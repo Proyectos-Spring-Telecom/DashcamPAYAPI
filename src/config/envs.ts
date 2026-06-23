@@ -1,1 +1,1 @@
-export * from './envs';
+import '@dotenvx/dotenvx/config';

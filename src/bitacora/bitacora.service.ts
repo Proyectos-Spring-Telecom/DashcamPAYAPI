@@ -1,9 +1,11 @@
 import {
+  ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { createHmac } from 'crypto';
 import { CreateBitacoraDto } from './dto/create-bitacora.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Bitacora } from 'src/entities/Bitacora';
@@ -359,22 +361,98 @@ ORDER BY b.FechaCreacion DESC;
     estatus?: string,
     error?: string,
   ) {
-    function pad(n: number) {
-      return n < 10 ? '0' + n : n;
-    }
-    const ahora = new Date();
-    const _FechaActual = `${ahora.getFullYear()}-${pad(ahora.getMonth() + 1)}-${pad(ahora.getDate())} ${pad(ahora.getHours())}:${pad(ahora.getMinutes())}:${pad(ahora.getSeconds())}`;
+    const fechaCreacion = new Date();
+    const querySanitizado = this.sanitizeQuery(query);
+
+    const canonical = [
+      modulo ?? '',
+      descripcion ?? '',
+      accion ?? '',
+      JSON.stringify(querySanitizado ?? {}),
+      estatus ?? '',
+      error ?? '',
+      String(idUsuario),
+      String(idModulo),
+      fechaCreacion.toISOString(),
+    ].join('|');
+
+    const hash = createHmac(
+      'sha256',
+      process.env.BITACORA_HMAC_SECRET as string,
+    )
+      .update(canonical)
+      .digest('hex');
 
     const registro = this.bitacoraRepository.create({
-      modulo: modulo,
-      descripcion: descripcion,
-      accion: accion,
-      query: query,
+      modulo,
+      descripcion,
+      accion,
+      query: querySanitizado,
       estatus: estatus ?? null,
       error: error ?? null,
-      idUsuario: idUsuario,
-      idModulo: idModulo,
+      idUsuario,
+      idModulo,
+      fechaCreacion,
+      hash,
     });
     await this.bitacoraRepository.save(registro);
+  }
+
+  private sanitizeQuery(query: any): any {
+    if (!query || typeof query !== 'object') return query;
+    const sensitiveKeys = [
+      'password',
+      'passwordHash',
+      'codigohash',
+      'codigoHash',
+      'cvv',
+      'cvv2',
+      'cardNumber',
+      'token',
+      'refreshToken',
+      'privateKey',
+      'secret',
+      'pin',
+    ];
+    const clone = JSON.parse(JSON.stringify(query));
+    const walk = (obj: any) => {
+      if (!obj || typeof obj !== 'object') return;
+      for (const k of Object.keys(obj)) {
+        if (
+          sensitiveKeys.some((s) => k.toLowerCase().includes(s.toLowerCase()))
+        ) {
+          obj[k] = '***';
+        } else if (typeof obj[k] === 'object') {
+          walk(obj[k]);
+        }
+      }
+    };
+    walk(clone);
+    return clone;
+  }
+
+  async verifyIntegrity(id: number): Promise<{ id: number; valido: boolean }> {
+    const r = await this.bitacoraRepository.findOne({ where: { id } });
+    if (!r) {
+      throw new NotFoundException(`Bitácora con ID ${id} no encontrada.`);
+    }
+    const canonical = [
+      r.modulo ?? '',
+      r.descripcion ?? '',
+      r.accion ?? '',
+      JSON.stringify(r.query ?? {}),
+      r.estatus ?? '',
+      r.error ?? '',
+      String(r.idUsuario),
+      String(r.idModulo),
+      (r.fechaCreacion as Date).toISOString(),
+    ].join('|');
+    const hashEsperado = createHmac(
+      'sha256',
+      process.env.BITACORA_HMAC_SECRET as string,
+    )
+      .update(canonical)
+      .digest('hex');
+    return { id, valido: r.hash === hashEsperado };
   }
 }

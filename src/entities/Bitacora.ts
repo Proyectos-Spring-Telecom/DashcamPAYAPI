@@ -43,6 +43,9 @@ export class Bitacora {
   @Column('varchar', { name: 'Error', nullable: true, length: 1000 })
   error: string | null;
 
+  @Column('char', { name: 'Hash', length: 64, nullable: true })
+  hash: string | null;
+
   @Column('bigint', { name: 'IdUsuario' })
   idUsuario: number;
 

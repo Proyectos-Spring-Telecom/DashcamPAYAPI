@@ -67,6 +67,7 @@ import { LoggerService } from './common/logger.service';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      ignoreEnvFile: true,
       validationSchema: Joi.object({
         DB_HOST: Joi.string().required(),
         DB_PORT: Joi.number().default(3306),
@@ -101,6 +102,7 @@ import { LoggerService } from './common/logger.service';
         MAX_LOGIN_ATTEMPTS: Joi.number().default(10),
         LOCKOUT_MINUTES: Joi.number().default(30),
         OTP_MAX_ATTEMPTS: Joi.number().default(5),
+        BITACORA_HMAC_SECRET: Joi.string().required(),
       }),
     }),
 
