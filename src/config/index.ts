@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './envs';
 import * as joi from 'joi';
 
 interface EnvVars {

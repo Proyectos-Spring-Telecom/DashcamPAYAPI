@@ -735,11 +735,24 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         );
       }
 
-      if (
-        !user ||
-        !user.codigoHash ||
-        !(await bcrypt.compare(loginAuthPin.codigohash, user.codigoHash))
-      ) {
+      const pinValid =
+        user.codigoHash &&
+        (await bcrypt.compare(loginAuthPin.codigohash, user.codigoHash));
+      if (!pinValid) {
+        try {
+          await this.bitacoraLogger.logToBitacora(
+            'Autenticación',
+            `Intento de inicio de sesión fallido: ${user.userName}`,
+            'LOGIN',
+            { userName: user.userName },
+            Number(user.id),
+            2,
+            EstatusEnumBitcora.ERROR,
+            'Credenciales inválidas',
+          );
+        } catch {
+          /* el log no debe interrumpir el login */
+        }
         throw new UnauthorizedException('Credenciales invalidas');
       }
 
@@ -761,6 +774,19 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
       };
 
       const tokens = await this.generateTokens(payload, Number(user.id));
+      try {
+        await this.bitacoraLogger.logToBitacora(
+          'Autenticación',
+          `Inicio de sesión exitoso: ${user.userName}`,
+          'LOGIN',
+          { userName: user.userName },
+          Number(user.id),
+          2,
+          EstatusEnumBitcora.SUCCESS,
+        );
+      } catch {
+        /* el log no debe interrumpir el login */
+      }
       return {
         token: tokens.token,
         refreshToken: tokens.refreshToken,
@@ -829,6 +855,33 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         }
         await this.usuariosRepository.update(user.id, updateData);
 
+        try {
+          if (nuevosIntentos >= maxIntentos) {
+            await this.bitacoraLogger.logToBitacora(
+              'Autenticación',
+              `Cuenta bloqueada por intentos fallidos: ${user.userName}`,
+              'LOCK',
+              { userName: user.userName },
+              Number(user.id),
+              2,
+              EstatusEnumBitcora.ERROR,
+              'Bloqueo temporal',
+            );
+          }
+          await this.bitacoraLogger.logToBitacora(
+            'Autenticación',
+            `Intento de inicio de sesión fallido: ${user.userName}`,
+            'LOGIN',
+            { userName: user.userName },
+            Number(user.id),
+            2,
+            EstatusEnumBitcora.ERROR,
+            'Credenciales inválidas',
+          );
+        } catch {
+          /* el log no debe interrumpir el login */
+        }
+
         throw new UnauthorizedException('Credenciales invalidas');
       }
 
@@ -856,6 +909,19 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
       }
 
       const tokens = await this.generateTokens(payload, Number(user.id));
+      try {
+        await this.bitacoraLogger.logToBitacora(
+          'Autenticación',
+          `Inicio de sesión exitoso: ${user.userName}`,
+          'LOGIN',
+          { userName: user.userName },
+          Number(user.id),
+          2,
+          EstatusEnumBitcora.SUCCESS,
+        );
+      } catch {
+        /* el log no debe interrumpir el login */
+      }
       return {
         token: tokens.token,
         refreshToken: tokens.refreshToken,
@@ -1220,6 +1286,19 @@ Muchas gracias por su preferencia.`;
         await this.refreshSessionsRepository.update(session.id, {
           revokedAt: new Date(),
         });
+        try {
+          await this.bitacoraLogger.logToBitacora(
+            'Autenticación',
+            'Cierre de sesión',
+            'LOGOUT',
+            {},
+            Number(session.idUsuario),
+            2,
+            EstatusEnumBitcora.SUCCESS,
+          );
+        } catch {
+          /* el log no debe interrumpir el logout */
+        }
       }
       return { message: 'Sesión cerrada correctamente' };
     } catch (error) {

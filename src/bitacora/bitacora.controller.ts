@@ -6,6 +6,7 @@ import {
   Param,
   ParseIntPipe,
   Request,
+  ForbiddenException,
 } from '@nestjs/common';
 import { BitacoraLoggerService } from './bitacora.service';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
@@ -37,6 +38,16 @@ export class BitacoraController {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.bitacoraService.findAll(+cliente, +rol, page, limit);
+  }
+
+  @Get(':id/verify')
+  async verifyIntegrity(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    if (Number(req.user.rol) !== 1) {
+      throw new ForbiddenException(
+        'Solo administradores pueden verificar integridad de bitácora.',
+      );
+    }
+    return await this.bitacoraService.verifyIntegrity(id);
   }
 
   @Get(':id')
