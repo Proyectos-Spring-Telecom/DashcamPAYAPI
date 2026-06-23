@@ -1,4 +1,4 @@
-
+// dto/update-usuarioregiome-estatus.dto.ts
 import { ApiProperty } from '@nestjs/swagger';
 import { IsInt, IsIn, IsNotEmpty } from 'class-validator';
 

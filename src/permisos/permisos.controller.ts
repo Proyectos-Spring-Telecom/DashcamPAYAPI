@@ -18,7 +18,10 @@ import { UpdatePermisoDto } from './dto/update-permiso.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { UpdatePermisoEstatusDto } from './dto/update-permiso-estatus.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Permisos')
+@ApiBearerAuth('bearer-token')
 @Controller('permisos')
 @UseGuards(JwtAuthGuard)
 export class PermisosController {
@@ -48,9 +51,9 @@ export class PermisosController {
 
   @Get('permisosAgrupados')
   async findAllAgrupado(@Req() req): Promise<any[]> {
-    const idUser = req.user.userId;
+    const idUsuario = req.user.userId;
     const permiso =
-      await this.permisosService.obtenerPermisosAgrupados(+idUser);
+      await this.permisosService.obtenerPermisosAgrupados(idUsuario);
     return permiso;
   }
 

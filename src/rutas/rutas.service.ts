@@ -4,22 +4,23 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-} from "@nestjs/common";
-import { CreateRutaDto } from "./dto/create-ruta.dto";
-import { UpdateRutaDto } from "./dto/update-ruta.dto";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
-import { Zonas } from "src/entities/Zonas";
-import { Rutas } from "src/entities/Rutas";
-import { BitacoraLoggerService } from "src/bitacora/bitacora.service";
+} from '@nestjs/common';
+import { CreateRutaDto } from './dto/create-ruta.dto';
+import { UpdateRutaDto } from './dto/update-ruta.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Zonas } from 'src/entities/Zonas';
+import { Rutas } from 'src/entities/Rutas';
+import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import {
   ApiCrudResponse,
   ApiResponseCommon,
   EstatusEnumBitcora,
-} from "src/common/ApiResponse";
-import { UsuariosZonas } from "src/entities/UsuariosZonas";
-import { UpdateRutasEstatusDto } from "./dto/update-ruta-estatus.dto";
-import { Clientes } from "src/entities/Clientes";
+} from 'src/common/ApiResponse';
+import { UsuariosZonas } from 'src/entities/UsuariosZonas';
+import { UpdateRutasEstatusDto } from './dto/update-ruta-estatus.dto';
+import { Clientes } from 'src/entities/Clientes';
+import { EnumModulos } from 'src/common/estatus.enum';
 
 @Injectable()
 export class RutasService {
@@ -29,45 +30,101 @@ export class RutasService {
     @InjectRepository(Rutas)
     private readonly rutasRepository: Repository<Rutas>,
     @InjectRepository(UsuariosZonas)
-    private readonly usuariozonasRepository: Repository<UsuariosZonas>,
+    private readonly usuarioszonasRepository: Repository<UsuariosZonas>,
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
-    private readonly bitacoraLogger: BitacoraLoggerService
+    private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
 
+  // ========================================
+  // 🔹 CREAR UNA RUTA
+  // ========================================
   async create(
     idUser: number,
     cliente: number,
     rol: number,
-    createRutaDto: CreateRutaDto
+    createRutaDto: CreateRutaDto,
   ): Promise<ApiCrudResponse> {
     try {
-      let Zona;
+      let zona;
+      const idZonaRuta = createRutaDto.idZona;
 
-      Zona = await this.zonasRepository.findOne({
+      zona = await this.zonasRepository.findOne({
         where: { id: createRutaDto.idZona },
       });
-      if (!Zona) throw new NotFoundException("Zona no encontrada");
+      if (!zona) throw new NotFoundException('Zona no encontrada');
+
+      // Si tiene idZonaFin, validar que exista
+      if (createRutaDto.idZonaFin) {
+        const zonaFin = await this.zonasRepository.findOne({
+          where: { id: createRutaDto.idZonaFin },
+        });
+        if (!zonaFin) throw new NotFoundException('Zona final no encontrada');
+      }
 
       const newRuta = this.rutasRepository.create(createRutaDto);
       const rutaSave = await this.rutasRepository.save(newRuta);
 
+      // Si registraRegreso es true, crear la ruta de regreso
+      if (createRutaDto.registraRegreso === true) {
+        const rutaRegresoData = {
+          nombre: `${createRutaDto.nombre} Regreso`,
+          puntoInicio: createRutaDto.puntoFin || null,
+          nombreInicio: createRutaDto.nombreFin || null,
+          puntoFin: createRutaDto.puntoInicio || null,
+          nombreFin: createRutaDto.nombreInicio || null,
+          estatus: createRutaDto.estatus,
+          idZona: createRutaDto.idZonaFin || createRutaDto.idZona, // Si no hay idZonaFin, usar idZona
+          idZonaFin: createRutaDto.idZona,
+          idRutaIda: rutaSave.id,
+        };
+
+        const newRutaRegreso = this.rutasRepository.create(rutaRegresoData);
+        const rutaRegresoSave = await this.rutasRepository.save(newRutaRegreso);
+
+        // La ruta original mantiene idRutaIda en null
+        // Solo la ruta de regreso tiene idRutaIda apuntando a la original
+
+        // Registro en la bitácora SUCCESS para ambas rutas
+        const querylogger = { createRutaDto, rutaRegreso: rutaRegresoData };
+        await this.bitacoraLogger.logToBitacora(
+          'Rutas',
+          `Se creó una ruta con nombre: ${rutaSave.nombre} (Id ${rutaSave.id}) y su ruta de regreso: ${rutaRegresoSave.nombre} (Id ${rutaRegresoSave.id})`,
+          'CREATE',
+          querylogger,
+          idUser,
+          EnumModulos.RUTAS,
+          EstatusEnumBitcora.SUCCESS,
+        );
+
+        // API response
+        const result: ApiCrudResponse = {
+          status: 'success',
+          message: 'Ruta y ruta de regreso creadas correctamente',
+          data: {
+            id: Number(rutaSave.id),
+            nombre: `Ruta ${rutaSave.id} Nombre: ${rutaSave.nombre}`,
+          },
+        };
+        return result;
+      }
+
       // Registro en la bitácora SUCCESS
       const querylogger = { createRutaDto };
       await this.bitacoraLogger.logToBitacora(
-        "Rutas",
+        'Rutas',
         `Se creó una ruta con nombre: ${rutaSave.nombre}  y Id ${rutaSave.id}`,
-        "CREATE",
+        'CREATE',
         querylogger,
         idUser,
-        17,
-        EstatusEnumBitcora.SUCCESS
+        EnumModulos.RUTAS,
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // API response (con mensajes corregidos)
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Ruta creada correctamente",
+        status: 'success',
+        message: 'Ruta creada correctamente',
         data: {
           id: Number(rutaSave.id),
           nombre: `Ruta ${rutaSave.id} Nombre: ${rutaSave.nombre}`,
@@ -78,20 +135,20 @@ export class RutasService {
       // Registro en la bitácora ERROR
       const querylogger = { createRutaDto };
       await this.bitacoraLogger.logToBitacora(
-        "Rutas",
+        'Rutas',
         `Se creó una ruta con nombre: ${createRutaDto.nombre}`,
-        "CREATE",
+        'CREATE',
         querylogger,
         idUser,
-        17,
+        EnumModulos.RUTAS,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al crear ruta",
+        message: 'Error al crear ruta',
         error: error.message,
       });
     }
@@ -101,7 +158,7 @@ export class RutasService {
   private async clienteHijos(cliente: number) {
     const clientesFiltrado = await this.clienteRepository.query(
       `CALL spGetClientes(?);`,
-      [cliente]
+      [cliente],
     );
 
     const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
@@ -113,14 +170,14 @@ export class RutasService {
     }
 
     // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => "?").join(", ");
+    const placeholders = ids.map(() => '?').join(', ');
     return { ids, placeholders };
   }
 
   private async consultarRutasPaginado(
     cliente: number,
     limit: number,
-    offset: number
+    offset: number,
   ) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `
@@ -136,7 +193,7 @@ SELECT
     ru.Estatus AS estatusRuta,
     ru.IdZonaFin AS idZonaFin,
 
-  -- Zona INICIAL
+  -- ZONA INICIAL
   r.Id AS idZona,
   r.Nombre AS nombreZona,
   r.Descripcion AS descripcionZona,
@@ -144,7 +201,7 @@ SELECT
   r.FechaActualizacion AS fechaActualizacionZona,
   r.Estatus AS estatusZona,
 
-  -- Zona FINAL (si existe)
+  -- ZONA FINAL (si existe)
   rf.Id AS idZonaFinDetalle,
   rf.Nombre AS nombreZonaFinDetalle,
   rf.Descripcion AS descripcionZonaFin,
@@ -166,38 +223,44 @@ LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
 WHERE 
-  r.Estatus = 1
-  AND c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+  c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+  AND r.Estatus = 1
 ORDER BY ru.Id DESC
-
 
   LIMIT ? OFFSET ?;
     `;
-    return this.usuariozonasRepository.query(query, [...ids, limit, offset]);
+    return this.usuarioszonasRepository.query(query, [
+      ...ids,
+      limit,
+      offset,
+    ]);
   }
 
   private async consultarTotalRutasPaginados(cliente: number) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `  
-  SELECT COUNT(*) AS total
+    SELECT COUNT(*) AS total
 FROM Rutas ru
 INNER JOIN Zonas r ON ru.IdZona = r.Id
 LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
 WHERE 
-  r.Estatus = 1
-  AND c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+  c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+  AND r.Estatus = 1
 `;
-    return await this.usuariozonasRepository.query(query, [...ids]);
+    return await this.usuarioszonasRepository.query(query, [...ids]);
   }
 
+  // ========================================
+  // 🔹 OBTENER PAGINADO DE RUTAS
+  // ========================================
   async obtenerRutasPorUsuarioSQL(
     idUser: number,
     cliente: number,
     rol: number,
     page: number,
-    limit: number
+    limit: number,
   ) {
     const offset = (page - 1) * limit;
     let data;
@@ -205,7 +268,7 @@ WHERE
     switch (rol) {
       case 1:
         // Consulta de datos paginados Usuario SuperAdministrador
-        data = await this.usuariozonasRepository.query(
+        data = await this.usuarioszonasRepository.query(
           `
 SELECT 
   -- RUTA
@@ -219,7 +282,7 @@ SELECT
     ru.Estatus AS estatusRuta,
     ru.IdZonaFin AS idZonaFin,
 
-  -- Zona INICIAL
+  -- ZONA INICIAL
   r.Id AS idZona,
   r.Nombre AS nombreZona,
   r.Descripcion AS descripcionZona,
@@ -227,7 +290,7 @@ SELECT
   r.FechaActualizacion AS fechaActualizacionZona,
   r.Estatus AS estatusZona,
 
-  -- Zona FINAL (si existe)
+  -- ZONA FINAL (si existe)
   rf.Id AS idZonaFinDetalle,
   rf.Nombre AS nombreZonaFinDetalle,
   rf.Descripcion AS descripcionZonaFin,
@@ -254,11 +317,11 @@ ORDER BY ru.Id DESC
 
   LIMIT ? OFFSET ?;
   `,
-          [limit, offset]
+          [limit, offset],
         );
 
         // Query para total (sin paginación)
-        totalResult = await this.usuariozonasRepository.query(
+        totalResult = await this.usuarioszonasRepository.query(
           `
   SELECT COUNT(*) AS total
 FROM Rutas ru
@@ -268,12 +331,20 @@ INNER JOIN Clientes c ON r.IdCliente = c.Id
 
 WHERE 
   r.Estatus = 1
-  `
+  `,
         );
         break;
 
       case 2:
         // Consulta de datos paginados Usuario Administrador
+        data = await this.consultarRutasPaginado(cliente, limit, offset);
+
+        // Query para total (sin paginación)
+        totalResult = await this.consultarTotalRutasPaginados(cliente);
+        break;
+
+      case 3:
+        // Consulta de datos paginados Usuario Operador
         data = await this.consultarRutasPaginado(cliente, limit, offset);
 
         // Query para total (sin paginación)
@@ -298,10 +369,9 @@ WHERE
 
       default:
         // Consulta de datos paginados resto Usuario
-        data = await this.usuariozonasRepository.query(
+        data = await this.usuarioszonasRepository.query(
           `
-SELECT 
-  -- RUTA
+  SELECT 
     ru.Id AS id,
     ru.Nombre AS nombre,
     ru.PuntoInicio AS puntoInicio,
@@ -312,21 +382,21 @@ SELECT
     ru.Estatus AS estatusRuta,
     ru.IdZonaFin AS idZonaFin,
 
-  -- Zona INICIAL
-  r.Id AS idZona,
-  r.Nombre AS nombreZona,
-  r.Descripcion AS descripcionZona,
-  r.FechaCreacion AS fechaCreacionZona,
-  r.FechaActualizacion AS fechaActualizacionZona,
-  r.Estatus AS estatusZona,
+    -- Datos de la región inicial
+    r.Id AS idZona,
+    r.Nombre AS nombreZona,
+    r.Descripcion AS descripcionZona,
+    r.FechaCreacion AS fechaCreacionZona,
+    r.FechaActualizacion AS fechaActualizacionZona,
+    r.Estatus AS estatusZona,
 
-  -- Zona FINAL (si existe)
-  rf.Id AS idZonaFinDetalle,
-  rf.Nombre AS nombreZonaFinDetalle,
-  rf.Descripcion AS descripcionZonaFin,
-  rf.FechaCreacion AS fechaCreacionZonaFin,
-  rf.FechaActualizacion AS fechaActualizacionZonaFin,
-  rf.Estatus AS estatusZonaFin,
+    -- Datos de la región final (si existe)
+    rf.Id AS idZonaFinDetalle,
+    rf.Nombre AS nombreZonaFinDetalle,
+    rf.Descripcion AS descripcionZonaFin,
+    rf.FechaCreacion AS fechaCreacionZonaFin,
+    rf.FechaActualizacion AS fechaActualizacionZonaFin,
+    rf.Estatus AS estatusZonaFin,
 
   -- CLIENTE
   c.Id AS idCliente,
@@ -334,7 +404,7 @@ SELECT
   c.ApellidoPaterno AS apellidoPaternoCliente,
   c.ApellidoMaterno AS apellidoMaternoCliente,
   c.Estatus AS estatusCliente,
-  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
+    CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
 
   FROM UsuariosZonas ur
   INNER JOIN Zonas r ON ur.IdZona = r.Id
@@ -349,13 +419,13 @@ SELECT
   ORDER BY ru.Id DESC
   LIMIT ? OFFSET ?;
   `,
-          [idUser, limit, offset]
+          [idUser, limit, offset],
         );
 
         // Query para total (sin paginación)
-        totalResult = await this.usuariozonasRepository.query(
+        totalResult = await this.usuarioszonasRepository.query(
           `
-    SELECT COUNT(*) AS total
+  SELECT COUNT(*) AS total
   FROM UsuariosZonas ur
   INNER JOIN Zonas r ON ur.IdZona = r.Id
   INNER JOIN Rutas ru ON ru.IdZona = r.Id
@@ -366,7 +436,7 @@ SELECT
     AND ur.Estatus = 1
     AND r.Estatus = 1
   `,
-          [idUser]
+          [idUser],
         );
         break;
     }
@@ -374,16 +444,34 @@ SELECT
     const total = Number(totalResult[0]?.total || 0);
 
     // Mapeo de resultados con conversión de tipos y manejo de idZonaFin
-    const rutas = data.map((item) => ({
-      ...item,
-      id: item.id ? Number(item.id) : null,
-      idZona: item.idZona ? Number(item.idZona) : null,
-      idZonaFin: item.idZonaFin ? Number(item.idZonaFin) : null,
-      idZonaFinDetalle: item.idZonaFinDetalle
-        ? Number(item.idZonaFinDetalle)
-        : null,
-      idCliente: item.idCliente ? Number(item.idCliente) : null,
-    }));
+    const rutas = data.map((item) => {
+      const ruta = {
+        ...item,
+        id: item.id ? Number(item.id) : null,
+        idZona: item.idZona ? Number(item.idZona) : null,
+        idZonaFin: item.idZonaFin ? Number(item.idZonaFin) : null,
+        idZonaFinDetalle: item.idZonaFinDetalle
+          ? Number(item.idZonaFinDetalle)
+          : null,
+        idCliente: item.idCliente ? Number(item.idCliente) : null,
+      };
+
+      // Agregar objeto zonaFin completo si existe
+      if (item.idZonaFinDetalle) {
+        ruta.zonaFin = {
+          id: Number(item.idZonaFinDetalle),
+          nombre: item.nombreZonaFinDetalle || null,
+          descripcion: item.descripcionZonaFin || null,
+          fechaCreacion: item.fechaCreacionZonaFin || null,
+          fechaActualizacion: item.fechaActualizacionZonaFin || null,
+          estatus: item.estatusZonaFin ? Number(item.estatusZonaFin) : null,
+        };
+      } else {
+        ruta.zonaFin = null;
+      }
+
+      return ruta;
+    });
 
     return {
       data: rutas,
@@ -410,7 +498,7 @@ SELECT
     ru.Estatus AS estatusRuta,
     ru.IdZonaFin AS idZonaFin,
 
-  -- Zona INICIAL
+  -- ZONA INICIAL
   r.Id AS idZona,
   r.Nombre AS nombreZona,
   r.Descripcion AS descripcionZona,
@@ -418,7 +506,7 @@ SELECT
   r.FechaActualizacion AS fechaActualizacionZona,
   r.Estatus AS estatusZona,
 
-  -- Zona FINAL (si existe)
+  -- ZONA FINAL (si existe)
   rf.Id AS idZonaFinDetalle,
   rf.Nombre AS nombreZonaFinDetalle,
   rf.Descripcion AS descripcionZonaFin,
@@ -446,16 +534,19 @@ WHERE
   AND ru.Estatus = 1
 ORDER BY ru.Id DESC;
     `;
-    return await this.usuariozonasRepository.query(query, [...ids]);
+    return await this.usuarioszonasRepository.query(query, [...ids]);
   }
 
+  // ========================================
+  // 🔹 OBTENER LISTADO DE RUTAS
+  // ========================================
   async findAllList(idUser: number, cliente: number, rol: number) {
     try {
       let rutas;
       switch (rol) {
         case 1:
           // Consulta de datos paginados Usuario Administrador
-          rutas = await this.usuariozonasRepository.query(
+          rutas = await this.usuarioszonasRepository.query(
             `
 SELECT 
   -- RUTA
@@ -469,7 +560,7 @@ SELECT
     ru.Estatus AS estatusRuta,
     ru.IdZonaFin AS idZonaFin,
 
-  -- Zona INICIAL
+  -- ZONA INICIAL
   r.Id AS idZona,
   r.Nombre AS nombreZona,
   r.Descripcion AS descripcionZona,
@@ -477,7 +568,7 @@ SELECT
   r.FechaActualizacion AS fechaActualizacionZona,
   r.Estatus AS estatusZona,
 
-  -- Zona FINAL (si existe)
+  -- ZONA FINAL (si existe)
   rf.Id AS idZonaFinDetalle,
   rf.Nombre AS nombreZonaFinDetalle,
   rf.Descripcion AS descripcionZonaFin,
@@ -503,12 +594,17 @@ WHERE
   AND ru.Estatus = 1
   AND c.Estatus = 1
 ORDER BY ru.Id DESC
-  `
+  `,
           );
           break;
 
         case 2:
           // Consulta de datos paginados Usuario Administrador
+          rutas = await this.consultarRutasListado(cliente);
+          break;
+
+        case 3:
+          // Consulta de datos paginados Usuario Operador
           rutas = await this.consultarRutasListado(cliente);
           break;
 
@@ -523,11 +619,11 @@ ORDER BY ru.Id DESC
           break;
 
         default:
+          console.log('default');
           // Consulta de datos paginados Usuario
-          rutas = await this.usuariozonasRepository.query(
+          rutas = await this.usuarioszonasRepository.query(
             `
             SELECT 
-  -- RUTA
     ru.Id AS id,
     ru.Nombre AS nombre,
     ru.PuntoInicio AS puntoInicio,
@@ -537,30 +633,24 @@ ORDER BY ru.Id DESC
     ru.FechaCreacion AS fechaCreacionRuta,
     ru.Estatus AS estatusRuta,
     ru.IdZonaFin AS idZonaFin,
-
-  -- Zona INICIAL
-  r.Id AS idZona,
-  r.Nombre AS nombreZona,
-  r.Descripcion AS descripcionZona,
-  r.FechaCreacion AS fechaCreacionZona,
-  r.FechaActualizacion AS fechaActualizacionZona,
-  r.Estatus AS estatusZona,
-
-  -- Zona FINAL (si existe)
-  rf.Id AS idZonaFinDetalle,
-  rf.Nombre AS nombreZonaFinDetalle,
-  rf.Descripcion AS descripcionZonaFin,
-  rf.FechaCreacion AS fechaCreacionZonaFin,
-  rf.FechaActualizacion AS fechaActualizacionZonaFin,
-  rf.Estatus AS estatusZonaFin,
-
-  -- CLIENTE
-  c.Id AS idCliente,
-  c.Nombre As nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente,
-  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
+    
+    r.Id AS idZona,
+    r.Nombre AS nombreZona,
+    r.Descripcion AS descripcionZona,
+    r.FechaCreacion AS fechaCreacionZona,
+    r.FechaActualizacion AS fechaActualizacionZona,
+    r.Estatus AS estatusZona,
+    
+    rf.Id AS idZonaFinDetalle,
+    rf.Nombre AS nombreZonaFinDetalle,
+    rf.Descripcion AS descripcionZonaFin,
+    rf.FechaCreacion AS fechaCreacionZonaFin,
+    rf.FechaActualizacion AS fechaActualizacionZonaFin,
+    rf.Estatus AS estatusZonaFin,
+    
+    c.Id AS idCliente,
+    c.Nombre AS nombreCliente,
+    CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
 
 FROM UsuariosZonas ur
 INNER JOIN Zonas r ON ur.IdZona = r.Id            -- Zona inicial
@@ -568,8 +658,7 @@ INNER JOIN Rutas ru ON ru.IdZona = r.Id              -- Ruta
 LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id        -- Zona final (puede ser null)
 INNER JOIN Clientes c ON r.IdCliente = c.Id            -- Cliente
 
-WHERE ur.IdUsuario = ?
-  AND ur.Estatus = 1
+WHERE  ur.Estatus = 1
   AND r.Estatus = 1
   AND ru.Estatus = 1
   AND c.Estatus = 1
@@ -577,13 +666,13 @@ WHERE ur.IdUsuario = ?
 ORDER BY ru.Id DESC;
 
             `,
-            [idUser]
+            [idUser],
           );
           break;
       }
 
       if (rutas.length === 0) {
-        throw new NotFoundException("Rutas no encontradas");
+        throw new NotFoundException('Rutas no encontradas');
       }
 
       // Mapeo de resultados con conversión de tipos y manejo de idZonaFin
@@ -609,7 +698,182 @@ ORDER BY ru.Id DESC;
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al obtener listado de rutas",
+        message: 'Error al obtener listado de rutas',
+        error: error.message,
+      });
+    }
+  }
+
+  // ========================================
+  // 🔹 OBTENER RUTAS POR REGIÓN
+  // ========================================
+  async findByZona(idZona: number, idUser: number, rol: number) {
+    try {
+      // Consulta directa de rutas por zona (solo la zona especificada)
+      const rutas = await this.rutasRepository.query(
+        `
+SELECT 
+  -- RUTA
+  ru.Id AS id,
+  ru.Nombre AS nombre,
+  ru.PuntoInicio AS puntoInicio,
+  ru.NombreInicio AS nombreInicio,
+  ru.PuntoFin AS puntoFin,
+  ru.NombreFin AS nombreFin,
+  ru.FechaCreacion AS fechaCreacionRuta,
+  ru.Estatus AS estatusRuta,
+  ru.IdZonaFin AS idZonaFin,
+
+  -- ZONA INICIAL
+  r.Id AS idZona,
+  r.Nombre AS nombreZona,
+  r.Descripcion AS descripcionZona,
+  r.FechaCreacion AS fechaCreacionZona,
+  r.FechaActualizacion AS fechaActualizacionZona,
+  r.Estatus AS estatusZona,
+
+  -- ZONA FINAL (si existe)
+  rf.Id AS idZonaFinDetalle,
+  rf.Nombre AS nombreZonaFinDetalle,
+  rf.Descripcion AS descripcionZonaFin,
+  rf.FechaCreacion AS fechaCreacionZonaFin,
+  rf.FechaActualizacion AS fechaActualizacionZonaFin,
+  rf.Estatus AS estatusZonaFin,
+
+  -- CLIENTE
+  c.Id AS idCliente,
+  c.Nombre AS nombreCliente,
+  c.ApellidoPaterno AS apellidoPaternoCliente,
+  c.ApellidoMaterno AS apellidoMaternoCliente,
+  c.Estatus AS estatusCliente,
+  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
+
+FROM Rutas ru
+INNER JOIN Zonas r ON ru.IdZona = r.Id
+LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
+INNER JOIN Clientes c ON r.IdCliente = c.Id
+
+WHERE 
+  ru.IdZona = ?
+  AND r.Estatus = 1
+  AND ru.Estatus = 1
+  AND c.Estatus = 1
+
+ORDER BY ru.Id DESC
+        `,
+        [idZona],
+      );
+
+      // Mapeo de resultados con conversión de tipos
+      const data = rutas.map((item) => ({
+        ...item,
+        id: item.id ? Number(item.id) : null,
+        idZona: item.idZona ? Number(item.idZona) : null,
+        idZonaFin: item.idZonaFin ? Number(item.idZonaFin) : null,
+        idZonaFinDetalle: item.idZonaFinDetalle
+          ? Number(item.idZonaFinDetalle)
+          : null,
+        idCliente: item.idCliente ? Number(item.idCliente) : null,
+      }));
+
+      // API response
+      const result: ApiResponseCommon = {
+        data: data,
+      };
+
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException({
+        message: 'Error al obtener rutas por zona',
+        error: error.message,
+      });
+    }
+  }
+
+  async findByCliente(idCliente: number, idUser: number, rol: number) {
+    try {
+      // Consulta directa de rutas por cliente (a través de las zonas)
+      const rutas = await this.rutasRepository.query(
+        `
+SELECT 
+  -- RUTA
+  ru.Id AS id,
+  ru.Nombre AS nombre,
+  ru.PuntoInicio AS puntoInicio,
+  ru.NombreInicio AS nombreInicio,
+  ru.PuntoFin AS puntoFin,
+  ru.NombreFin AS nombreFin,
+  ru.FechaCreacion AS fechaCreacionRuta,
+  ru.Estatus AS estatusRuta,
+  ru.IdZonaFin AS idZonaFin,
+
+  -- ZONA INICIAL
+  r.Id AS idZona,
+  r.Nombre AS nombreZona,
+  r.Descripcion AS descripcionZona,
+  r.FechaCreacion AS fechaCreacionZona,
+  r.FechaActualizacion AS fechaActualizacionZona,
+  r.Estatus AS estatusZona,
+
+  -- ZONA FINAL (si existe)
+  rf.Id AS idZonaFinDetalle,
+  rf.Nombre AS nombreZonaFinDetalle,
+  rf.Descripcion AS descripcionZonaFin,
+  rf.FechaCreacion AS fechaCreacionZonaFin,
+  rf.FechaActualizacion AS fechaActualizacionZonaFin,
+  rf.Estatus AS estatusZonaFin,
+
+  -- CLIENTE
+  c.Id AS idCliente,
+  c.Nombre AS nombreCliente,
+  c.ApellidoPaterno AS apellidoPaternoCliente,
+  c.ApellidoMaterno AS apellidoMaternoCliente,
+  c.Estatus AS estatusCliente,
+  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
+
+FROM Rutas ru
+INNER JOIN Zonas r ON ru.IdZona = r.Id
+LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
+INNER JOIN Clientes c ON r.IdCliente = c.Id
+
+WHERE 
+  c.Id = ?
+  AND r.Estatus = 1
+  AND ru.Estatus = 1
+  AND c.Estatus = 1
+
+ORDER BY ru.Id DESC
+        `,
+        [idCliente],
+      );
+
+      // Mapeo de resultados con conversión de tipos
+      const data = rutas.map((item) => ({
+        ...item,
+        id: item.id ? Number(item.id) : null,
+        idZona: item.idZona ? Number(item.idZona) : null,
+        idZonaFin: item.idZonaFin ? Number(item.idZonaFin) : null,
+        idZonaFinDetalle: item.idZonaFinDetalle
+          ? Number(item.idZonaFinDetalle)
+          : null,
+        idCliente: item.idCliente ? Number(item.idCliente) : null,
+      }));
+
+      // API response
+      const result: ApiResponseCommon = {
+        data: data,
+      };
+
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException({
+        message: 'Error al obtener rutas por cliente',
         error: error.message,
       });
     }
@@ -630,7 +894,7 @@ ORDER BY ru.Id DESC;
     ru.Estatus AS estatusRuta,
     ru.IdZonaFin AS idZonaFin,
 
-  -- Zona INICIAL
+  -- ZONA INICIAL
   r.Id AS idZona,
   r.Nombre AS nombreZona,
   r.Descripcion AS descripcionZona,
@@ -638,7 +902,7 @@ ORDER BY ru.Id DESC;
   r.FechaActualizacion AS fechaActualizacionZona,
   r.Estatus AS estatusZona,
 
-  -- Zona FINAL (si existe)
+  -- ZONA FINAL (si existe)
   rf.Id AS idZonaFinDetalle,
   rf.Nombre AS nombreZonaFinDetalle,
   rf.Descripcion AS descripcionZonaFin,
@@ -665,16 +929,20 @@ WHERE
   AND ru.Id = ?
 ORDER BY ru.Id DESC;
     `;
-    return await this.usuariozonasRepository.query(query, [...ids, id]);
+    return await this.usuarioszonasRepository.query(query, [...ids, id]);
   }
 
+
+  // ========================================
+  // 🔹 OBTENER UNA RUTA
+  // ========================================
   async findOne(id: number, idUser: number, cliente: number, rol: number) {
     try {
       let ruta;
       switch (rol) {
         case 1:
           // Consulta de datos paginados Usuario SuperAdministrador
-          ruta = await this.usuariozonasRepository.query(
+          ruta = await this.usuarioszonasRepository.query(
             `
      SELECT 
   -- RUTA
@@ -688,7 +956,7 @@ ORDER BY ru.Id DESC;
     ru.Estatus AS estatusRuta,
     ru.IdZonaFin AS idZonaFin,
 
-  -- Zona INICIAL
+  -- ZONA INICIAL
   r.Id AS idZona,
   r.Nombre AS nombreZona,
   r.Descripcion AS descripcionZona,
@@ -696,7 +964,7 @@ ORDER BY ru.Id DESC;
   r.FechaActualizacion AS fechaActualizacionZona,
   r.Estatus AS estatusZona,
 
-  -- Zona FINAL (si existe)
+  -- ZONA FINAL (si existe)
   rf.Id AS idZonaFinDetalle,
   rf.Nombre AS nombreZonaFinDetalle,
   rf.Descripcion AS descripcionZonaFin,
@@ -717,92 +985,28 @@ INNER JOIN Zonas r ON ru.IdZona = r.Id
 LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
-WHERE r.Estatus = 1
+WHERE 
+      r.Estatus = 1
   AND ru.Id = ?
 ORDER BY ru.Id DESC;
 
             `,
-            [id]
+            [id],
           );
-          break;
-
-        case 2:
-          ruta = await this.consultarRutasOne(id, cliente);
-          break;
-
-        case 8:
-          ruta = await this.consultarRutasOne(id, cliente);
-          break;
-
-        case 10:
-          ruta = await this.consultarRutasOne(id, cliente);
           break;
 
         default:
-          // Consulta de datos paginados Usuario
-          ruta = await this.usuariozonasRepository.query(
-            `
-            SELECT 
-  -- RUTA
-    ru.Id AS id,
-    ru.Nombre AS nombre,
-    ru.PuntoInicio AS puntoInicio,
-    ru.NombreInicio AS nombreInicio,
-    ru.PuntoFin AS puntoFin,
-    ru.NombreFin AS nombreFin,
-    ru.FechaCreacion AS fechaCreacionRuta,
-    ru.Estatus AS estatusRuta,
-    ru.IdZonaFin AS idZonaFin,
-
-  -- Zona INICIAL
-  r.Id AS idZona,
-  r.Nombre AS nombreZona,
-  r.Descripcion AS descripcionZona,
-  r.FechaCreacion AS fechaCreacionZona,
-  r.FechaActualizacion AS fechaActualizacionZona,
-  r.Estatus AS estatusZona,
-
-  -- Zona FINAL (si existe)
-  rf.Id AS idZonaFinDetalle,
-  rf.Nombre AS nombreZonaFinDetalle,
-  rf.Descripcion AS descripcionZonaFin,
-  rf.FechaCreacion AS fechaCreacionZonaFin,
-  rf.FechaActualizacion AS fechaActualizacionZonaFin,
-  rf.Estatus AS estatusZonaFin,
-
-  -- CLIENTE
-  c.Id AS idCliente,
-  c.Nombre As nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente,
-  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
-
-FROM UsuariosZonas ur
-INNER JOIN Zonas r ON ur.IdZona = r.Id            -- Zona inicial
-INNER JOIN Rutas ru ON ru.IdZona = r.Id              -- Ruta
-LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id        -- Zona final (puede ser null)
-INNER JOIN Clientes c ON r.IdCliente = c.Id            -- Cliente
-
-WHERE ur.IdUsuario = ?
-  AND ur.Estatus = 1
-  AND r.Estatus = 1
-  AND ru.Id = ?
-
-ORDER BY ru.Id DESC;
-
-            `,
-            [idUser, id]
-          );
+          // Consulta de datos paginados Usuario SuperAdministrador
+          ruta = await this.consultarRutasOne(id, cliente);
           break;
       }
 
       if (ruta.length == 0) {
-        throw new NotFoundException("Ruta no encontrado");
+        throw new NotFoundException('Ruta no encontrado');
       }
 
       // Conversión directa de IDs
-      const Zona = ruta.idZona2;
+      const zona = ruta.idZona2;
 
       const data = ruta.map((item) => ({
         ...item,
@@ -824,22 +1028,25 @@ ORDER BY ru.Id DESC;
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al obtener una ruta",
+        message: 'Error al obtener una ruta',
         error: error.message,
       });
     }
   }
 
+  // ========================================
+  // 🔹 ACTUALIZAR ESTATUS DE UNA RUTA
+  // ========================================
   async updateEstatus(
     id: number,
     idUser: number,
     cliente: number,
     rol: number,
-    updateRutasEstatusDto: UpdateRutasEstatusDto
+    updateRutasEstatusDto: UpdateRutasEstatusDto,
   ) {
     try {
       const ruta = await this.rutasRepository.findOne({ where: { id: id } });
-      if (!ruta) throw new NotFoundException("Ruta no encontrada");
+      if (!ruta) throw new NotFoundException('Ruta no encontrada');
 
       const estatus = updateRutasEstatusDto.estatus;
       await this.rutasRepository.update(id, { estatus: estatus });
@@ -847,19 +1054,19 @@ ORDER BY ru.Id DESC;
       // Registro en la bitácora SUCCESS
       const querylogger = { updateRutasEstatusDto };
       await this.bitacoraLogger.logToBitacora(
-        "Rutas",
+        'Rutas',
         `Se actualizo estatus a ${estatus}  de una Ruta con Id: ${ruta.id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        17,
-        EstatusEnumBitcora.SUCCESS
+        EnumModulos.RUTAS,
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // API response (con mensajes corregidos)
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Estatus de la ruta actualizada correctamente",
+        status: 'success',
+        message: 'Estatus de la ruta actualizada correctamente',
         data: {
           id: id,
           nombre: `Ruta ${id} `,
@@ -870,54 +1077,57 @@ ORDER BY ru.Id DESC;
       // Registro en la bitácora ERROR
       const querylogger = { updateRutasEstatusDto };
       await this.bitacoraLogger.logToBitacora(
-        "Rutas",
+        'Rutas',
         `Se actualizo estatus a ${updateRutasEstatusDto.estatus}  de una Ruta con ID: ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        17,
+        EnumModulos.RUTAS,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al actualizar estatus de una ruta",
+        message: 'Error al actualizar estatus de una ruta',
         error: error.message,
       });
     }
   }
 
+  // ========================================
+  // 🔹 ACTUALIZAR DATOS DE LA RUTA
+  // ========================================
   async update(
     id: number,
     idUser: number,
     cliente: number,
     rol: number,
-    updateRutaDto: UpdateRutaDto
+    updateRutaDto: UpdateRutaDto,
   ) {
     try {
       const ruta = await this.rutasRepository.findOne({ where: { id: id } });
-      if (!ruta) throw new NotFoundException("Ruta no encontrada");
+      if (!ruta) throw new NotFoundException('Ruta no encontrada');
 
       await this.rutasRepository.update(id, updateRutaDto);
 
       // Registro en la bitácora SUCCESS
       const querylogger = { updateRutaDto };
       await this.bitacoraLogger.logToBitacora(
-        "Rutas",
+        'Rutas',
         `Se actualizo una Rutas con Id: ${ruta.id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        17,
-        EstatusEnumBitcora.SUCCESS
+        EnumModulos.RUTAS,
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // API response
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Ruta actualizada correctamente",
+        status: 'success',
+        message: 'Ruta actualizada correctamente',
         data: {
           id: id,
           nombre: `Ruta ${id} `,
@@ -928,48 +1138,51 @@ ORDER BY ru.Id DESC;
       // Registro en la bitácora ERROR
       const querylogger = { updateRutaDto };
       await this.bitacoraLogger.logToBitacora(
-        "Rutas",
+        'Rutas',
         `Se actualizo una Ruta con ID: ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        17,
+        EnumModulos.RUTAS,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al actualizar ruta",
+        message: 'Error al actualizar ruta',
         error: error.message,
       });
     }
   }
 
+  // ========================================
+  // 🔹 ELIMINADO LOGICO
+  // ========================================
   async remove(id: number, idUser: number, rol: number) {
     try {
       const ruta = await this.rutasRepository.findOne({ where: { id: id } });
-      if (!ruta) throw new NotFoundException("Ruta no encontrada");
+      if (!ruta) throw new NotFoundException('Ruta no encontrada');
 
       await this.rutasRepository.update(id, { estatus: 0 });
 
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Rutas",
+        'Rutas',
         `Se elimino una Ruta con Id: ${ruta.id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        17,
-        EstatusEnumBitcora.SUCCESS
+        EnumModulos.RUTAS,
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // API response (con mensajes corregidos)
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Ruta eliminada logicamente correctamente",
+        status: 'success',
+        message: 'Ruta eliminada logicamente correctamente',
         data: {
           id: id,
           nombre: `Ruta ${id}, Nombre: ${ruta.nombre} `,
@@ -980,24 +1193,28 @@ ORDER BY ru.Id DESC;
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Rutas",
+        'Rutas',
         `Se elimino una Ruta con ID: ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        17,
+        EnumModulos.RUTAS,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al eliminado logico una ruta",
+        message: 'Error al eliminado logico una ruta',
         error: error.message,
       });
     }
   }
+
+  // ========================================
+  // 🔹 ELIMINADO PERMANENTE
+  // ========================================
 
   async removeTotal(id: number, idUser: number, rol: number) {
     try {
@@ -1008,11 +1225,11 @@ ORDER BY ru.Id DESC;
           ruta = await this.rutasRepository.findOne({
             where: { id: id },
           });
-          if (!ruta) throw new NotFoundException("Ruta no encontrada");
+          if (!ruta) throw new NotFoundException('Ruta no encontrada');
           break;
 
         default:
-          // Usuarios normales - solo sus Zonas asignadas
+          // Usuarios normales - solo sus zonas asignadas
           throw new BadRequestException(`Acceso denegado`);
           break;
       }
@@ -1022,19 +1239,19 @@ ORDER BY ru.Id DESC;
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Rutas",
+        'Rutas',
         `Se elimino una Ruta con Id: ${ruta.id}`,
-        "DELETE",
+        'DELETE',
         querylogger,
         idUser,
-        17,
-        EstatusEnumBitcora.SUCCESS
+        EnumModulos.RUTAS,
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // API response (con mensajes corregidos)
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Ruta eliminada correctamente", // ✅ Corregido
+        status: 'success',
+        message: 'Ruta eliminada correctamente', // ✅ Corregido
         data: {
           id: id,
           nombre: `Ruta ${id}, Nombre: ${ruta.nombre} `, // ✅ Mejorado
@@ -1045,20 +1262,20 @@ ORDER BY ru.Id DESC;
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Rutas",
+        'Rutas',
         `Se elimino una Ruta con Id: ${id}`,
-        "DELETE",
+        'DELETE',
         querylogger,
         idUser,
-        17,
+        EnumModulos.RUTAS,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al eliminado permanente una ruta",
+        message: 'Error al eliminado permanente una ruta',
         error: error.message,
       });
     }

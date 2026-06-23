@@ -9,10 +9,12 @@ import { Validadores } from 'src/entities/Validadores';
 import { Contadores } from 'src/entities/Contadores';
 import { Vehiculos } from 'src/entities/Vehiculos';
 import { Clientes } from 'src/entities/Clientes';
+import { InstalacionContadores } from 'src/entities/InstalacionContadores';
+import { HistoricoInstalaciones } from 'src/entities/historico-instalaciones';
 import { HistoricoinstalacionesModule } from 'src/historicoinstalaciones/historicoinstalaciones.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Instalaciones,UsuariosInstalaciones,Validadores,Contadores,Vehiculos,Clientes]), BitacoraModule,HistoricoinstalacionesModule],
+  imports: [TypeOrmModule.forFeature([Instalaciones,UsuariosInstalaciones,Validadores,Contadores,Vehiculos,Clientes,InstalacionContadores]), BitacoraModule,HistoricoinstalacionesModule],
   controllers: [InstalacionesController],
   providers: [InstalacionesService],
 })

@@ -2,11 +2,22 @@ import {
   Column,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
 } from "typeorm";
-import { applySchema } from "src/common/apply-schema.decorator";
+import { Contadores } from "./Contadores";
+import { Validadores } from "./Validadores";
+import { Instalaciones } from "./Instalaciones";
+import { Monederos } from "./Monederos";
+import { Zonas } from "./Zonas";
+import { Turnos } from "./Turnos";
 import { Usuarios } from "./Usuarios";
+import { Vehiculos } from "./Vehiculos";
+import { Viajes } from "./Viajes";
+import { TransbordosPermitidos } from "./TransbordosPermitidos";
+import { applySchema } from "src/common/apply-schema.decorator";
 
 @applySchema
 @Index("UQ_Clientes_RFC", ["rfc"], { unique: true })
@@ -111,7 +122,46 @@ export class Clientes {
   @Column("tinyint", { name: "Estatus", default: () => "'1'" })
   estatus: number;
 
+  @OneToMany(() => Contadores, (contadores) => contadores.idCliente2)
+  contadores: Contadores[];
+
+  @ManyToOne(() => Clientes, (clientes) => clientes.clientes, {
+    onDelete: "NO ACTION",
+    onUpdate: "NO ACTION",
+  })
+  @JoinColumn([{ name: "IdPadre", referencedColumnName: "id" }])
+  idPadre2: Clientes;
+
+  @OneToMany(() => Clientes, (clientes) => clientes.idPadre2)
+  clientes: Clientes[];
+
+  @OneToMany(() => Validadores, (validadores) => validadores.idCliente2)
+  validadores: Validadores[];
+
+  @OneToMany(() => Instalaciones, (instalaciones) => instalaciones.idCliente2)
+  instalaciones: Instalaciones[];
+
+  @OneToMany(() => Monederos, (monederos) => monederos.idCliente2)
+  monederos: Monederos[];
+
+  @OneToMany(() => Zonas, (zonas) => zonas.idCliente2)
+  zonas: Zonas[];
+
+  @OneToMany(() => Turnos, (turnos) => turnos.idCliente2)
+  turnos: Turnos[];
+
   @OneToMany(() => Usuarios, (usuarios) => usuarios.idCliente2)
   usuarios: Usuarios[];
 
+  @OneToMany(() => Vehiculos, (vehiculos) => vehiculos.idCliente2)
+  vehiculos: Vehiculos[];
+
+  @OneToMany(() => Viajes, (viajes) => viajes.idCliente2)
+  viajes: Viajes[];
+
+  @OneToMany(
+    () => TransbordosPermitidos,
+    (transbordosPermitidos) => transbordosPermitidos.idClienteTransbordo
+  )
+  transbordosPermitidos: TransbordosPermitidos[];
 }

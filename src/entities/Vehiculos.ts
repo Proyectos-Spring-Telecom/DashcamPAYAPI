@@ -2,11 +2,14 @@ import {
   Column,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
 } from "typeorm";
-import { applySchema } from "src/common/apply-schema.decorator";
 import { Instalaciones } from "./Instalaciones";
+import { Clientes } from "./Clientes";
+import { applySchema } from "src/common/apply-schema.decorator";
 
 @applySchema
 @Index("UQ_Vehiculos_Placa", ["placa"], { unique: true })
@@ -55,6 +58,15 @@ export class Vehiculos {
   @Column("varchar", { name: "Foto", nullable: true, length: 500 })
   foto: string | null;
 
+  @Column("int", { name: "PasajerosSentados", nullable: true, unsigned: true })
+  pasajerosSentados: number;
+
+  @Column("int", { name: "PasajerosParados", nullable: true, unsigned: true })
+  pasajerosParados: number;
+
+  @Column("int", { name: "CantidadPuertas", nullable: true })
+  cantidadPuertas: number | null;
+
   @Column("datetime", {
     name: "FechaCreacion",
     default: () => "CURRENT_TIMESTAMP",
@@ -70,17 +82,28 @@ export class Vehiculos {
   @Column("tinyint", { name: "Estatus", default: () => "'1'" })
   estatus: number;
 
-  @Column("tinyint", {
-    name: "EstadoActual",
-    unsigned: true,
-    default: () => "'1'",
-  })
+  @Column('tinyint', { name: 'EstadoActual', unsigned: true })
   estadoActual: number;
 
   @Column("bigint", { name: "IdCliente" })
   idCliente: number;
 
+  @Column("float", { name: "KM", nullable: true })
+  km: number;
+
+  @Column("bigint", { name: "IdCombustible", nullable: true })
+  idCombustible: number;
+
+  @Column("float", { name: "CapacidadLitros", nullable: true })
+  capacidadLitros: number;
+
   @OneToMany(() => Instalaciones, (instalaciones) => instalaciones.vehiculos)
   instalaciones: Instalaciones[];
 
+  @ManyToOne(() => Clientes, (clientes) => clientes.vehiculos, {
+    onDelete: "NO ACTION",
+    onUpdate: "NO ACTION",
+  })
+  @JoinColumn([{ name: "IdCliente", referencedColumnName: "id" }])
+  idCliente2: Clientes;
 }

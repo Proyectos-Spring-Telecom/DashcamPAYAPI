@@ -1,17 +1,32 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
-import { applySchema } from "src/common/apply-schema.decorator";
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+} from "typeorm";
+import { Clientes } from "./Clientes";
 import { Validadores } from "./Validadores";
-import { Contadores } from "./Contadores";
 import { Vehiculos } from "./Vehiculos";
+import { Turnos } from "./Turnos";
+import { UsuariosInstalaciones } from "./UsuariosInstalaciones";
+import { Verificaciones } from "./Verificaciones";
+import { MantenimientoVehicular } from "./MantenimientoVehicular";
+import { MantenimientoKilometraje } from "./MantenimientoKilometraje";
+import { MantenimientoCombustible } from "./MantenimientoCombustible";
+import { Incidentes } from "./Incidentes";
+import { InstalacionContadores } from "./InstalacionContadores";
+import { applySchema } from "src/common/apply-schema.decorator";
 
 @applySchema
 @Index(
   "IX_Instalaciones_IdCliente_IdValidador",
-  ["idCliente", "idValidador"],
+  ["idValidador", "idCliente"],
   {}
 )
-@Index("IX_Instalaciones_IdCliente_IdContador", ["idCliente", "idContador"], {})
-@Index("IX_Instalaciones_IdCliente_IdVehiculo", ["idCliente", "idVehiculo"], {})
+@Index("IX_Instalaciones_IdCliente_IdVehiculo", ["idVehiculo", "idCliente"], {})
 @Index("FK_Instalaciones_Clientes", ["idCliente"], {})
 @Entity("Instalaciones")
 export class Instalaciones {
@@ -36,14 +51,18 @@ export class Instalaciones {
   @Column("bigint", { name: "IdValidador" })
   idValidador: number;
 
-  @Column("bigint", { name: "IdContador" })
-  idContador: number;
-
   @Column("bigint", { name: "IdVehiculo" })
   idVehiculo: number;
 
   @Column("bigint", { name: "IdCliente" })
   idCliente: number;
+
+  @ManyToOne(() => Clientes, (clientes) => clientes.instalaciones, {
+    onDelete: "NO ACTION",
+    onUpdate: "NO ACTION",
+  })
+  @JoinColumn([{ name: "IdCliente", referencedColumnName: "id" }])
+  idCliente2: Clientes;
 
   @ManyToOne(() => Validadores, (validadores) => validadores.instalaciones, {
     onDelete: "NO ACTION",
@@ -55,16 +74,6 @@ export class Instalaciones {
   ])
   validadores: Validadores;
 
-  @ManyToOne(() => Contadores, (contadores) => contadores.instalaciones, {
-    onDelete: "NO ACTION",
-    onUpdate: "NO ACTION",
-  })
-  @JoinColumn([
-    { name: "IdCliente", referencedColumnName: "idCliente" },
-    { name: "IdContador", referencedColumnName: "id" },
-  ])
-  contadores: Contadores;
-
   @ManyToOne(() => Vehiculos, (vehiculos) => vehiculos.instalaciones, {
     onDelete: "NO ACTION",
     onUpdate: "NO ACTION",
@@ -74,4 +83,31 @@ export class Instalaciones {
     { name: "IdVehiculo", referencedColumnName: "id" },
   ])
   vehiculos: Vehiculos;
+
+  @OneToMany(() => Turnos, (turnos) => turnos.idInstalacion2)
+  turnos: Turnos[];
+
+  @OneToMany(
+    () => UsuariosInstalaciones,
+    (usuariosInstalaciones) => usuariosInstalaciones.idInstalacion2
+  )
+  usuariosInstalaciones: UsuariosInstalaciones[];
+
+  @OneToMany(() => Verificaciones, (verificaciones) => verificaciones.instalacion)
+  verificaciones: Verificaciones[];
+
+  @OneToMany(() => MantenimientoVehicular, (mantenimientoVehicular) => mantenimientoVehicular.instalacion)
+  mantenimientosVehiculares: MantenimientoVehicular[];
+
+  @OneToMany(() => MantenimientoKilometraje, (mantenimientoKilometraje) => mantenimientoKilometraje.instalacion)
+  mantenimientosKilometraje: MantenimientoKilometraje[];
+
+  @OneToMany(() => MantenimientoCombustible, (mantenimientoCombustible) => mantenimientoCombustible.instalacion)
+  mantenimientosCombustible: MantenimientoCombustible[];
+
+  @OneToMany(() => Incidentes, (incidentes) => incidentes.instalacion)
+  incidentes: Incidentes[];
+
+  @OneToMany(() => InstalacionContadores, (instalacionContadores) => instalacionContadores.instalacion)
+  instalacionContadores: InstalacionContadores[];
 }

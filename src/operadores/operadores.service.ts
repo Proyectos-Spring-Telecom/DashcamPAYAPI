@@ -4,20 +4,23 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-} from "@nestjs/common";
-import { CreateOperadoreDto } from "./dto/create-operadore.dto";
-import { UpdateOperadoreDto } from "./dto/update-operadore.dto";
-import { UpdateOperadorStatusDto } from "./dto/update-operadores-estatus.dto";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
-import { Operadores } from "src/entities/Operadores";
-import { BitacoraLoggerService } from "src/bitacora/bitacora.service";
+} from '@nestjs/common';
+import { CreateOperadoreDto } from './dto/create-operadore.dto';
+import { UpdateOperadoreDto } from './dto/update-operadore.dto';
+import { UpdateOperadorStatusDto } from './dto/update-operadores-estatus.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Operadores } from 'src/entities/Operadores';
+import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import {
   ApiCrudResponse,
   ApiResponseCommon,
   EstatusEnumBitcora,
-} from "src/common/ApiResponse";
-import { Clientes } from "src/entities/Clientes";
+} from 'src/common/ApiResponse';
+import { Clientes } from 'src/entities/Clientes';
+import { Licencias } from 'src/entities/Licencias';
+import { Usuarios } from 'src/entities/Usuarios';
+import { EnumModulos, EstatusEnum } from 'src/common/estatus.enum';
 
 @Injectable()
 export class OperadoresService {
@@ -26,75 +29,112 @@ export class OperadoresService {
     private readonly operadoresRepository: Repository<Operadores>,
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
-    private readonly bitacoraLogger: BitacoraLoggerService
+    @InjectRepository(Licencias)
+    private readonly licenciasRepository: Repository<Licencias>,
+    @InjectRepository(Usuarios)
+    private readonly usuariosRepository: Repository<Usuarios>,
+    private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
-  //Crear operador
+
+  // ========================================
+  // 🔹 CREAR UN OPERADOR
+  // ========================================
   async createOperador(
     createOperadoreDto: CreateOperadoreDto,
-    idUser: number
+    idUser: number,
   ): Promise<ApiCrudResponse> {
     try {
-      const operadorExistente = await this.operadoresRepository.findOne({
+      const operadorExistente = await this.licenciasRepository.findOne({
         where: { numeroLicencia: createOperadoreDto.numeroLicencia },
       });
       if (operadorExistente) {
         throw new BadRequestException(
-          `Operador con licencia: ${createOperadoreDto.numeroLicencia} esta registrado`
+          `El operador con licencia número: ${createOperadoreDto.numeroLicencia} ya se encuentra registrado.`,
+        );
+      }
+      const usuarioOperador = await this.operadoresRepository.findOne({
+        where: { idUsuario: createOperadoreDto.idUsuario },
+      });
+      if (usuarioOperador) {
+        throw new BadRequestException(
+          `El usuario con ID ${createOperadoreDto.idUsuario} ya se encuentra registrado.`,
         );
       }
 
+      //extraemos los valores para crear al operador
+      const bodyOperador = {
+        fechaNacimiento: createOperadoreDto.fechaNacimiento,
+        identificacion: createOperadoreDto.identificacion,
+        licencia: createOperadoreDto.licencia,
+        numeroLicencia: createOperadoreDto.numeroLicencia,
+        comprobanteDomicilio: createOperadoreDto.comprobanteDomicilio,
+        certificadoMedico: createOperadoreDto.certificadoMedico,
+        antecedentesNoPenales: createOperadoreDto.antecedentesNoPenales,
+        estatus: EstatusEnum.ACTIVO,
+        idUsuario: createOperadoreDto.idUsuario,
+      };
+
       //creamos al operador
-      const newOperador =
-        await this.operadoresRepository.create(createOperadoreDto);
+      const newOperador = await this.operadoresRepository.create(bodyOperador);
       const operador = await this.operadoresRepository.save(newOperador);
 
-      const operadorData = await this.operadoresRepository.findOne({
-        where: { id: operador.id },
-      });
+      //Creamos la licencia con la cual se registra
+      const bodyLicencia = {
+        licencia: createOperadoreDto.licencia,
+        numeroLicencia: createOperadoreDto.numeroLicencia,
+        fechaExpedicion: createOperadoreDto.fechaExpedicion,
+        fechaVencimiento: createOperadoreDto.fechaVencimiento,
+        idTipoLicencia: createOperadoreDto.idTipoLicencia,
+        idCategoriaLicencia: createOperadoreDto.idCategoriaLicencia,
+        idOperador: operador.id,
+      };
+
+      //Guardamos la licencia
+      const licenciaCreate =
+        await this.licenciasRepository.create(bodyLicencia);
+
+      const licencia = await this.licenciasRepository.save(licenciaCreate);
 
       //-----Registro en la bitacora-----SUCCESS
       const querylogger = { createOperadoreDto };
       await this.bitacoraLogger.logToBitacora(
-        "Operadores",
-        `El operador fue creado correctamente con el número de licencia: ${createOperadoreDto.numeroLicencia}.`,
-        "CREATE",
+        'Operadores',
+        `El operador ha sido creado correctamente con el número de licencia: ${createOperadoreDto.numeroLicencia}.`,
+        'CREATE',
         querylogger,
         Number(idUser),
-        9,
-        EstatusEnumBitcora.SUCCESS
+        EnumModulos.OPERADORES,
+        EstatusEnumBitcora.SUCCESS,
       );
 
       //Api response
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "El operador ha sido creado correctamente.",
+        status: 'success',
+        message: 'El operador ha sido creado correctamente.',
         data: {
           id: Number(operador.id),
-          nombre:
-            `ID de usuario: ${operador.idUsuario} | Número de licencia: ${operador.numeroLicencia}` ||
-            "",
+          nombre: `ID de usuario: ${operador.idUsuario} ` || '',
         },
       };
       return result;
     } catch (error) {
-      console.log(error)
       //-----Registro en la bitacora-----SUCCESS
       const querylogger = { createOperadoreDto };
       await this.bitacoraLogger.logToBitacora(
-        "Operadores",
-        `El operador fue creado correctamente con el número de licencia: ${createOperadoreDto.numeroLicencia}.`,
-        "CREATE",
+        'Operadores',
+        `El operador ha sido creado correctamente con el número de licencia: ${createOperadoreDto.numeroLicencia}.`,
+        'CREATE',
         querylogger,
         Number(idUser),
-        9,
+        EnumModulos.OPERADORES,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: `Ocurrió un error al crear el operador.`,
+        message: `Ha ocurrido un error durante el proceso de creación del operador.`,
         error: error.message,
       });
     }
@@ -120,12 +160,14 @@ export class OperadoresService {
     return { ids, placeholders };
   }
 
-  //Obtener todos los operadores
+  // ========================================
+  // 🔹 OBTENER PAGINADO DE OPERADORES
+  // ========================================
   async findAllOperadores(
     cliente: number,
     rol: number,
     page: number,
-    limit: number
+    limit: number,
   ): Promise<ApiResponseCommon> {
     try {
       const offset = (page - 1) * limit;
@@ -139,15 +181,20 @@ export class OperadoresService {
 SELECT
   -- Datos del Operador
   o.Id AS id,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimiento,
   o.Identificacion AS identificacion,
   o.Licencia AS licencia,
   o.ComprobanteDomicilio AS comprobanteDomicilio,
+  o.CertificadoMedico AS certificadoMedico,
   o.AntecedentesNoPenales AS antecedentesNoPenales,
-  o.FechaCreacion AS fechaCreacion,
-  o.FechaActualizacion AS fechaActualizacion,
-  o.Estatus AS estatus,
+  o.FechaCreacion AS fechaCreacionOperador,
+  o.FechaActualizacion AS fechaActualizacionOperador,
+  o.Estatus AS estatusOperador,
+
+  -- Datos Del Clientes
+  c.Nombre As nombreCliente,
+  c.ApellidoPaterno AS apellidoPaternoCliente,
+  c.ApellidoMaterno AS apellidoMaternoCliente,
 
   -- Datos del Usuario
   u.Id AS idUsuario,
@@ -156,23 +203,58 @@ SELECT
   u.ApellidoPaterno AS apellidoPaternoUsuario,
   u.ApellidoMaterno AS apellidoMaternoUsuario,
   u.Telefono AS telefonoUsuario,
-  u.ValidadorId AS validadorIdId,
   u.FotoPerfil AS fotoPerfil,
-  u.FechaCreacion AS fechaCreacionUsuario,
-  u.FechaActualizacion AS fechaActualizacion,
-  u.Estatus AS estatusUsuario,
   u.IdRol AS idRol,
+  u.IdCliente AS idCliente,
 
-  -- Datos del Cliente
-  u.IdCliente AS idCliente
+  -- Agrupamos las licencias del operador en un JSON
+  JSON_ARRAYAGG(
+    JSON_OBJECT(
+      'idLicencia', l.Id,
+      'licencia', l.Licencia,
+      'numeroLicencia', l.NumeroLicencia,
+      'fechaExpedicion', l.FechaExpedicion,
+      'fechaVencimiento', l.FechaVencimiento,
+      'idTipoLicencia', l.IdTipoLicencia,
+      'nombreTipoLicencia', ctl.Nombre,
+      'idCategoriaLicencia', l.IdCategoriaLicencia,
+      'nombreCategoriaLicencia', ccl.Nombre
+    )
+  ) AS licencias
 
 FROM Operadores o
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
-WHERE u.Estatus = 1
+INNER JOIN Clientes c ON u.IdCliente = c.Id
+LEFT JOIN Licencias l ON l.IdOperador = o.Id
+LEFT JOIN CatTipoLicencia ctl ON l.IdTipoLicencia = ctl.Id
+LEFT JOIN CatCategoriaLicencia ccl ON l.IdCategoriaLicencia = ccl.Id
+
+-- WHERE o.Id = @idOperador   -- filtra un operador específico
+
+GROUP BY
+  o.Id,
+  o.FechaNacimiento,
+  o.Identificacion,
+  o.ComprobanteDomicilio,
+  o.CertificadoMedico,
+  o.AntecedentesNoPenales,
+  o.FechaCreacion,
+  o.FechaActualizacion,
+  o.Estatus,
+  u.Id,
+  u.UserName,
+  u.Nombre,
+  u.ApellidoPaterno,
+  u.ApellidoMaterno,
+  u.Telefono,
+  u.FotoPerfil,
+  u.IdRol,
+  u.IdCliente
+
 ORDER BY o.Id DESC
 LIMIT ? OFFSET ?;
         `,
-            [limit, offset]
+            [limit, offset],
           );
 
           // Query para total (sin paginación)
@@ -181,28 +263,33 @@ LIMIT ? OFFSET ?;
   SELECT COUNT(*) AS total
 FROM Operadores o
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
-WHERE u.Estatus = 1
-  `
+
+  `,
           );
           break;
 
         default:
+          const { ids, placeholders } = await this.clienteHijos(cliente);
           // Consulta de datos paginados resto Usuario
-          const { ids, placeholders } = await this.clienteHijos(cliente)
           operadores = await this.operadoresRepository.query(
             `
 SELECT
   -- Datos del Operador
   o.Id AS id,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimiento,
   o.Identificacion AS identificacion,
   o.Licencia AS licencia,
   o.ComprobanteDomicilio AS comprobanteDomicilio,
+  o.CertificadoMedico AS certificadoMedico,
   o.AntecedentesNoPenales AS antecedentesNoPenales,
-  o.FechaCreacion AS fechaCreacion,
-  o.FechaActualizacion AS fechaActualizacion,
-  o.Estatus AS estatus,
+  o.FechaCreacion AS fechaCreacionOperador,
+  o.FechaActualizacion AS fechaActualizacionOperador,
+  o.Estatus AS estatusOperador,
+
+  -- Datos Del Clientes
+  c.Nombre As nombreCliente,
+  c.ApellidoPaterno AS apellidoPaternoCliente,
+  c.ApellidoMaterno AS apellidoMaternoCliente,
 
   -- Datos del Usuario
   u.Id AS idUsuario,
@@ -211,34 +298,70 @@ SELECT
   u.ApellidoPaterno AS apellidoPaternoUsuario,
   u.ApellidoMaterno AS apellidoMaternoUsuario,
   u.Telefono AS telefonoUsuario,
-  u.ValidadorId AS ValidadorId,
   u.FotoPerfil AS fotoPerfil,
-  u.FechaCreacion AS fechaCreacionUsuario,
-  u.FechaActualizacion AS fechaActualizacion,
-  u.Estatus AS estatusUsuario,
   u.IdRol AS idRol,
+  u.IdCliente AS idCliente,
 
-  -- Datos del Cliente
-  u.IdCliente AS idCliente
+  -- Agrupamos las licencias del operador en un JSON
+  JSON_ARRAYAGG(
+    JSON_OBJECT(
+      'idLicencia', l.Id,
+      'licencia', l.Licencia,
+      'numeroLicencia', l.NumeroLicencia,
+      'fechaExpedicion', l.FechaExpedicion,
+      'fechaVencimiento', l.FechaVencimiento,
+      'idTipoLicencia', l.IdTipoLicencia,
+      'nombreTipoLicencia', ctl.Nombre,
+      'idCategoriaLicencia', l.IdCategoriaLicencia,
+      'nombreCategoriaLicencia', ccl.Nombre
+    )
+  ) AS licencias
 
 FROM Operadores o
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Clientes c ON u.IdCliente = c.Id
+LEFT JOIN Licencias l ON l.IdOperador = o.Id
+LEFT JOIN CatTipoLicencia ctl ON l.IdTipoLicencia = ctl.Id
+LEFT JOIN CatCategoriaLicencia ccl ON l.IdCategoriaLicencia = ccl.Id
+
 WHERE u.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
 AND u.Estatus = 1
+
+GROUP BY
+  o.Id,
+  o.FechaNacimiento,
+  o.Identificacion,
+  o.ComprobanteDomicilio,
+  o.CertificadoMedico,
+  o.AntecedentesNoPenales,
+  o.FechaCreacion,
+  o.FechaActualizacion,
+  o.Estatus,
+  u.Id,
+  u.UserName,
+  u.Nombre,
+  u.ApellidoPaterno,
+  u.ApellidoMaterno,
+  u.Telefono,
+  u.FotoPerfil,
+  u.IdRol,
+  u.IdCliente
+
 ORDER BY o.Id DESC
 LIMIT ? OFFSET ?;
         `,
-            [...ids, limit, offset]
+            [...ids, limit, offset],
           );
 
           // Query para total (sin paginación)
           totalResult = await this.operadoresRepository.query(
             `
    SELECT COUNT(*) AS total
-  FROM Operadores o
-  INNER JOIN Usuarios u ON o.IdUsuario = u.Id
-	WHERE u.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
-  AND u.Estatus = 1
+FROM Operadores o
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+
+WHERE u.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+AND u.Estatus = 1
   `,
             [...ids],
           );
@@ -269,16 +392,18 @@ LIMIT ? OFFSET ?;
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al obtener la paginación de los operadores.",
+        message: 'Error al obtener la paginación de los operadores.',
         error: error.message,
       });
     }
   }
 
-  //Obtener todos los operadores
+  // ========================================
+  // 🔹 OBTENER LISTADO DE OPERADORES
+  // ========================================
   async findAllListOperadores(
     cliente: number,
-    rol: number
+    rol: number,
   ): Promise<ApiResponseCommon> {
     try {
       let operadores;
@@ -289,11 +414,10 @@ LIMIT ? OFFSET ?;
 SELECT
   -- Datos del Operador
   o.Id AS id,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimiento,
   o.Identificacion AS identificacion,
-  o.Licencia AS licencia,
   o.ComprobanteDomicilio AS comprobanteDomicilio,
+  o.CertificadoMedico AS certificadoMedico,
   o.AntecedentesNoPenales AS antecedentesNoPenales,
   o.FechaCreacion AS fechaCreacion,
   o.FechaActualizacion AS fechaActualizacion,
@@ -306,7 +430,7 @@ SELECT
   u.ApellidoPaterno AS apellidoPaternoUsuario,
   u.ApellidoMaterno AS apellidoMaternoUsuario,
   u.Telefono AS telefonoUsuario,
-  u.ValidadorId AS ValidadorId,
+  u.ValidadorId AS validadorId,
   u.FotoPerfil AS fotoPerfil,
   u.FechaCreacion AS fechaCreacionUsuario,
   u.FechaActualizacion AS fechaActualizacion,
@@ -315,28 +439,28 @@ SELECT
 
   -- Datos del Cliente
   u.IdCliente AS idCliente
+  
 
 FROM Operadores o
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
 WHERE o.Estatus = 1
 AND u.Estatus = 1
 ORDER BY o.Id DESC;
-        `
+        `,
           );
           break;
 
         default:
-          const { ids, placeholders } = await this.clienteHijos(cliente)
+          const { ids, placeholders } = await this.clienteHijos(cliente);
           operadores = await this.operadoresRepository.query(
             `
 SELECT
   -- Datos del Operador
   o.Id AS id,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimiento,
   o.Identificacion AS identificacion,
-  o.Licencia AS licencia,
   o.ComprobanteDomicilio AS comprobanteDomicilio,
+  o.CertificadoMedico AS certificadoMedico,
   o.AntecedentesNoPenales AS antecedentesNoPenales,
   o.FechaCreacion AS fechaCreacion,
   o.FechaActualizacion AS fechaActualizacion,
@@ -349,7 +473,7 @@ SELECT
   u.ApellidoPaterno AS apellidoPaternoUsuario,
   u.ApellidoMaterno AS apellidoMaternoUsuario,
   u.Telefono AS telefonoUsuario,
-  u.ValidadorId AS ValidadorId,
+  u.ValidadorId AS validadorId,
   u.FotoPerfil AS fotoPerfil,
   u.FechaCreacion AS fechaCreacionUsuario,
   u.FechaActualizacion AS fechaActualizacion,
@@ -358,6 +482,8 @@ SELECT
 
   -- Datos del Cliente
   u.IdCliente AS idCliente
+  
+
 
 FROM Operadores o
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
@@ -366,7 +492,7 @@ AND o.Estatus = 1
 AND u.Estatus = 1
 ORDER BY o.Id DESC;
         `,
-            [...ids]
+            [...ids],
           );
           break;
       }
@@ -378,6 +504,9 @@ ORDER BY o.Id DESC;
         idUsuario: Number(item.idUsuario),
         idRol: Number(item.idRol),
         idCliente: Number(item.idCliente),
+        idLicencia: Number(item.idLicencia),
+        idTipoLicencia: Number(item.idTipoLicencia),
+        idCategoriaLicencia: Number(item.idCategoriaLicencia),
       }));
 
       const result: ApiResponseCommon = {
@@ -389,13 +518,101 @@ ORDER BY o.Id DESC;
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al obtener el listado de los operadores.",
+        message: 'Error al obtener el listado de los operadores.',
         error: error.message,
       });
     }
   }
 
-  //Obtener operador por ID
+  // ========================================
+  // 🔹 OBTENER OPERADORES POR ID DE CLIENTE
+  // ========================================
+  async findByCliente(
+    idCliente: number,
+    idUser: number,
+    rol: number,
+  ): Promise<ApiResponseCommon> {
+    try {
+      // Consulta directa de operadores por cliente (solo el cliente especificado)
+      const operadores = await this.operadoresRepository.query(
+        `
+SELECT
+  -- Datos del Operador
+  o.Id AS id,
+  o.FechaNacimiento AS fechaNacimiento,
+  o.Identificacion AS identificacion,
+  o.Licencia AS licencia,
+  o.ComprobanteDomicilio AS comprobanteDomicilio,
+  o.CertificadoMedico AS certificadoMedico,
+  o.AntecedentesNoPenales AS antecedentesNoPenales,
+  o.FechaCreacion AS fechaCreacion,
+  o.FechaActualizacion AS fechaActualizacion,
+  o.Estatus AS estatus,
+
+  -- Datos del Usuario
+  u.Id AS idUsuario,
+  u.UserName AS userNameUsuario,
+  u.Nombre AS nombreUsuario,
+  u.ApellidoPaterno AS apellidoPaternoUsuario,
+  u.ApellidoMaterno AS apellidoMaternoUsuario,
+  u.Telefono AS telefonoUsuario,
+  u.ValidadorId AS validadorId,
+  u.FotoPerfil AS fotoPerfil,
+  u.FechaCreacion AS fechaCreacionUsuario,
+  u.FechaActualizacion AS fechaActualizacionUsuario,
+  u.Estatus AS estatusUsuario,
+  u.IdRol AS idRol,
+
+  -- Datos del Cliente
+  u.IdCliente AS idCliente,
+  c.Nombre AS nombreCliente,
+  c.ApellidoPaterno AS apellidoPaternoCliente,
+  c.ApellidoMaterno AS apellidoMaternoCliente,
+  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', IFNULL(c.ApellidoMaterno, '')) AS nombreCompletoCliente
+
+FROM Operadores o
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Clientes c ON u.IdCliente = c.Id
+
+WHERE 
+  u.IdCliente = ?
+  AND o.Estatus = 1
+  AND u.Estatus = 1
+  AND c.Estatus = 1
+
+ORDER BY o.Id DESC
+        `,
+        [idCliente],
+      );
+
+      // Forzamos a cambiar el id a number
+      const data = operadores.map((item) => ({
+        ...item,
+        id: Number(item.id),
+        idUsuario: Number(item.idUsuario),
+        idRol: Number(item.idRol),
+        idCliente: Number(item.idCliente),
+      }));
+
+      const result: ApiResponseCommon = {
+        data: data,
+      };
+
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException({
+        message: 'Error al obtener operadores por cliente',
+        error: error.message,
+      });
+    }
+  }
+
+  // ========================================
+  // 🔹 OBTENER OPERADORES POR ID
+  // ========================================
   async findOneOperador(id: number, cliente: number, rol: number) {
     try {
       let operador;
@@ -407,15 +624,15 @@ ORDER BY o.Id DESC;
 SELECT
   -- Datos del Operador
   o.Id AS id,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimiento,
   o.Identificacion AS identificacion,
   o.Licencia AS licencia,
   o.ComprobanteDomicilio AS comprobanteDomicilio,
+  o.CertificadoMedico AS certificadoMedico,
   o.AntecedentesNoPenales AS antecedentesNoPenales,
-  o.FechaCreacion AS fechaCreacion,
-  o.FechaActualizacion AS fechaActualizacion,
-  o.Estatus AS estatus,
+  o.FechaCreacion AS fechaCreacionOperador,
+  o.FechaActualizacion AS fechaActualizacionOperador,
+  o.Estatus AS estatusOperador,
 
   -- Datos del Usuario
   u.Id AS idUsuario,
@@ -424,42 +641,76 @@ SELECT
   u.ApellidoPaterno AS apellidoPaternoUsuario,
   u.ApellidoMaterno AS apellidoMaternoUsuario,
   u.Telefono AS telefonoUsuario,
-  u.ValidadorId AS ValidadorId,
   u.FotoPerfil AS fotoPerfil,
-  u.FechaCreacion AS fechaCreacionUsuario,
-  u.FechaActualizacion AS fechaActualizacion,
-  u.Estatus AS estatusUsuario,
   u.IdRol AS idRol,
+  u.IdCliente AS idCliente,
 
-  -- Datos del Cliente
-  u.IdCliente AS idCliente
+  -- Agrupamos las licencias del operador en un JSON
+  JSON_ARRAYAGG(
+    JSON_OBJECT(
+      'idLicencia', l.Id,
+      'licencia', l.Licencia,
+      'numeroLicencia', l.NumeroLicencia,
+      'fechaExpedicion', l.FechaExpedicion,
+      'fechaVencimiento', l.FechaVencimiento,
+      'idTipoLicencia', l.IdTipoLicencia,
+      'nombreTipoLicencia', ctl.Nombre,
+      'idCategoriaLicencia', l.IdCategoriaLicencia,
+      'nombreCategoriaLicencia', ccl.Nombre
+    )
+  ) AS licencias
 
 FROM Operadores o
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
-WHERE o.Id = ?
-ORDER BY o.Id DESC;
+LEFT JOIN Licencias l ON l.IdOperador = o.Id
+LEFT JOIN CatTipoLicencia ctl ON l.IdTipoLicencia = ctl.Id
+LEFT JOIN CatCategoriaLicencia ccl ON l.IdCategoriaLicencia = ccl.Id
+
+WHERE o.Id = ?   -- filtra un operador específico
+
+GROUP BY
+  o.Id,
+  o.FechaNacimiento,
+  o.Identificacion,
+  o.ComprobanteDomicilio,
+  o.CertificadoMedico,
+  o.AntecedentesNoPenales,
+  o.FechaCreacion,
+  o.FechaActualizacion,
+  o.Estatus,
+  u.Id,
+  u.UserName,
+  u.Nombre,
+  u.ApellidoPaterno,
+  u.ApellidoMaterno,
+  u.Telefono,
+  u.FotoPerfil,
+  u.IdRol,
+  u.IdCliente
+
+ORDER BY o.Id DESC
         `,
-            [id]
+            [id],
           );
           break;
 
         default:
+          const { ids, placeholders } = await this.clienteHijos(cliente);
           // Consulta de datos paginados resto Usuario
-          const { ids, placeholders } = await this.clienteHijos(cliente)
           operador = await this.operadoresRepository.query(
             `
 SELECT
   -- Datos del Operador
   o.Id AS id,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimiento,
   o.Identificacion AS identificacion,
   o.Licencia AS licencia,
   o.ComprobanteDomicilio AS comprobanteDomicilio,
+  o.CertificadoMedico AS certificadoMedico,
   o.AntecedentesNoPenales AS antecedentesNoPenales,
-  o.FechaCreacion AS fechaCreacion,
-  o.FechaActualizacion AS fechaActualizacion,
-  o.Estatus AS estatus,
+  o.FechaCreacion AS fechaCreacionOperador,
+  o.FechaActualizacion AS fechaActualizacionOperador,
+  o.Estatus AS estatusOperador,
 
   -- Datos del Usuario
   u.Id AS idUsuario,
@@ -468,23 +719,56 @@ SELECT
   u.ApellidoPaterno AS apellidoPaternoUsuario,
   u.ApellidoMaterno AS apellidoMaternoUsuario,
   u.Telefono AS telefonoUsuario,
-  u.ValidadorId AS ValidadorId,
   u.FotoPerfil AS fotoPerfil,
-  u.FechaCreacion AS fechaCreacionUsuario,
-  u.FechaActualizacion AS fechaActualizacion,
-  u.Estatus AS estatusUsuario,
   u.IdRol AS idRol,
+  u.IdCliente AS idCliente,
 
-  -- Datos del Cliente
-  u.IdCliente AS idCliente
+  -- Agrupamos las licencias del operador en un JSON
+  JSON_ARRAYAGG(
+    JSON_OBJECT(
+      'idLicencia', l.Id,
+      'licencia', l.Licencia,
+      'numeroLicencia', l.NumeroLicencia,
+      'fechaExpedicion', l.FechaExpedicion,
+      'fechaVencimiento', l.FechaVencimiento,
+      'idTipoLicencia', l.IdTipoLicencia,
+      'nombreTipoLicencia', ctl.Nombre,
+      'idCategoriaLicencia', l.IdCategoriaLicencia,
+      'nombreCategoriaLicencia', ccl.Nombre
+    )
+  ) AS licencias
 
 FROM Operadores o
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
-WHERE u.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
-AND o.Id = ?
-ORDER BY o.Id DESC;
+LEFT JOIN Licencias l ON l.IdOperador = o.Id
+LEFT JOIN CatTipoLicencia ctl ON l.IdTipoLicencia = ctl.Id
+LEFT JOIN CatCategoriaLicencia ccl ON l.IdCategoriaLicencia = ccl.Id
+
+WHERE o.Id = ?   -- filtra un operador específico
+
+GROUP BY
+  o.Id,
+  o.FechaNacimiento,
+  o.Identificacion,
+  o.ComprobanteDomicilio,
+  o.CertificadoMedico,
+  o.AntecedentesNoPenales,
+  o.FechaCreacion,
+  o.FechaActualizacion,
+  o.Estatus,
+  u.Id,
+  u.UserName,
+  u.Nombre,
+  u.ApellidoPaterno,
+  u.ApellidoMaterno,
+  u.Telefono,
+  u.FotoPerfil,
+  u.IdRol,
+  u.IdCliente
+
+ORDER BY o.Id DESC
         `,
-            [...ids, id]
+            [...ids, id],
           );
           break;
       }
@@ -509,17 +793,19 @@ ORDER BY o.Id DESC;
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al obtener operador.",
+        message: 'Error al obtener operador.',
         error: error.message,
       });
     }
   }
 
-  //Actualizar el estatus del operador
+  // ========================================
+  // 🔹 ACTUALIZAR ESTATUS DEL OPERADOR
+  // ========================================
   async updateOperadorEstatus(
     id: number,
     idUser: number,
-    updateOperadorStatusDto: UpdateOperadorStatusDto
+    updateOperadorStatusDto: UpdateOperadorStatusDto,
   ): Promise<ApiCrudResponse> {
     try {
       const operador = await this.operadoresRepository.findOne({
@@ -527,7 +813,7 @@ ORDER BY o.Id DESC;
       });
       if (!operador) {
         throw new NotFoundException(
-          `Operador id: ${id} con rol no encontrado.`
+          `Operador id: ${id} con rol no encontrado.`,
         );
       }
       const { estatus } = updateOperadorStatusDto;
@@ -536,25 +822,23 @@ ORDER BY o.Id DESC;
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updateOperadorStatusDto };
       await this.bitacoraLogger.logToBitacora(
-        "Operadores",
+        'Operadores',
         `Se cambió el estatus a: ${estatus} del operador con ID: ${id}.`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        9,
-        EstatusEnumBitcora.SUCCESS
+        EnumModulos.OPERADORES,
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // ----- Api response -----
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Estatus del operador actualizado correctamente.",
+        status: 'success',
+        message: 'Estatus del operador actualizado correctamente.',
         estatus: { estatus: estatus },
         data: {
           id: id,
-          nombre:
-            `ID usuario: ${operador.idUsuario} con número de licencia: ${operador.numeroLicencia}.` ||
-            "",
+          nombre: `ID usuario: ${operador.idUsuario}.` || '',
         },
       };
       return result;
@@ -562,63 +846,76 @@ ORDER BY o.Id DESC;
       //-----Registro en la bitacora----- ERROR
       const querylogger = { updateOperadorStatusDto };
       await this.bitacoraLogger.logToBitacora(
-        "Operadores",
+        'Operadores',
         `Se cambió el estatus a: ${updateOperadorStatusDto.estatus} del operador con ID: ${id}.`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        9,
+        EnumModulos.OPERADORES,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: " Error al actualizar el estatus al operador.",
+        message: ' Error al actualizar el estatus al operador.',
         error: error.message,
       });
     }
   }
-  
-  //Actualizar datos del operador
+
+  // ========================================
+  // 🔹 ACTUALIZAR DATOS DEL OPERADOR
+  // ========================================
   async updateOperador(
     id: number,
     idUser: number,
-    updateOperadoreDto: UpdateOperadoreDto
+    updateOperadoreDto: UpdateOperadoreDto,
   ) {
     try {
       const operador = await this.operadoresRepository.findOne({
         where: { id: id },
       });
+      console.log(operador?.idUsuario, { fotoPerfil: updateOperadoreDto.foto });
+
       if (!operador) {
         throw new NotFoundException(`Operador con id: ${id} no encontrado`);
       }
-      const operadorData =
-        await this.operadoresRepository.create(updateOperadoreDto);
-      await this.operadoresRepository.update(id, operadorData);
+      // Asignar solo los campos enviados al operador y guardar (save persiste correctamente)
+      if (updateOperadoreDto.fechaNacimiento !== undefined) operador.fechaNacimiento = updateOperadoreDto.fechaNacimiento;
+      if (updateOperadoreDto.identificacion !== undefined) operador.identificacion = updateOperadoreDto.identificacion;
+      if (updateOperadoreDto.comprobanteDomicilio !== undefined) operador.comprobanteDomicilio = updateOperadoreDto.comprobanteDomicilio;
+      if (updateOperadoreDto.certificadoMedico !== undefined) operador.certificadoMedico = updateOperadoreDto.certificadoMedico;
+      if (updateOperadoreDto.antecedentesNoPenales !== undefined) operador.antecedentesNoPenales = updateOperadoreDto.antecedentesNoPenales;
+      if (updateOperadoreDto.foto !== undefined) operador.foto = updateOperadoreDto.foto;
+      if (updateOperadoreDto.estatus !== undefined) operador.estatus = updateOperadoreDto.estatus;
+      if (updateOperadoreDto.idUsuario !== undefined) operador.idUsuario = updateOperadoreDto.idUsuario;
+      await this.operadoresRepository.save(operador);
+      // Sincronizar la foto en Usuarios.FotoPerfil usando el idUsuario del operador
+      if (updateOperadoreDto.foto !== undefined && updateOperadoreDto.foto !== '') {
+        await this.usuariosRepository.update(operador.idUsuario, { fotoPerfil: updateOperadoreDto.foto });
+      }
 
       //-----Registro en la bitacora-----SUCCESS
       const querylogger = { updateOperadoreDto };
       await this.bitacoraLogger.logToBitacora(
-        "Operadores",
+        'Operadores',
         `Se actualizó el Operador con ID: ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        9,
-        EstatusEnumBitcora.SUCCESS
+        EnumModulos.OPERADORES,
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // ----- Api response -----
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Operador actualizado correctamente",
+        status: 'success',
+        message: 'Operador actualizado correctamente',
         data: {
           id: id,
-          nombre:
-            `id usuario:${operador.idUsuario} con numero de licencia:${operador.numeroLicencia} ` ||
-            "",
+          nombre: `id usuario:${operador.idUsuario}  ` || '',
         },
       };
       return result;
@@ -626,27 +923,29 @@ ORDER BY o.Id DESC;
       //-----Registro en la bitacora-----ERROR
       const querylogger = { updateOperadoreDto };
       await this.bitacoraLogger.logToBitacora(
-        "Operadores",
+        'Operadores',
         `Se actualizó el Operador con ID: ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        9,
+        EnumModulos.OPERADORES,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
 
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al actualizar al operador.",
+        message: 'Error al actualizar al operador.',
         error: error.message,
       });
     }
   }
 
-  //Eliminar Operador
+  // ========================================
+  // 🔹 ELIMINAR OPERADOR
+  // ========================================
   async removeOperador(id: number, idUser: number) {
     try {
       const operador = await this.operadoresRepository.findOne({
@@ -660,24 +959,22 @@ ORDER BY o.Id DESC;
       //-----Registro en la bitacora-----SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Operadores",
+        'Operadores',
         `Se eliminó el operador con ID: ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        9,
-        EstatusEnumBitcora.SUCCESS
+        EnumModulos.OPERADORES,
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // ----- Api response -----
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Operador eliminado correctamente",
+        status: 'success',
+        message: 'Operador eliminado correctamente',
         data: {
           id: id,
-          nombre:
-            `id usuario:${operador.idUsuario} con numero de licencia:${operador.numeroLicencia} ` ||
-            "",
+          nombre: `id usuario:${operador.idUsuario} ` || '',
         },
       };
       return result;
@@ -685,21 +982,22 @@ ORDER BY o.Id DESC;
       //-----Registro en la bitacora-----SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Operadores",
+        'Operadores',
         `Se eliminó el operador con ID: ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
-        9,
+        EnumModulos.OPERADORES,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
 
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al eliminar al operador",
+        message:
+          'Ha ocurrido un error durante el proceso de eliminación del operador.',
         error: error.message,
       });
     }

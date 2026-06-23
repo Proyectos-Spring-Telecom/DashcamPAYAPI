@@ -13,13 +13,16 @@ import {
 import { ViajestransaccionesService } from './viajestransacciones.service';
 import { CreateViajestransaccioneDto } from './dto/create-viajestransaccione.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Viajes transacciones')
+@ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
 @Controller('viajestransacciones')
 export class ViajestransaccionesController {
   constructor(
     private readonly viajestransaccionesService: ViajestransaccionesService,
-  ) {}
+  ) { }
 
   @Post()
   create(
@@ -34,8 +37,15 @@ export class ViajestransaccionesController {
   }
 
   @Get('list')
-  findAllList() {
-    return this.viajestransaccionesService.findAllList();
+  findAllList(@Request() req,) {
+    const cliente = req.user.cliente;
+    const rol = req.user.rol;
+    const idUser = req.user.userId;
+    return this.viajestransaccionesService.findAllList(
+      +idUser,
+      +cliente,
+      +rol,
+    );
   }
 
   @Get('viajes/:id')
@@ -54,6 +64,14 @@ export class ViajestransaccionesController {
     @Param('limit', ParseIntPipe) limit: number,
     @Request() req,
   ) {
-    return this.viajestransaccionesService.findAll(page, limit);
+    const cliente = req.user.cliente;
+    const rol = req.user.rol;
+    const idUser = req.user.userId;
+    return this.viajestransaccionesService.findAll(
+      +idUser,
+      +cliente,
+      +rol,
+      page, 
+      limit);
   }
 }

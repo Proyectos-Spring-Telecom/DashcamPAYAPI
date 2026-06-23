@@ -4,26 +4,24 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-} from "@nestjs/common";
-import { CreateContadoresDto } from "../contadores/dto/create-contadores.dto";
-import { UpdateContadoresDto } from "../contadores/dto/update-contadores.dto";
+} from '@nestjs/common';
+import { CreateContadoresDto } from './dto/create-contadores.dto';
+import { UpdateContadoresDto } from './dto/update-contadores.dto';
 import {
   ApiCrudResponse,
   ApiResponseCommon,
   EstatusEnumBitcora,
-} from "src/common/ApiResponse";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Contadores } from "src/entities/Contadores";
-import { Repository } from "typeorm";
-import { BitacoraLoggerService } from "src/bitacora/bitacora.service";
-import { UpdateContadoresEstatusDto } from "../contadores/dto/update-contadores-estatus.dto";
-import { Instalaciones } from "src/entities/Instalaciones";
-import { Clientes } from "src/entities/Clientes";
-import {
-  EstadoComponente,
-  EstatusEnum,
-} from "src/common/estado-componente.enum";
-import { UpdateContadoresEstadoDto } from "./dto/update-contadores-estado.dto";
+} from 'src/common/ApiResponse';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Contadores } from 'src/entities/Contadores';
+import { Repository } from 'typeorm';
+import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
+import { UpdateContadoresEstatusDto } from './dto/update-contadores-estatus.dto';
+import { Instalaciones } from 'src/entities/Instalaciones';
+import { InstalacionContadores } from 'src/entities/InstalacionContadores';
+import { Clientes } from 'src/entities/Clientes';
+import { UpdateContadoresEstadoDto } from './dto/update-contadores.estado.dto';
+import { EstadoComponente, EstatusEnum } from 'src/common/estatus.enum';
 
 @Injectable()
 export class ContadoresService {
@@ -32,107 +30,74 @@ export class ContadoresService {
     private readonly contadoresRepository: Repository<Contadores>,
     @InjectRepository(Instalaciones)
     private readonly instalacionesRepository: Repository<Instalaciones>,
+    @InjectRepository(InstalacionContadores)
+    private readonly instalacionContadoresRepository: Repository<InstalacionContadores>,
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
-    private readonly bitacoraLogger: BitacoraLoggerService
+    private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
 
   //Crear Contadores
   async create(
     idUser: number,
-    createContadoresDto: CreateContadoresDto
+    createContadorDto: CreateContadoresDto,
   ): Promise<ApiCrudResponse> {
     try {
-      const Contadores = await this.contadoresRepository.findOne({
-        where: { numeroSerie: createContadoresDto.numeroSerie },
+      const contador = await this.contadoresRepository.findOne({
+        where: { numeroSerie: createContadorDto.numeroSerie },
       });
-      if (Contadores) {
+      if (contador) {
         throw new BadRequestException(
-          `Contador registrado con número de serie: ${Contadores.numeroSerie}.`
+          `Contador registrado con número de serie: ${contador.numeroSerie}.`,
         );
       }
 
-      //Se crea
-      const newContadoress =
-        await this.contadoresRepository.create(createContadoresDto);
-      const ContadoresSave =
-        await this.contadoresRepository.save(newContadoress);
+      //Se crea contador
+      const newContador =
+        await this.contadoresRepository.create(createContadorDto);
+      const contadorSave = await this.contadoresRepository.save(newContador);
 
       //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { createContadoresDto };
+      const querylogger = { createContadorDto };
       await this.bitacoraLogger.logToBitacora(
-        "Contadores",
-        `Se creó un Contador con número de serie: ${ContadoresSave.numeroSerie}.`,
-        "CREATE",
+        'Contadores',
+        `Se creó un Contador con número de serie: ${contadorSave.numeroSerie}.`,
+        'CREATE',
         querylogger,
         idUser,
         12,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       //Api response
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Contador creado correctamente.",
+        status: 'success',
+        message: 'Contador creado correctamente.',
         data: {
-          id: Number(ContadoresSave.id),
-          nombre:
-            `${ContadoresSave.marca} ${ContadoresSave.numeroSerie} ` || "",
+          id: Number(contadorSave.id),
+          nombre: `${contadorSave.marca} ${contadorSave.numeroSerie} ` || '',
         },
       };
 
       return result;
     } catch (error) {
       //-----Registro en la bitacora----- ERROR
-      const querylogger = { createContadoresDto };
+      const querylogger = { createContadorDto };
       await this.bitacoraLogger.logToBitacora(
-        "Contadores",
-        `Se creó un Contador con número de serie: ${createContadoresDto.numeroSerie}.`,
-        "CREATE",
+        'Contadores',
+        `Se creó un Contador con número de serie: ${createContadorDto.numeroSerie}.`,
+        'CREATE',
         querylogger,
         idUser,
         12,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Ocurrió un error al intentar crear un Contador.",
-        error: error.message,
-      });
-    }
-  }
-
-  //Obtener los Contadores por cliente --obsoleto
-  async findAllListClientes(id: number, cliente: number) {
-    try {
-      const Contadores = await this.contadoresRepository.find({
-        where: {
-          idCliente: id,
-          estatus: EstatusEnum.ACTIVO,
-          estadoActual: EstadoComponente.DISPONIBLE,
-        },
-      });
-      
-
-      //Forzamos a cambiar el id a number
-      const data = Contadores.map((item) => ({
-        ...item,
-        id: Number(item.id),
-      }));
-
-      const result: ApiResponseCommon = {
-        data: data,
-      };
-      return result;
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new InternalServerErrorException({
-        message: `Error al obtener los Contador.`,
+        message: 'Ocurrió un error al intentar crear un Contador.',
         error: error.message,
       });
     }
@@ -142,7 +107,7 @@ export class ContadoresService {
   private async clienteHijos(cliente: number) {
     const clientesFiltrado = await this.clienteRepository.query(
       `CALL spGetClientes(?);`,
-      [cliente]
+      [cliente],
     );
 
     const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
@@ -154,8 +119,73 @@ export class ContadoresService {
     }
 
     // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => "?").join(", ");
+    const placeholders = ids.map(() => '?').join(', ');
     return { ids, placeholders };
+  }
+
+  //Obtener los contadores por cliente -- incluye disponibles y el que está en uso
+  async findAllListClientes(id: number, cliente: number) {
+    try {
+      // Consulta SQL para obtener contadores DISPONIBLES y ASIGNADOS
+      // Para los asignados a instalaciones, se agrega "-Asignado" al numeroSerie
+      const contadores = await this.contadoresRepository.query(
+        `
+SELECT
+  c.Id AS id,
+  CASE 
+    WHEN ic.Id IS NOT NULL THEN CONCAT(c.NumeroSerie, '-Asignado')
+    ELSE c.NumeroSerie
+  END AS numeroSerie,
+  c.Marca AS marca,
+  c.Modelo AS modelo,
+  c.FechaCreacion AS fechaCreacion,
+  c.FechaActualizacion AS fechaActualizacion,
+  c.EstadoActual AS estadoActual,
+  c.Estatus AS estatus,
+  c.IdCliente AS idCliente,
+  CASE 
+    WHEN ic.Id IS NOT NULL THEN 1
+    ELSE 0
+  END AS enUso
+FROM Contadores c
+LEFT JOIN InstalacionContadores ic ON c.Id = ic.IdContador AND ic.Estatus = 1
+LEFT JOIN Instalaciones i ON ic.IdInstalacion = i.Id AND i.Estatus = 1
+WHERE c.IdCliente = ?
+  AND c.Estatus = 1
+  AND (
+    c.EstadoActual = ? -- DISPONIBLE
+    OR c.EstadoActual = ? -- ASIGNADO
+  )
+ORDER BY 
+  enUso DESC, -- Primero los que están en uso
+  c.Id ASC;
+        `,
+        [id, EstadoComponente.DISPONIBLE, EstadoComponente.ASIGNADO],
+      );
+
+      //Forzamos a cambiar el id a number
+      const data = contadores.map((item) => ({
+        ...item,
+        id: Number(item.id),
+        idCliente: Number(item.idCliente),
+        estadoActual: Number(item.estadoActual),
+        estatus: Number(item.estatus),
+        enUso: Number(item.enUso),
+      }));
+
+      const result: ApiResponseCommon = {
+        data: data,
+      };
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException({
+        message: `Error al obtener los contadores.`,
+        error: error.message,
+      });
+    }
   }
 
   //Obtner paginado
@@ -163,16 +193,16 @@ export class ContadoresService {
     cliente: number,
     rol: number,
     page: number,
-    limit: number
+    limit: number,
   ): Promise<ApiResponseCommon> {
     try {
       const offset = (page - 1) * limit;
-      let Contadores;
+      let contadores;
       let totalResult;
       switch (rol) {
         case 1:
           // Consulta de datos paginados Usuario SuperAdministrador
-          Contadores = await this.contadoresRepository.query(
+          contadores = await this.contadoresRepository.query(
             `
 SELECT
   -- Datos del Contador
@@ -194,11 +224,10 @@ SELECT
 
 FROM Contadores b
 INNER JOIN Clientes c ON b.IdCliente = c.Id
-
 ORDER BY b.Id DESC
 LIMIT ? OFFSET ?;
         `,
-            [limit, offset]
+            [limit, offset],
           );
 
           // Query para total (sin paginación)
@@ -207,17 +236,17 @@ LIMIT ? OFFSET ?;
   SELECT COUNT(*) AS total
 FROM Contadores b
 INNER JOIN Clientes c ON b.IdCliente = c.Id
-  `
+  `,
           );
           break;
 
         default:
           // Consulta de datos paginados resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
-          Contadores = await this.contadoresRepository.query(
+          contadores = await this.contadoresRepository.query(
             `
 SELECT
-  -- Datos del Contadores
+  -- Datos del Contador
   b.Id AS id,
   b.NumeroSerie AS numeroSerie,
   b.Marca AS marca,
@@ -241,7 +270,7 @@ WHERE b.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente
 ORDER BY b.Id DESC
 LIMIT ? OFFSET ?;
         `,
-            [...ids, limit, offset]
+            [...ids, limit, offset],
           );
 
           // Query para total (sin paginación)
@@ -252,12 +281,12 @@ FROM Contadores b
 INNER JOIN Clientes c ON b.IdCliente = c.Id
 WHERE b.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
   `,
-            [...ids]
+            [...ids],
           );
           break;
       }
 
-      const data = Contadores.map((item) => ({
+      const data = contadores.map((item) => ({
         ...item,
         id: Number(item.id),
         idCliente: Number(item.idCliente),
@@ -288,11 +317,11 @@ WHERE b.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente
 
   async findAllList(cliente: number, rol: number): Promise<ApiResponseCommon> {
     try {
-      let Contadores;
+      let contadores;
       switch (rol) {
         case 1:
           // Consulta de datos listado Usuario SuperAdministrador
-          Contadores = await this.contadoresRepository.query(
+          contadores = await this.contadoresRepository.query(
             `
 SELECT
   -- Datos del Contador
@@ -318,17 +347,17 @@ WHERE b.Estatus = 1
 AND b.EstadoActual = 1
 AND c.Estatus = 1
 ORDER BY b.Id DESC;
-        `
+        `,
           );
           break;
 
         default:
           // Consulta de datos listado resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
-          Contadores = await this.contadoresRepository.query(
+          contadores = await this.contadoresRepository.query(
             `
 SELECT
-  -- Datos del Contadores
+  -- Datos del Contador
   b.Id AS id,
   b.NumeroSerie AS numeroSerie,
   b.Marca AS marca,
@@ -353,12 +382,12 @@ AND b.EstadoActual = 1
 AND c.Estatus = 1
 ORDER BY b.Id DESC;
         `,
-            [...ids]
+            [...ids],
           );
           break;
       }
 
-      const data = Contadores.map((item) => ({
+      const data = contadores.map((item) => ({
         ...item,
         id: Number(item.id),
         idCliente: Number(item.idCliente),
@@ -372,21 +401,22 @@ ORDER BY b.Id DESC;
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new BadRequestException({
-        message: "Error al Obtener listado Contadores.",
-      });
+      throw new BadRequestException(
+        'Se produjo un error al obtener el listado de Contadores.',
+      );
     }
   }
 
+  //Obtener por ID
   async findOne(id: number, cliente: number, rol: number) {
     try {
-      let Contadores;
+      let contadores;
       switch (rol) {
         case 1:
-          Contadores = await this.contadoresRepository.query(
+          contadores = await this.contadoresRepository.query(
             `
 SELECT
-  -- Datos del Contadores
+  -- Datos del Contador
   b.Id AS id,
   b.NumeroSerie AS numeroSerie,
   b.Marca AS marca,
@@ -408,16 +438,16 @@ INNER JOIN Clientes c ON b.IdCliente = c.Id
 WHERE b.Id = ?
 ORDER BY b.Id DESC;
         `,
-            [id]
+            [id],
           );
           break;
 
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
-          Contadores = await this.contadoresRepository.query(
+          contadores = await this.contadoresRepository.query(
             `
 SELECT
-  -- Datos del Contadores
+  -- Datos del Contador
   b.Id AS id,
   b.NumeroSerie AS numeroSerie,
   b.Marca AS marca,
@@ -440,16 +470,16 @@ WHERE b.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente
 AND b.Id = ?
 ORDER BY b.Id DESC;
         `,
-            [...ids, id]
+            [...ids, id],
           );
           break;
       }
 
-      if (Contadores.length == 0) {
-        throw new NotFoundException(`Contadores con ID:${id} no encontrado.`);
+      if (contadores.length == 0) {
+        throw new NotFoundException(`No se encontró un Contador con ID: ${id}.`);
       }
 
-      const data = Contadores.map((item) => ({
+      const data = contadores.map((item) => ({
         ...item,
         id: Number(item.id),
         idCliente: Number(item.idCliente),
@@ -461,183 +491,94 @@ ORDER BY b.Id DESC;
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al obtener Contadores",
+        message: 'No fue posible recuperar la información del Contador.',
       });
     }
   }
 
-  async update(
-    id: number,
-    idUser: number,
-    updateContadoresDto: UpdateContadoresDto
-  ) {
+  //Actualizar equipo
+  async update(id: number, idUser: number, updateContadorDto: UpdateContadoresDto) {
     try {
-      const Contadores = await this.contadoresRepository.findOne({
+      const contador = await this.contadoresRepository.findOne({
         where: { id: id },
       });
-      if (!Contadores) throw new NotFoundException("Contadores no encontrado");
-      await this.contadoresRepository.update(id, updateContadoresDto);
+      if (!contador)
+        throw new NotFoundException(`No se encontró un Contador con ID: ${id}.`);
+      await this.contadoresRepository.update(id, updateContadorDto);
 
       //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { updateContadoresDto };
+      const querylogger = { updateContadorDto };
       await this.bitacoraLogger.logToBitacora(
-        "Contadores",
-        `Se actualizo el Contadores con ID: ${id}`,
-        "UPDATE",
+        'Contadores',
+        `Se actualizó el Contador con ID: ${id}.`,
+        'UPDATE',
         querylogger,
         idUser,
         12,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // ----- Api response -----
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Contadores actualizado correctamente",
+        status: 'success',
+        message: 'Contador actualizado correctamente',
         data: {
           id: id,
           nombre:
-            `${Contadores.marca || updateContadoresDto.marca} ${Contadores.numeroSerie || updateContadoresDto.numeroSerie} ` ||
-            "",
+            `${contador.marca || updateContadorDto.marca} ${contador.numeroSerie || updateContadorDto.numeroSerie} ` ||
+            '',
         },
       };
       return result;
     } catch (error) {
       //-----Registro en la bitacora----- ERROR
-      const querylogger = { updateContadoresDto };
+      const querylogger = { updateContadorDto };
       await this.bitacoraLogger.logToBitacora(
-        "Contadores",
-        `Se actualizo el Contadores con ID: ${id}`,
-        "UPDATE",
+        'Contadores',
+        `Se actualizó el Contador con ID: ${id}.`,
+        'UPDATE',
         querylogger,
         idUser,
         12,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Ocurrió un error al intentar actualizar Contadores.",
+        message: 'Ocurrió un error al intentar actualizar contador.',
         error: error.message,
       });
     }
   }
 
-  async updateEstado(
-    id: number,
-    idUser: number,
-    updateContadoresEstadoDto: UpdateContadoresEstadoDto
-  ) {
-    try {
-      //buscamos y validamos que exista
-      const contadores = await this.contadoresRepository.findOne({
-        where: { id: id },
-      });
-      if (!contadores)
-        throw new NotFoundException(`No se encontró un contador con ID: ${id}`);
-
-      //obtenemos el valor de estado
-      const estadoActual = updateContadoresEstadoDto.estadoActual;
-
-      //logica si estado del contador esta asignado
-      if (
-        contadores.estadoActual === EstadoComponente.INACTIVO &&
-        contadores.estatus === EstatusEnum.INACTIVO
-      ) {
-        throw new BadRequestException(
-          "No es posible completar la operación: contador se encuentra dado de baja."
-        );
-      }
-
-      const contadoresInstalacion = await this.instalacionesRepository.findOne({
-        where: { idContador: contadores.id, estatus: 1 },
-      });
-
-      if (contadoresInstalacion)
-        throw new BadRequestException(
-          "No es posible completar la operación: contador ya se encuentra asignado a una instalación."
-        );
-
-      //se cambia estado del componente
-      await this.contadoresRepository.update(id, {
-        estadoActual: estadoActual,
-      });
-
-      //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { updateContadoresEstadoDto };
-      await this.bitacoraLogger.logToBitacora(
-        "Contadores",
-        `Se actualizo el estado del contador con ID: ${id}.`,
-        "UPDATE",
-        querylogger,
-        idUser,
-        12,
-        EstatusEnumBitcora.SUCCESS
-      );
-
-      // ----- Api response -----
-      const result: ApiCrudResponse = {
-        status: "success",
-        message: "Estado del contador actualizado correctamente.",
-        estatus: { estatus: Number(estadoActual) },
-        data: {
-          id: id,
-          nombre: `${contadores.modelo} ${contadores.numeroSerie} ` || "",
-        },
-      };
-      return result;
-    } catch (error) {
-      //-----Registro en la bitacora----- ERROR
-      const querylogger = { updateContadoresEstadoDto };
-      await this.bitacoraLogger.logToBitacora(
-        "Contadores",
-        `Se actualizo el estado del contador con ID: ${id}.`,
-        "UPDATE",
-        querylogger,
-        idUser,
-        12,
-        EstatusEnumBitcora.ERROR,
-        error.message
-      );
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new InternalServerErrorException({
-        message: "Error al actualizar estado del contador.",
-        error: error.message,
-      });
-    }
-  }
-
+  //actualizar estatus
   async updateEstatus(
     id: number,
     idUser: number,
-    updateContadoresEstatusDto: UpdateContadoresEstatusDto
+    updateContadorEstatusDto: UpdateContadoresEstatusDto,
   ) {
     try {
       //buscamos y validamos que exista
-      const contadores = await this.contadoresRepository.findOne({
+      const contador = await this.contadoresRepository.findOne({
         where: { id: id },
       });
-      if (!contadores)
-        throw new NotFoundException(`No se encontró un contador con ID: ${id}`);
+      if (!contador)
+        throw new NotFoundException(`No se encontró un Contador con ID: ${id}.`);
 
-      //obtenemos el valor de estatus
-      const estatus = updateContadoresEstatusDto.estatus;
+      //Obtenemos el estatus
+      const estatus = updateContadorEstatusDto.estatus;
 
-      //logica si estatus es 0 :3
+      //logica si estatus es 0
       if (estatus === 0) {
-        //buscamos que no este asiganada a una instalacion
-        const contadoresInstalacion =
-          await this.instalacionesRepository.findOne({
-            where: { idContador: contadores.id, estatus: 1 },
-          });
-
-        if (contadoresInstalacion)
+        //buscamos que no este asignado a una instalacion
+        const contadorInstalacion = await this.instalacionContadoresRepository.findOne({
+          where: { idContador: contador.id, estatus: 1 },
+        });
+        if (contadorInstalacion)
           throw new BadRequestException(
-            "No es posible completar la operación: Contadores ya se encuentra asignado a una instalación."
+            'No es posible completar la operación: Contador se encuentra asignado a una instalación.',
           );
 
         //actualizamos el estado del componente a INACTIVO
@@ -650,51 +591,132 @@ ORDER BY b.Id DESC;
           estadoActual: EstadoComponente.DISPONIBLE,
         });
       }
-
-      //se habilita o desabilita el componente
       await this.contadoresRepository.update(id, { estatus: estatus });
 
       //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { updateContadoresEstatusDto };
+      const querylogger = { updateContadorEstatusDto };
       await this.bitacoraLogger.logToBitacora(
-        "Contadores",
-        `Se actualizo el estatus del Contadores con ID: ${id}`,
-        "UPDATE",
+        'Contadores',
+        `Se actualizo el estatus del contador con ID: ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         12,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // ----- Api response -----
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Estatus de contador actualizado correctamente.",
+        status: 'success',
+        message: 'Estatus de contador actualizado correctamente',
         estatus: { estatus: estatus },
         data: {
           id: id,
-          nombre: `${contadores.modelo} ${contadores.numeroSerie} ` || "",
+          nombre: `${contador.modelo} ${contador.numeroSerie} ` || '',
         },
       };
       return result;
     } catch (error) {
       //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { updateContadoresEstatusDto };
+      const querylogger = { updateContadorEstatusDto };
       await this.bitacoraLogger.logToBitacora(
-        "Contadores",
-        `Se actualizo el estatus del Contadores con ID: ${id}`,
-        "UPDATE",
+        'Contadores',
+        `Se actualizo el estatus del contador con ID: ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         12,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al actualizar estatus del Contadores.",
+        message: 'Error al actualizar estatus del contador.',
+        error: error.message,
+      });
+    }
+  }
+
+  //actualizar estado
+  async updateEstado(
+    id: number,
+    idUser: number,
+    updateContadorEstadoDto: UpdateContadoresEstadoDto,
+  ) {
+    try {
+      //buscamos y validamos que exista
+      const contador = await this.contadoresRepository.findOne({
+        where: { id: id },
+      });
+      if (!contador)
+        throw new NotFoundException(`No se encontró un Contador con ID: ${id}.`);
+
+      //buscamos que no este asignado a una instalacion
+      const contadorInstalacion = await this.instalacionContadoresRepository.findOne({
+        where: { idContador: contador.id, estatus: 1 },
+      });
+      if (contadorInstalacion)
+        throw new BadRequestException(
+          'No es posible completar la operación: Contador se encuentra asignado a una instalación.',
+        );
+
+      //logica si estado del componente esta asignado
+      if (
+        contador.estadoActual === EstadoComponente.INACTIVO &&
+        contador.estatus === EstatusEnum.INACTIVO
+      ) {
+        throw new BadRequestException(
+          'No es posible completar la operación: Contador se encuentra asignado a una instalación.',
+        );
+      }
+      //obtenemos el valor de estado
+      const estadoActual = updateContadorEstadoDto.estadoActual;
+      //se cambia estado del componente
+      await this.contadoresRepository.update(id, { estadoActual: estadoActual });
+
+      //-----Registro en la bitacora----- SUCCESS
+      const querylogger = { updateContadorEstadoDto };
+      await this.bitacoraLogger.logToBitacora(
+        'Contadores',
+        `Se actualizo el estado del contador con ID: ${id}`,
+        'UPDATE',
+        querylogger,
+        idUser,
+        12,
+        EstatusEnumBitcora.SUCCESS,
+      );
+
+      // ----- Api response -----
+      const result: ApiCrudResponse = {
+        status: 'success',
+        message: 'Estado de contador actualizado correctamente',
+        estatus: { estatus: Number(estadoActual) },
+        data: {
+          id: id,
+          nombre: `${contador.modelo} ${contador.numeroSerie} ` || '',
+        },
+      };
+      return result;
+    } catch (error) {
+      //-----Registro en la bitacora----- SUCCESS
+      const querylogger = { updateContadorEstadoDto };
+      await this.bitacoraLogger.logToBitacora(
+        'Contadores',
+        `Se actualizo el estado del contador con ID: ${id}`,
+        'UPDATE',
+        querylogger,
+        idUser,
+        12,
+        EstatusEnumBitcora.ERROR,
+        error.message,
+      );
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException({
+        message: 'Error al actualizar estado del contador.',
         error: error.message,
       });
     }
@@ -702,42 +724,46 @@ ORDER BY b.Id DESC;
 
   async remove(id: number, idUser: number) {
     try {
-      const Contadores = await this.contadoresRepository.findOne({
+      //buscamos y validamos que exista
+      const contador = await this.contadoresRepository.findOne({
         where: { id: id },
       });
-      if (!Contadores) throw new NotFoundException("Contador no encontrado.");
+      if (!contador)
+        throw new NotFoundException(`No se encontró un Contador con ID: ${id}.`);
 
-      //buscamos que no este asiganada a una instalacion
-      const contadoresInstalacion = await this.instalacionesRepository.findOne({
-        where: { idContador: Contadores.id, estatus: 1 },
+      //buscamos que no este asignado a una instalacion
+      const contadorInstalacion = await this.instalacionContadoresRepository.findOne({
+        where: { idContador: contador.id, estatus: 1 },
       });
-
-      if (contadoresInstalacion)
+      if (contadorInstalacion)
         throw new BadRequestException(
-          "No es posible completar la operación: contador se encuentra dado de baja."
+          'No es posible completar la operación: Contador se encuentra asignado a una instalación.',
         );
+
+      //actualizamos el estado del componente a INACTIVO
+      await this.contadoresRepository.update(id, { estadoActual: 0 });
 
       await this.contadoresRepository.update(id, { estatus: 0 });
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Contadores",
-        `Se eliminó el Contadores con ID: ${id}`,
-        "UPDATE",
+        'Contadores',
+        `Se eliminó el contador con ID: ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         12,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // ----- Api response -----
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Contadores eliminado correctamente",
+        status: 'success',
+        message: 'Contador eliminado correctamente',
         data: {
           id: id,
-          nombre: `${Contadores.modelo} ${Contadores.numeroSerie} ` || "",
+          nombre: `${contador.modelo} ${contador.numeroSerie} ` || '',
         },
       };
       return result;
@@ -745,22 +771,23 @@ ORDER BY b.Id DESC;
       //-----Registro en la bitacora----- ERROR
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Contadores",
-        `Se eliminó el Contadores con ID: ${id}`,
-        "UPDATE",
+        'Contadores',
+        `Se eliminó el contador con ID: ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         12,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Ocurrió un error al intentar eliminar el Contadores.",
+        message: 'Ocurrió un error al intentar eliminar el contador.',
         error: error.message,
       });
     }
   }
 }
+

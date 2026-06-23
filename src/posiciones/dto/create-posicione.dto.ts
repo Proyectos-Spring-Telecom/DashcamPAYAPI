@@ -2,7 +2,6 @@ import {
   IsString,
   IsNumber,
   IsDate,
-  IsOptional,
   Length,
   IsInt,
   IsIn,
@@ -48,14 +47,14 @@ export class CreatePosicionesDto {
     description: 'Latitud GPS con hasta 7 decimales',
     example: 19.4326077,
   })
-  @IsNumber({ maxDecimalPlaces: 7 })
+  @IsNumber({ maxDecimalPlaces: 15 })
   latitud: number;
 
   @ApiProperty({
     description: 'Longitud GPS con hasta 7 decimales',
     example: -99.133208,
   })
-  @IsNumber({ maxDecimalPlaces: 7 })
+  @IsNumber({ maxDecimalPlaces: 15 })
   longitud: number;
 
   @ApiProperty({
@@ -67,7 +66,7 @@ export class CreatePosicionesDto {
   fechaHora: Date;
 
   @ApiProperty({
-    description: 'Número de serie del Validador asociado',
+    description: 'Número de serie del validador asociado',
     example: 'DEV-123456',
   })
   @IsString()

@@ -10,33 +10,50 @@ import {
   UseGuards,
   ParseIntPipe,
   Request,
-  Query,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import * as multer from 'multer';
 import { UsuariosService } from './usuarios.service';
 import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
 import { UpdateUsuarioEstatusDto } from './dto/update-usuario-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
-import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiBody,
+} from '@nestjs/swagger';
 import { ApiCrudResponse } from 'src/common/ApiResponse';
 import { UpdateUsuarioOperadorDto } from './dto/update-usuario-operador.dto';
 import { UpdateUsuarioContrasena } from './dto/update-usuario-contrasena.dto';
+import { UpdateUsuarioValidadorDto } from './dto/update-usuario-validador.dto';
 
 @UseGuards(JwtAuthGuard)
-@ApiTags('usuarios')
-@ApiBearerAuth()
+@ApiTags('Usuarios')
+@ApiBearerAuth('bearer-token')
 @Controller('usuarios')
 export class UsuariosController {
-  constructor(private readonly usuariosService: UsuariosService) {}
+  constructor(private readonly usuariosService: UsuariosService) { }
 
   // ========================================
   // 🔹 POST ROUTES (crear recursos)
   // ========================================
   @Post()
-  @ApiOperation({ summary: 'Crear nuevo usuario' })
-  @ApiResponse({ status: 201, description: 'Usuario creado exitosamente' })
-  @ApiResponse({ status: 400, description: 'Datos inválidos' })
+  @ApiOperation({ summary: 'Registrar un nuevo usuario' })
+  @ApiResponse({
+    status: 201,
+    description: 'El usuario ha sido creado exitosamente.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Los datos ingresados no son válidos',
+  })
   async createUsuario(
     @Body() createUsuarioDto: CreateUsuarioDto,
     @Request() req,
@@ -57,27 +74,29 @@ export class UsuariosController {
     return await this.usuariosService.getAllListUsuarios(+cliente, +rol);
   }
 
-  @Get('list/rol/operador/:cliente')
-  @ApiOperation({ summary: 'Obtener usuarios con rol operador' })
-  @ApiResponse({ status: 200, description: 'Lista de usuarios operadores' })
-  async findAllListOperador(@Request() req,
-    @Param('cliente', ParseIntPipe) id: number,): Promise<ApiResponseCommon> {
-    const cliente = req.user.cliente;
-    const rol = req.user.rol;
-    return await this.usuariosService.getAllListUsuariosRol(+id);
-  }
-
   @Get('list/cliente')
   @ApiOperation({ summary: 'Obtener usuarios por cliente específico' })
   @ApiResponse({ status: 200, description: 'Lista de usuarios del cliente' })
   @ApiResponse({ status: 404, description: 'Cliente no encontrado' })
   async findAllListUsuarioCliente(
     @Param('id', ParseIntPipe) id: number,
-    @Request() req
+    @Request() req,
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return await this.usuariosService.getAllListUsuariosCliente(id, +cliente);
+  }
+
+  @Get('list/rol/operador/:cliente')
+  @ApiOperation({ summary: 'Obtener usuarios con rol operador' })
+  @ApiResponse({ status: 200, description: 'Lista de usuarios operadores' })
+  async findAllListOperador(
+    @Request() req,
+    @Param('cliente', ParseIntPipe) id: number,
+  ): Promise<ApiResponseCommon> {
+    const cliente = req.user.cliente;
+    const rol = req.user.rol;
+    return await this.usuariosService.getAllListUsuariosRol(+id);
   }
 
   @Get(':page/:limit')
@@ -90,7 +109,9 @@ export class UsuariosController {
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
+    const idUser = req.user.userId;
     return await this.usuariosService.getAllUsuario(
+      +idUser,
       +cliente,
       +rol,
       page,
@@ -114,7 +135,10 @@ export class UsuariosController {
 
   @Put('actualizar/contrasena/:id')
   @ApiOperation({ summary: 'Cambiar contraseña de usuario' })
-  @ApiResponse({ status: 200, description: 'Contraseña actualizada exitosamente' })
+  @ApiResponse({
+    status: 200,
+    description: 'Contraseña actualizada exitosamente',
+  })
   @ApiResponse({ status: 400, description: 'Contraseña inválida' })
   @ApiResponse({ status: 404, description: 'Usuario no encontrado' })
   async updateContrasena(
@@ -130,22 +154,9 @@ export class UsuariosController {
     );
   }
 
-  @Put('operador')
-  @ApiOperation({ summary: 'Actualizar o crear Codigo de operador' })
-  @ApiResponse({ status: 200, description: 'Codigo de operador actualizado' })
-  @ApiResponse({ status: 400, description: 'Datos inválidos' })
-  async updateCodigo(
-    @Body() updateUsuarioOperadorDto: UpdateUsuarioOperadorDto,
-    @Request() req,
-  ): Promise<ApiCrudResponse> {
-    const idUser = req.user.userId;
-    const userName = req.user.email;
-    return await this.usuariosService.createCodigo(
-      userName,
-      +idUser,
-      updateUsuarioOperadorDto,
-    );
-  }
+  // ========================================
+  // 🔹 PUT ACTUALIZAR USUARIO
+  // ========================================
 
   @Put(':id')
   @ApiOperation({ summary: 'Actualizar información completa del usuario' })
@@ -169,6 +180,40 @@ export class UsuariosController {
   // 🔹 PATCH ROUTES (actualización parcial)
   // ========================================
 
+  @Patch('generar/pin')
+  @ApiOperation({ summary: 'Actualizar o crear PIN de operador' })
+  @ApiResponse({ status: 200, description: 'PIN de operador actualizado' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos' })
+  async updatePin(
+    @Body() updateUsuarioOperadorDto: UpdateUsuarioOperadorDto,
+    @Request() req,
+  ): Promise<ApiCrudResponse> {
+    const idUser = req.user.userId;
+    const userName = req.user.email;
+    return await this.usuariosService.createPin(
+      userName,
+      +idUser,
+      updateUsuarioOperadorDto,
+    );
+  }
+
+  @Patch('actualizar/validador')
+  @ApiOperation({ summary: 'Actualizar validador del operador' })
+  @ApiResponse({ status: 200, description: 'Validador Actualizado' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos' })
+  async updateValidador(
+    @Body() updateUsuarioValidadorDto: UpdateUsuarioValidadorDto,
+    @Request() req,
+  ): Promise<ApiCrudResponse> {
+    const idUser = req.user.userId;
+    const userName = req.user.email;
+    return await this.usuariosService.updateValidador(
+      userName,
+      +idUser,
+      updateUsuarioValidadorDto,
+    );
+  }
+
   @Patch('estatus/:id')
   @ApiOperation({ summary: 'Cambiar estatus del usuario (activar/desactivar)' })
   @ApiResponse({ status: 200, description: 'Estatus actualizado exitosamente' })
@@ -184,6 +229,60 @@ export class UsuariosController {
       updateUsuarioEstatusDto,
       idUser,
     );
+  }
+
+  @Post('foto-perfil')
+  @UseInterceptors(
+    FileInterceptor('foto', {
+      storage: multer.memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 }, // máximo 10 MB
+      fileFilter: (req, file, cb) => {
+        const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
+        if (file && !allowedTypes.includes(file.mimetype)) {
+          return cb(
+            new Error('Solo se permiten imágenes PNG, JPG o JPEG'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Subir o actualizar foto de perfil del usuario',
+    description: 'Sube una nueva foto de perfil para el usuario autenticado. Si el usuario ya tiene una foto, se reemplazará automáticamente.',
+  })
+  @ApiBody({
+    description: 'Archivo de imagen (PNG, JPG o JPEG)',
+    schema: {
+      type: 'object',
+      properties: {
+        foto: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Foto de perfil actualizada exitosamente',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Archivo inválido o no proporcionado',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Usuario no encontrado',
+  })
+  async uploadFotoPerfil(
+    @UploadedFile() fotoFile: Express.Multer.File,
+    @Request() req,
+  ): Promise<ApiCrudResponse> {
+    const idUser = req.user.userId;
+    return await this.usuariosService.uploadFotoPerfil(fotoFile, idUser);
   }
 
   // ========================================

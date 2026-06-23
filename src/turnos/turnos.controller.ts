@@ -6,7 +6,6 @@ import {
   Patch,
   Param,
   Delete,
-  Put,
   ParseIntPipe,
   Request,
   UseGuards,
@@ -17,7 +16,10 @@ import { UpdateTurnoDto } from './dto/update-turno.dto';
 import { UpdateTurnosEstatusDto } from './dto/update-turno-estatus.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Turnos')
+@ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
 @Controller('turnos')
 export class TurnosController {
@@ -31,7 +33,8 @@ export class TurnosController {
     const cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return await this.turnosService.create(+idUser, createTurnoDto);
+    const idOperador = req.user.idOperador;
+    return await this.turnosService.create(+idUser, +cliente, +idOperador, createTurnoDto);
   }
 
   @Get('list')
@@ -74,7 +77,7 @@ export class TurnosController {
     return await this.turnosService.updateEstatus(id, +idUser, updateTurnosEstatusDto);
   }
 
-  @Put(':id')
+  @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateTurnoDto: UpdateTurnoDto,
@@ -83,7 +86,8 @@ export class TurnosController {
     const cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return await this.turnosService.update(id, +idUser, updateTurnoDto);
+    const idOperador = req.user.idOperador;
+    return await this.turnosService.update(id, +idUser, +cliente, +idOperador, updateTurnoDto);
   }
 
   @Delete(':id')

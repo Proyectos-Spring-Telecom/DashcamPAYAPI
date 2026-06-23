@@ -13,14 +13,18 @@ import {
   ApiResponseCommon,
   EstatusEnumBitcora,
 } from 'src/common/ApiResponse';
+import { Clientes } from 'src/entities/Clientes';
+import { EnumModulos } from 'src/common/estatus.enum';
 
 @Injectable()
 export class ViajestransaccionesService {
   constructor(
     @InjectRepository(ViajesTransacciones)
     private readonly viajestransaccionesRepository: Repository<ViajesTransacciones>,
+    @InjectRepository(Clientes)
+    private readonly clienteRepository: Repository<Clientes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
-  ) {}
+  ) { }
 
   async create(
     idUser: number,
@@ -38,11 +42,11 @@ export class ViajestransaccionesService {
       const querylogger = { createViajestransaccioneDto };
       await this.bitacoraLogger.logToBitacora(
         'ViajesTransacciones',
-        `Se creó el viajestransacciones con viaje ID: ${createViajestransaccioneDto.idViaje} y transaccion ID: ${createViajestransaccioneDto.idTransaccion}`,
+        `Se creó el viajestransacciones con viaje ID: ${createViajestransaccioneDto.idViaje} y transaccion ID: ${createViajestransaccioneDto.idTransaccionDebito}, ${createViajestransaccioneDto.idTransaccionRecarga}`,
         'CREATE',
         querylogger,
         idUser,
-        26,
+        EnumModulos.VIAJESTRANSACCIONES, 
         EstatusEnumBitcora.SUCCESS,
       );
 
@@ -51,9 +55,9 @@ export class ViajestransaccionesService {
         status: 'success',
         message: 'El viajestransaccion ha sido creado exitosamente.',
         data: {
-          id: Number(viajestransaccionesSave.idTransaccion),
+          id: Number(viajestransaccionesSave.idViaje),
           nombre:
-            `Viaje ID: ${viajestransaccionesSave.idTransaccion} Transaccion ID: ${viajestransaccionesSave.idViaje} ` ||
+            `Viaje ID: ${viajestransaccionesSave.idViaje} Transaccion ID: ${viajestransaccionesSave.idTransaccionDebito},  ${viajestransaccionesSave.idTransaccionRecarga} ` ||
             '',
         },
       };
@@ -63,7 +67,7 @@ export class ViajestransaccionesService {
       const querylogger = { createViajestransaccioneDto };
       await this.bitacoraLogger.logToBitacora(
         'ViajesTransacciones',
-        `Se creó el viajestransacciones con viaje ID: ${createViajestransaccioneDto.idViaje} y transaccion ID: ${createViajestransaccioneDto.idTransaccion}`,
+        `Se creó el viajestransacciones con viaje ID: ${createViajestransaccioneDto.idViaje} y transaccion ID: ${createViajestransaccioneDto.idTransaccionDebito}, ${createViajestransaccioneDto.idTransaccionRecarga}`,
         'CREATE',
         querylogger,
         idUser,
@@ -81,36 +85,317 @@ export class ViajestransaccionesService {
     }
   }
 
-  async findAllList() {
+  //funcion para obtener los clientes hijos
+  private async clienteHijos(cliente: number) {
+    const clientesFiltrado = await this.clienteRepository.query(
+      `CALL spGetClientes(?);`,
+      [cliente],
+    );
+
+    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
+    const ids = idsFiltrados
+      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
+      .filter(Boolean);
+    if (ids.length === 0) {
+      return { data: [] }; // No hay clientes que consultar
+    }
+
+    // 3. Construir el query dinámico con los IDs
+    const placeholders = ids.map(() => '?').join(', ');
+    return { ids, placeholders };
+  }
+
+  // Consultar posiciones para roles que usan clientes hijos
+  private async consultarViajesTransacciones(cliente: number) {
+    const { ids, placeholders } = await this.clienteHijos(cliente);
+
+    const query = `
+SELECT
+    v.Id AS idViaje,
+    v.Inicio AS inicioViaje,
+    v.Fin AS finViaje,
+    v.Estatus AS estatusViaje,
+
+    -- Datos del Cliente
+    CONCAT(
+        c.Nombre,
+        IFNULL(CONCAT(' ', c.ApellidoPaterno), ''),
+        IFNULL(CONCAT(' ', c.ApellidoMaterno), '')
+    ) AS NombreCompletoCliente,
+
+    -- Datos del Operador
+    o.Id AS idOperador,
+    u.Nombre AS nombreOperador,
+    u.ApellidoPaterno AS apellidoPaternoOperador,
+    u.ApellidoMaterno AS apellidoMaternoOperador,
+
+    -- Información del variante, ruta y región
+    d.Nombre AS nombreVariante,
+    r.Nombre AS nombreRuta,
+    reg.Nombre AS nombreRegion,
+
+    -- Agrupamos las transacciones de débito en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionDebito', td.Id,
+            'controlTransaccionDebito', td.ControlTransaccion,
+            'montoDebito', td.Monto,
+            'fechaHoraDebito', td.FechaHoraFinal,
+            'latitudDebito', td.LatitudFinal,
+            'longitudDebito', td.LongitudFinal
+        )
+    ) AS transaccionesDebito,
+
+    -- Agrupamos las transacciones de recarga en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionRecarga', tr.Id,
+            'controlTransaccionRecarga', tr.ControlTransaccion,
+            'montoRecarga', tr.Monto,
+            'fechaHoraRecarga', tr.FechaHora,
+            'latitudRecarga', tr.Latitud,
+            'longitudRecarga', tr.Longitud
+        )
+    ) AS transaccionesRecarga
+
+FROM Viajes v
+INNER JOIN Clientes c ON v.IdCliente = c.Id
+INNER JOIN Operadores o ON v.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Variantes d ON v.IdVariante = d.Id
+INNER JOIN Rutas r ON d.IdRuta = r.Id
+INNER JOIN Zonas reg ON r.IdZona = reg.Id
+
+-- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
+LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+
+WHERE c.Id IN (${placeholders})
+
+GROUP BY
+    v.Id,
+    v.Inicio,
+    v.Fin,
+    v.Estatus,
+    c.Id,
+    c.Nombre,
+    c.ApellidoPaterno,
+    c.ApellidoMaterno,
+    o.Id,
+    u.Nombre,
+    u.ApellidoPaterno,
+    u.ApellidoMaterno,
+    d.Id,
+    d.Nombre,
+    r.Id,
+    r.Nombre,
+    reg.Id,
+    reg.Nombre
+
+ORDER BY v.Id DESC; 
+    `;
+    return this.viajestransaccionesRepository.query(query, [...ids]);
+  }
+
+  // Consultar posiciones para roles que usan solo el cliente actual
+  private async consultarViajesTransaccionesCL(cliente: number) {
+    const query = `
+      SELECT
+    v.Id AS idViaje,
+    v.Inicio AS inicioViaje,
+    v.Fin AS finViaje,
+    v.Estatus AS estatusViaje,
+
+    -- Datos del Cliente
+    CONCAT(
+        c.Nombre,
+        IFNULL(CONCAT(' ', c.ApellidoPaterno), ''),
+        IFNULL(CONCAT(' ', c.ApellidoMaterno), '')
+    ) AS NombreCompletoCliente,
+
+    -- Datos del Operador
+    o.Id AS idOperador,
+    u.Nombre AS nombreOperador,
+    u.ApellidoPaterno AS apellidoPaternoOperador,
+    u.ApellidoMaterno AS apellidoMaternoOperador,
+
+    -- Información del variante, ruta y región
+    d.Nombre AS nombreVariante,
+    r.Nombre AS nombreRuta,
+    reg.Nombre AS nombreRegion,
+
+    -- Agrupamos las transacciones de débito en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionDebito', td.Id,
+            'controlTransaccionDebito', td.ControlTransaccion,
+            'montoDebito', td.Monto,
+            'fechaHoraDebito', td.FechaHoraFinal,
+            'latitudDebito', td.LatitudFinal,
+            'longitudDebito', td.LongitudFinal
+        )
+    ) AS transaccionesDebito,
+
+    -- Agrupamos las transacciones de recarga en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionRecarga', tr.Id,
+            'controlTransaccionRecarga', tr.ControlTransaccion,
+            'montoRecarga', tr.Monto,
+            'fechaHoraRecarga', tr.FechaHora,
+            'latitudRecarga', tr.Latitud,
+            'longitudRecarga', tr.Longitud
+        )
+    ) AS transaccionesRecarga
+
+FROM Viajes v
+INNER JOIN Clientes c ON v.IdCliente = c.Id
+INNER JOIN Operadores o ON v.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Variantes d ON v.IdVariante = d.Id
+INNER JOIN Rutas r ON d.IdRuta = r.Id
+INNER JOIN Zonas reg ON r.IdZona = reg.Id
+
+-- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
+LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+
+WHERE c.Id = ?
+
+GROUP BY
+    v.Id,
+    v.Inicio,
+    v.Fin,
+    v.Estatus,
+    c.Id,
+    c.Nombre,
+    c.ApellidoPaterno,
+    c.ApellidoMaterno,
+    o.Id,
+    u.Nombre,
+    u.ApellidoPaterno,
+    u.ApellidoMaterno,
+    d.Id,
+    d.Nombre,
+    r.Id,
+    r.Nombre,
+    reg.Id,
+    reg.Nombre
+
+ORDER BY v.Id DESC; 
+    `;
+    return this.viajestransaccionesRepository.query(query, [cliente]);
+  }
+
+  async findAllList(idUser: number, cliente: number, rol: number) {
     try {
-      const viajesconteos = await this.viajestransaccionesRepository.query(
-        `
-SELECT 
-  vt.IdViaje AS idViaje,
-  v.Inicio AS inicioViaje,
-  v.Fin AS finViaje,
-  v.IdCliente AS idCliente,
-  v.IdOperador AS idOperador,
-  v.IdTurno AS idTurno,
-  v.IdVariante AS idVariante,
+      let viajestransacciones;
+      switch (rol) {
+        case 1:
+          viajestransacciones = await this.viajestransaccionesRepository.query(
+            `
+SELECT
+    v.Id AS idViaje,
+    v.Inicio AS inicioViaje,
+    v.Fin AS finViaje,
+    v.Estatus AS estatusViaje,
 
-  t.Id AS IdTransaccion,
-  t.TipoTransaccion AS tipoTransaccion,
-  t.Monto AS monto,
-  t.Latitud AS latitud,
-  t.Longitud AS longitud,
-  t.FechaHora AS fecheHora,
-  t.FHRegistro AS fhRegistro,
-  t.NumeroSerieMonedero AS NumeroSerieMonedero,
-  t.NumeroSerieValidador AS numeroSerieValidador 
+    -- Datos del Cliente
+    CONCAT(
+        c.Nombre,
+        IFNULL(CONCAT(' ', c.ApellidoPaterno), ''),
+        IFNULL(CONCAT(' ', c.ApellidoMaterno), '')
+    ) AS NombreCompletoCliente,
 
-FROM ViajesTransacciones vt
-INNER JOIN Viajes v ON v.Id = vt.IdViaje
-INNER JOIN Transacciones t ON t.Id = vt.IdTransaccion
-ORDER BY v.Id DESC;
+    -- Datos del Operador
+    o.Id AS idOperador,
+    u.Nombre AS nombreOperador,
+    u.ApellidoPaterno AS apellidoPaternoOperador,
+    u.ApellidoMaterno AS apellidoMaternoOperador,
+
+    -- Información del variante, ruta y región
+    d.Nombre AS nombreVariante,
+    r.Nombre AS nombreRuta,
+    reg.Nombre AS nombreRegion,
+
+    -- Agrupamos las transacciones de débito en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionDebito', td.Id,
+            'controlTransaccionDebito', td.ControlTransaccion,
+            'montoDebito', td.Monto,
+            'fechaHoraDebito', td.FechaHoraFinal,
+            'latitudDebito', td.LatitudFinal,
+            'longitudDebito', td.LongitudFinal
+        )
+    ) AS transaccionesDebito,
+
+    -- Agrupamos las transacciones de recarga en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionRecarga', tr.Id,
+            'controlTransaccionRecarga', tr.ControlTransaccion,
+            'montoRecarga', tr.Monto,
+            'fechaHoraRecarga', tr.FechaHora,
+            'latitudRecarga', tr.Latitud,
+            'longitudRecarga', tr.Longitud
+        )
+    ) AS transaccionesRecarga
+
+FROM Viajes v
+INNER JOIN Clientes c ON v.IdCliente = c.Id
+INNER JOIN Operadores o ON v.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Variantes d ON v.IdVariante = d.Id
+INNER JOIN Rutas r ON d.IdRuta = r.Id
+INNER JOIN Zonas reg ON r.IdZona = reg.Id
+
+-- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
+LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+
+WHERE v.Estatus = 1  -- Filtra los viajes activos
+
+GROUP BY
+    v.Id,
+    v.Inicio,
+    v.Fin,
+    v.Estatus,
+    c.Id,
+    c.Nombre,
+    c.ApellidoPaterno,
+    c.ApellidoMaterno,
+    o.Id,
+    u.Nombre,
+    u.ApellidoPaterno,
+    u.ApellidoMaterno,
+    d.Id,
+    d.Nombre,
+    r.Id,
+    r.Nombre,
+    reg.Id,
+    reg.Nombre
+
+ORDER BY v.Id DESC;  
+
               `,
-      );
-      const data = viajesconteos.map((item) => ({
+          );
+          break;
+        case 2: // Administrador
+        case 8: // Reportes
+        case 10: // Capturista
+          viajestransacciones = await this.consultarViajesTransacciones(cliente)
+          break;
+
+        default:
+        case 3: // Operador
+          viajestransacciones = await this.consultarViajesTransaccionesCL(cliente)
+          break;
+      }
+      const data = viajestransacciones.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
         idCliente: Number(item.idCliente),
@@ -121,7 +406,7 @@ ORDER BY v.Id DESC;
         monto: Number(item.monto),
       }));
       const result: ApiResponseCommon = {
-        data: data,
+        data: viajestransacciones,
       };
       return result;
     } catch (error) {
@@ -136,52 +421,390 @@ ORDER BY v.Id DESC;
     }
   }
 
-  async findAll(page: number, limit: number) {
+  private async consultarViajesTransaccionesPaginado(
+    cliente: number,
+    limit: number,
+    offset: number,
+  ) {
+    const { ids, placeholders } = await this.clienteHijos(cliente);
+    const query = `
+SELECT
+    v.Id AS idViaje,
+    v.Inicio AS inicioViaje,
+    v.Fin AS finViaje,
+    v.Estatus AS estatusViaje,
+
+    -- Datos del Cliente
+    CONCAT(
+        c.Nombre,
+        IFNULL(CONCAT(' ', c.ApellidoPaterno), ''),
+        IFNULL(CONCAT(' ', c.ApellidoMaterno), '')
+    ) AS NombreCompletoCliente,
+
+    -- Datos del Operador
+    o.Id AS idOperador,
+    u.Nombre AS nombreOperador,
+    u.ApellidoPaterno AS apellidoPaternoOperador,
+    u.ApellidoMaterno AS apellidoMaternoOperador,
+
+    -- Información del variante, ruta y región
+    d.Nombre AS nombreVariante,
+    r.Nombre AS nombreRuta,
+    reg.Nombre AS nombreRegion,
+
+    -- Agrupamos las transacciones de débito en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionDebito', td.Id,
+            'controlTransaccionDebito', td.ControlTransaccion,
+            'montoDebito', td.Monto,
+            'fechaHoraDebito', td.FechaHoraFinal,
+            'latitudDebito', td.LatitudFinal,
+            'longitudDebito', td.LongitudFinal
+        )
+    ) AS transaccionesDebito,
+
+    -- Agrupamos las transacciones de recarga en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionRecarga', tr.Id,
+            'controlTransaccionRecarga', tr.ControlTransaccion,
+            'montoRecarga', tr.Monto,
+            'fechaHoraRecarga', tr.FechaHora,
+            'latitudRecarga', tr.Latitud,
+            'longitudRecarga', tr.Longitud
+        )
+    ) AS transaccionesRecarga
+
+FROM Viajes v
+INNER JOIN Clientes c ON v.IdCliente = c.Id
+INNER JOIN Operadores o ON v.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Variantes d ON v.IdVariante = d.Id
+INNER JOIN Rutas r ON d.IdRuta = r.Id
+INNER JOIN Zonas reg ON r.IdZona = reg.Id
+
+-- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
+LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+
+WHERE c.Id IN (${placeholders})
+
+GROUP BY
+    v.Id,
+    v.Inicio,
+    v.Fin,
+    v.Estatus,
+    c.Id,
+    c.Nombre,
+    c.ApellidoPaterno,
+    c.ApellidoMaterno,
+    o.Id,
+    u.Nombre,
+    u.ApellidoPaterno,
+    u.ApellidoMaterno,
+    d.Id,
+    d.Nombre,
+    r.Id,
+    r.Nombre,
+    reg.Id,
+    reg.Nombre
+
+ORDER BY v.Id DESC
+LIMIT ? OFFSET ?;
+    `;
+    return this.viajestransaccionesRepository.query(query, [
+      ...ids,
+      limit,
+      offset,
+    ]);
+  }
+
+  private async consultarTotalViajesTransaccionesPaginados(cliente: number) {
+    const { ids, placeholders } = await this.clienteHijos(cliente);
+    const query = `  
+    SELECT COUNT(*) AS total
+FROM Viajes v
+INNER JOIN Clientes c ON v.IdCliente = c.Id
+INNER JOIN Operadores o ON v.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Variantes d ON v.IdVariante = d.Id
+INNER JOIN Rutas r ON d.IdRuta = r.Id
+INNER JOIN Zonas reg ON r.IdRegion = reg.Id
+
+-- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
+LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+
+WHERE c.Id IN (${placeholders})
+`;
+    return await this.viajestransaccionesRepository.query(query, [...ids]);
+  }
+
+  private async consultarViajesTransaccionesPaginadoCL(
+    cliente: number,
+    limit: number,
+    offset: number,
+  ) {
+    const query = `
+SELECT
+    v.Id AS idViaje,
+    v.Inicio AS inicioViaje,
+    v.Fin AS finViaje,
+    v.Estatus AS estatusViaje,
+
+    -- Datos del Cliente
+    CONCAT(
+        c.Nombre,
+        IFNULL(CONCAT(' ', c.ApellidoPaterno), ''),
+        IFNULL(CONCAT(' ', c.ApellidoMaterno), '')
+    ) AS NombreCompletoCliente,
+
+    -- Datos del Operador
+    o.Id AS idOperador,
+    u.Nombre AS nombreOperador,
+    u.ApellidoPaterno AS apellidoPaternoOperador,
+    u.ApellidoMaterno AS apellidoMaternoOperador,
+
+    -- Información del variante, ruta y región
+    d.Nombre AS nombreVariante,
+    r.Nombre AS nombreRuta,
+    reg.Nombre AS nombreRegion,
+
+    -- Agrupamos las transacciones de débito en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionDebito', td.Id,
+            'controlTransaccionDebito', td.ControlTransaccion,
+            'montoDebito', td.Monto,
+            'fechaHoraDebito', td.FechaHoraFinal,
+            'latitudDebito', td.LatitudFinal,
+            'longitudDebito', td.LongitudFinal
+        )
+    ) AS transaccionesDebito,
+
+    -- Agrupamos las transacciones de recarga en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionRecarga', tr.Id,
+            'controlTransaccionRecarga', tr.ControlTransaccion,
+            'montoRecarga', tr.Monto,
+            'fechaHoraRecarga', tr.FechaHora,
+            'latitudRecarga', tr.Latitud,
+            'longitudRecarga', tr.Longitud
+        )
+    ) AS transaccionesRecarga
+
+FROM Viajes v
+INNER JOIN Clientes c ON v.IdCliente = c.Id
+INNER JOIN Operadores o ON v.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Variantes d ON v.IdVariante = d.Id
+INNER JOIN Rutas r ON d.IdRuta = r.Id
+INNER JOIN Zonas reg ON r.IdZona = reg.Id
+
+-- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
+LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+
+WHERE c.Id = ?
+
+GROUP BY
+    v.Id,
+    v.Inicio,
+    v.Fin,
+    v.Estatus,
+    c.Id,
+    c.Nombre,
+    c.ApellidoPaterno,
+    c.ApellidoMaterno,
+    o.Id,
+    u.Nombre,
+    u.ApellidoPaterno,
+    u.ApellidoMaterno,
+    d.Id,
+    d.Nombre,
+    r.Id,
+    r.Nombre,
+    reg.Id,
+    reg.Nombre
+
+ORDER BY v.Id DESC; 
+LIMIT ? OFFSET ?;
+    `;
+    return this.viajestransaccionesRepository.query(query, [
+      cliente,
+      limit,
+      offset,
+    ]);
+  }
+
+  private async consultarTotalViajesTransaccionesPaginadosCl(cliente: number) {
+    const query = `  
+    SELECT COUNT(*) AS total
+FROM Viajes v
+INNER JOIN Clientes c ON v.IdCliente = c.Id
+INNER JOIN Operadores o ON v.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Variantes d ON v.IdVariante = d.Id
+INNER JOIN Rutas r ON d.IdRuta = r.Id
+INNER JOIN Zonas reg ON r.IdZona = reg.Id
+
+-- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
+LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+
+WHERE c.Id = ?
+`;
+    return await this.viajestransaccionesRepository.query(query, [cliente]);
+  }
+
+  async findAll(
+    idUser: number,
+    cliente: number,
+    rol: number,
+    page: number,
+    limit: number) {
     try {
       const offset = (page - 1) * limit;
       let totalResult;
-      const viajesconteos = await this.viajestransaccionesRepository.query(
-        `
-SELECT 
-  vt.IdViaje AS idViaje,
-  v.Inicio AS inicioViaje,
-  v.Fin AS finViaje,
-  v.IdCliente AS idCliente,
-  v.IdOperador AS idOperador,
-  v.IdTurno AS idTurno,
-  v.IdVariante AS idVariante,
+      let viajestransacciones
 
-  t.Id AS IdTransaccion,
-  t.TipoTransaccion AS tipoTransaccion,
-  t.Monto AS monto,
-  t.Latitud AS latitud,
-  t.Longitud AS longitud,
-  t.FechaHora AS fecheHora,
-  t.FHRegistro AS fhRegistro,
-  t.NumeroSerieMonedero AS NumeroSerieMonedero,
-  t.NumeroSerieValidador AS numeroSerieValidador 
+      switch (rol) {
+        case 1:
+          viajestransacciones = await this.viajestransaccionesRepository.query(
+            `
+SELECT
+    v.Id AS idViaje,
+    v.Inicio AS inicioViaje,
+    v.Fin AS finViaje,
+    v.Estatus AS estatusViaje,
 
-FROM ViajesTransacciones vt
-INNER JOIN Viajes v ON v.Id = vt.IdViaje
-INNER JOIN Transacciones t ON t.Id = vt.IdTransaccion
+    -- Datos del Cliente
+    CONCAT(
+        c.Nombre,
+        IFNULL(CONCAT(' ', c.ApellidoPaterno), ''),
+        IFNULL(CONCAT(' ', c.ApellidoMaterno), '')
+    ) AS NombreCompletoCliente,
+
+    -- Datos del Operador
+    o.Id AS idOperador,
+    u.Nombre AS nombreOperador,
+    u.ApellidoPaterno AS apellidoPaternoOperador,
+    u.ApellidoMaterno AS apellidoMaternoOperador,
+
+    -- Información del variante, ruta y región
+    d.Nombre AS nombreVariante,
+    r.Nombre AS nombreRuta,
+    reg.Nombre AS nombreRegion,
+
+    -- Agrupamos las transacciones de débito en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionDebito', td.Id,
+            'controlTransaccionDebito', td.ControlTransaccion,
+            'montoDebito', td.Monto,
+            'fechaHoraDebito', td.FechaHoraFinal,
+            'latitudDebito', td.LatitudFinal,
+            'longitudDebito', td.LongitudFinal
+        )
+    ) AS transaccionesDebito,
+
+    -- Agrupamos las transacciones de recarga en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionRecarga', tr.Id,
+            'controlTransaccionRecarga', tr.ControlTransaccion,
+            'montoRecarga', tr.Monto,
+            'fechaHoraRecarga', tr.FechaHora,
+            'latitudRecarga', tr.Latitud,
+            'longitudRecarga', tr.Longitud
+        )
+    ) AS transaccionesRecarga
+
+FROM Viajes v
+INNER JOIN Clientes c ON v.IdCliente = c.Id
+INNER JOIN Operadores o ON v.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Variantes d ON v.IdVariante = d.Id
+INNER JOIN Rutas r ON d.IdRuta = r.Id
+INNER JOIN Zonas reg ON r.IdZona = reg.Id
+
+-- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
+LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+
+
+
+GROUP BY
+    v.Id,
+    v.Inicio,
+    v.Fin,
+    v.Estatus,
+    c.Id,
+    c.Nombre,
+    c.ApellidoPaterno,
+    c.ApellidoMaterno,
+    o.Id,
+    u.Nombre,
+    u.ApellidoPaterno,
+    u.ApellidoMaterno,
+    d.Id,
+    d.Nombre,
+    r.Id,
+    r.Nombre,
+    reg.Id,
+    reg.Nombre
+
 ORDER BY v.Id DESC
 LIMIT ? OFFSET ?;
               `,
-        [limit, offset],
-      );
-      // Query para total (sin paginación)
-      totalResult = await this.viajestransaccionesRepository.query(
-        `
+            [limit, offset],
+          );
+          // Query para total (sin paginación)
+          totalResult = await this.viajestransaccionesRepository.query(
+            `
    SELECT COUNT(*) AS total
-FROM ViajesTransacciones vt
-INNER JOIN Viajes v ON v.Id = vt.IdViaje
-INNER JOIN Transacciones t ON t.Id = vt.IdTransaccion
-ORDER BY v.Id DESC;
+FROM Viajes v
+INNER JOIN Clientes c ON v.IdCliente = c.Id
+INNER JOIN Operadores o ON v.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Variantes d ON v.IdVariante = d.Id
+INNER JOIN Rutas r ON d.IdRuta = r.Id
+INNER JOIN Zonas reg ON r.IdZona = reg.Id
+
+-- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
+LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+
+
   `,
-      );
+          );
+          break;
+        case 2: // Administrador
+        case 8: // Reportes
+        case 10: // Capturista
+          viajestransacciones = await this.consultarTotalViajesTransaccionesPaginados(cliente);
+
+          totalResult = await this.consultarTotalViajesTransaccionesPaginados(cliente);
+          break;
+
+        case 3: // Operador
+        default:
+          viajestransacciones = await this.consultarTotalViajesTransaccionesPaginadosCl(cliente);
+
+          totalResult = await this.consultarTotalViajesTransaccionesPaginadosCl(cliente);
+          break;
+      }
 
       const total = Number(totalResult[0]?.total || 0);
-      const data = viajesconteos.map((item) => ({
+      const data = viajestransacciones.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
         idCliente: Number(item.idCliente),
@@ -192,7 +815,7 @@ ORDER BY v.Id DESC;
         monto: Number(item.monto),
       }));
       const result: ApiResponseCommon = {
-        data: data,
+        data: viajestransacciones,
         paginated: {
           total: total,
           page,
@@ -214,36 +837,96 @@ ORDER BY v.Id DESC;
 
   async findOneViajes(id: number) {
     try {
-      const viajesconteos = await this.viajestransaccionesRepository.query(
+      const viajestransacciones = await this.viajestransaccionesRepository.query(
         `
-SELECT 
-  vt.IdViaje AS idViaje,
-  v.Inicio AS inicioViaje,
-  v.Fin AS finViaje,
-  v.IdCliente AS idCliente,
-  v.IdOperador AS idOperador,
-  v.IdTurno AS idTurno,
-  v.IdVariante AS idVariante,
+SELECT
+    v.Id AS idViaje,
+    v.Inicio AS inicioViaje,
+    v.Fin AS finViaje,
+    v.Estatus AS estatusViaje,
 
-  t.Id AS IdTransaccion,
-  t.TipoTransaccion AS tipoTransaccion,
-  t.Monto AS monto,
-  t.Latitud AS latitud,
-  t.Longitud AS longitud,
-  t.FechaHora AS fecheHora,
-  t.FHRegistro AS fhRegistro,
-  t.NumeroSerieMonedero AS NumeroSerieMonedero,
-  t.NumeroSerieValidador AS numeroSerieValidador 
+    -- Datos del Cliente
+    CONCAT(
+        c.Nombre,
+        IFNULL(CONCAT(' ', c.ApellidoPaterno), ''),
+        IFNULL(CONCAT(' ', c.ApellidoMaterno), '')
+    ) AS NombreCompletoCliente,
 
-FROM ViajesTransacciones vt
-INNER JOIN Viajes v ON v.Id = vt.IdViaje
-INNER JOIN Transacciones t ON t.Id = vt.IdTransaccion
-WHERE v.ID = ?
-ORDER BY v.Id DESC;
+    -- Datos del Operador
+    o.Id AS idOperador,
+    u.Nombre AS nombreOperador,
+    u.ApellidoPaterno AS apellidoPaternoOperador,
+    u.ApellidoMaterno AS apellidoMaternoOperador,
+
+    -- Información del variante, ruta y región
+    d.Nombre AS nombreVariante,
+    r.Nombre AS nombreRuta,
+    reg.Nombre AS nombreRegion,
+
+    -- Agrupamos las transacciones de débito en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionDebito', td.Id,
+            'controlTransaccionDebito', td.ControlTransaccion,
+            'montoDebito', td.Monto,
+            'fechaHoraDebito', td.FechaHoraFinal,
+            'latitudDebito', td.LatitudFinal,
+            'longitudDebito', td.LongitudFinal
+        )
+    ) AS transaccionesDebito,
+
+    -- Agrupamos las transacciones de recarga en un JSON Array
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'idTransaccionRecarga', tr.Id,
+            'controlTransaccionRecarga', tr.ControlTransaccion,
+            'montoRecarga', tr.Monto,
+            'fechaHoraRecarga', tr.FechaHora,
+            'latitudRecarga', tr.Latitud,
+            'longitudRecarga', tr.Longitud
+        )
+    ) AS transaccionesRecarga
+
+FROM Viajes v
+INNER JOIN Clientes c ON v.IdCliente = c.Id
+INNER JOIN Operadores o ON v.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Variantes d ON v.IdVariante = d.Id
+INNER JOIN Rutas r ON d.IdRuta = r.Id
+INNER JOIN Zonas reg ON r.IdZona = reg.Id
+
+-- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
+LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+
+WHERE v.Id = ?
+
+GROUP BY
+    v.Id,
+    v.Inicio,
+    v.Fin,
+    v.Estatus,
+    c.Id,
+    c.Nombre,
+    c.ApellidoPaterno,
+    c.ApellidoMaterno,
+    o.Id,
+    u.Nombre,
+    u.ApellidoPaterno,
+    u.ApellidoMaterno,
+    d.Id,
+    d.Nombre,
+    r.Id,
+    r.Nombre,
+    reg.Id,
+    reg.Nombre
+
+ORDER BY v.Id DESC
               `,
         [id],
       );
-      const data = viajesconteos.map((item) => ({
+      const data = viajestransacciones.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
         idCliente: Number(item.idCliente),
@@ -254,7 +937,7 @@ ORDER BY v.Id DESC;
         monto: Number(item.monto),
       }));
       const result: ApiResponseCommon = {
-        data: data,
+        data: viajestransacciones,
       };
       return result;
     } catch (error) {
@@ -271,7 +954,7 @@ ORDER BY v.Id DESC;
 
   async findOneTransacciones(id: number) {
     try {
-      const viajesconteos = await this.viajestransaccionesRepository.query(
+      const viajestransacciones = await this.viajestransaccionesRepository.query(
         `
 SELECT 
   vt.IdViaje AS idViaje,
@@ -300,7 +983,7 @@ ORDER BY v.Id DESC;
               `,
         [id],
       );
-      const data = viajesconteos.map((item) => ({
+      const data = viajestransacciones.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
         idCliente: Number(item.idCliente),

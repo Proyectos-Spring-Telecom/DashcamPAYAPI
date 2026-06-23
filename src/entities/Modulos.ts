@@ -37,6 +37,9 @@ export class Modulos {
   @Column("tinyint", { name: "Estatus", nullable: true })
   estatus: number | null;
 
+  @OneToMany(() => Bitacora, (bitacora) => bitacora.idModulo2)
+  bitacoras: Bitacora[];
+
   @OneToMany(() => Permisos, (permisos) => permisos.idModulo2)
   permisos: Permisos[];
 }

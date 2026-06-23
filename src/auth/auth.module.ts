@@ -1,17 +1,23 @@
-import { Module } from "@nestjs/common";
-import { AuthService } from "./auth.service";
-import { AuthController } from "./auth.controller";
-import { TypeOrmModule } from "@nestjs/typeorm";
-import { Usuarios } from "src/entities/Usuarios";
-import { ConfigModule, ConfigService } from "@nestjs/config";
-import { JwtModule } from "@nestjs/jwt";
-import { UsuariosPermisos } from "src/entities/UsuariosPermisos";
-import { JwtStrategy } from "./jwt.strategy";
-import { MailModule } from "src/mail/mail.module";
-import { BitacoraModule } from "src/bitacora/bitacora.module";
-import { MonederosModule } from "src/monederos/monederos.module";
-import { PasajerosModule } from "src/pasajeros/pasajeros.module";
-import { CodigoAutenticacion } from "src/entities/CodigoAutenticacion";
+import { Module } from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { AuthController } from './auth.controller';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { Usuarios } from 'src/entities/Usuarios';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
+import { UsuariosPermisos } from 'src/entities/UsuariosPermisos';
+import { JwtStrategy } from './jwt.strategy';
+import { UsuariosModule } from 'src/usuarios/usuarios.module';
+import { MailModule } from 'src/mail/mail.module';
+import { BitacoraModule } from 'src/bitacora/bitacora.module';
+import { CodigoAutenticacion } from 'src/entities/CodigoAutenticacion';
+import { MonederosModule } from 'src/monederos/monederos.module';
+import { PasajerosModule } from 'src/pasajeros/pasajeros.module';
+import { NetpayModule } from 'src/netpay/netpay.module';
+import { Pasajeros } from 'src/entities/Pasajeros';
+import { Monederos } from 'src/entities/Monederos';
+import { Turnos } from 'src/entities/Turnos';
+import { Viajes } from 'src/entities/Viajes';
 
 @Module({
   imports: [
@@ -19,17 +25,17 @@ import { CodigoAutenticacion } from "src/entities/CodigoAutenticacion";
     BitacoraModule,
     MonederosModule,
     PasajerosModule,
+    NetpayModule,
     ConfigModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>("JWT_SECRET"),
-        signOptions: { expiresIn: config.get<string>("JWT_EXPIRES_IN") as any },
+        secret: config.get<string>('JWT_SECRET'),
+        signOptions: { expiresIn: config.get<string>('JWT_EXPIRES_IN') },
       }),
     }),
-
-    TypeOrmModule.forFeature([Usuarios, UsuariosPermisos,CodigoAutenticacion]),
+    TypeOrmModule.forFeature([Usuarios, UsuariosPermisos, CodigoAutenticacion, Pasajeros, Monederos, Turnos, Viajes]),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

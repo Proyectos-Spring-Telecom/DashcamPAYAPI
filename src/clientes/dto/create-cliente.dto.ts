@@ -12,11 +12,7 @@ import {
 export class CreateClienteDto {
   @IsOptional()
   @IsInt({ message: "IdPadre debe ser un número entero" })
-  @ApiProperty({
-    description: "Id del cliente padre",
-    example: 1,
-    required: false,
-  })
+  @ApiProperty({ description: "Id del cliente padre", example: 1, required: false })
   idPadre?: number;
 
   @IsString()
@@ -25,73 +21,44 @@ export class CreateClienteDto {
   @ApiProperty({ description: "RFC del cliente", example: "XAXX010101000" })
   rfc: string;
 
-  @IsInt({
-    message: "TipoPersona debe ser un número entero (1=Física, 2=Moral)",
-  })
+  @IsInt({ message: "TipoPersona debe ser un número entero (1=Física, 2=Moral)" })
   @IsIn([1, 2], { message: "TipoPersona debe ser 1 (Física) o 2 (Moral)" })
-  @ApiProperty({
-    description: "Tipo de persona (1=Física, 2=Moral)",
-    example: 1,
-  })
+  @ApiProperty({ description: "Tipo de persona (1=Física, 2=Moral)", example: 1 })
   tipoPersona: number;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  @ApiProperty({
-    description: "Nombre del cliente",
-    example: "Juan",
-    required: false,
-  })
+  @ApiProperty({ description: "Nombre del cliente", example: "Juan", required: false })
   nombre?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  @ApiProperty({
-    description: "Apellido paterno",
-    example: "Pérez",
-    required: false,
-  })
+  @ApiProperty({ description: "Apellido paterno", example: "Pérez", required: false })
   apellidoPaterno?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  @ApiProperty({
-    description: "Apellido materno",
-    example: "López",
-    required: false,
-  })
+  @ApiProperty({ description: "Apellido materno", example: "López", required: false })
   apellidoMaterno?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(14)
-  @ApiProperty({
-    description: "Teléfono",
-    example: "5551234567",
-    required: false,
-  })
+  @ApiProperty({ description: "Teléfono", example: "5551234567", required: false })
   telefono?: string;
 
   @IsOptional()
   @IsEmail({}, { message: "Debe ser un correo válido" })
-  @ApiProperty({
-    description: "Correo electrónico",
-    example: "cliente@correo.com",
-    required: false,
-  })
+  @ApiProperty({ description: "Correo electrónico", example: "cliente@correo.com", required: false })
   correo?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  @ApiProperty({
-    description: "Sitio web",
-    example: "https://miempresa.com",
-    required: false,
-  })
+  @ApiProperty({ description: "Sitio web", example: "https://miempresa.com", required: false })
   sitioWeb?: string;
 
   // ⚡ Dirección

@@ -5,8 +5,8 @@ import {
   OneToMany,
   PrimaryGeneratedColumn,
 } from "typeorm";
-import { applySchema } from "src/common/apply-schema.decorator";
 import { Usuarios } from "./Usuarios";
+import { applySchema } from "src/common/apply-schema.decorator";
 
 @applySchema
 @Index("UQ_Roles_Nombre", ["nombre"], { unique: true })
@@ -36,6 +36,6 @@ export class Roles {
   @Column("tinyint", { name: "Estatus", default: () => "'1'" })
   estatus: number;
 
-  @OneToMany(() => Usuarios, (u) => u.rol)
+  @OneToMany(() => Usuarios, (usuarios) => usuarios.idRol2)
   usuarios: Usuarios[];
 }

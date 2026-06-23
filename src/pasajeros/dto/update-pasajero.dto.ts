@@ -1,16 +1,16 @@
-import { PartialType } from '@nestjs/mapped-types';
-import { CreatePasajeroDto } from './create-pasajero.dto';
 import { ApiProperty } from '@nestjs/swagger';
 import {
   IsDateString,
-  IsEmail,
+  IsEnum,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
   Length,
   MaxLength,
+  MinLength,
 } from 'class-validator';
+import { EnumSolicitudPasajero } from 'src/common/estatus.enum';
 
 export class UpdatePasajeroDto {
   @ApiProperty({ example: 'Juan', description: 'Nombre del pasajero' })
@@ -64,4 +64,33 @@ export class UpdatePasajeroDto {
     example: '1',
   })
   estatus?: number;
+
+  @IsEnum(EnumSolicitudPasajero, {
+    message: 'Estado de solicitud: 0 (No Solicitado), 1 (SOLICITADO)',
+  })
+  @ApiProperty({
+    description: 'Solicitud cambio tipo de pasajero',
+    example: '0 = No Solicitado, 1 = Solicitado',
+  })
+  @IsOptional()
+  estadoSolicitud?: EnumSolicitudPasajero = EnumSolicitudPasajero.NOSOLICITADO;
+
+  @ApiProperty({
+    description: 'url del documento',
+    example: 'https.documento.com',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  documentacion?: string;
+
+  @ApiProperty({
+    description: 'CURP del pasajero',
+    example: 'ABCDEFGHIJKLMNOPQ',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(18)
+  @MinLength(18)
+  curp?: string;
 }

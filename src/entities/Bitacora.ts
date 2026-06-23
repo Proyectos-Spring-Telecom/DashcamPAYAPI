@@ -2,8 +2,12 @@ import {
   Column,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
 } from "typeorm";
+import { Modulos } from "./Modulos";
+import { Usuarios } from "./Usuarios";
 import { applySchema } from "src/common/apply-schema.decorator";
 
 @applySchema
@@ -45,4 +49,17 @@ export class Bitacora {
   @Column("bigint", { name: "IdModulo" })
   idModulo: number;
 
+  @ManyToOne(() => Modulos, (modulos) => modulos.bitacoras, {
+    onDelete: "NO ACTION",
+    onUpdate: "NO ACTION",
+  })
+  @JoinColumn([{ name: "IdModulo", referencedColumnName: "id" }])
+  idModulo2: Modulos;
+
+  @ManyToOne(() => Usuarios, (usuarios) => usuarios.bitacoras, {
+    onDelete: "NO ACTION",
+    onUpdate: "NO ACTION",
+  })
+  @JoinColumn([{ name: "IdUsuario", referencedColumnName: "id" }])
+  idUsuario2: Usuarios;
 }

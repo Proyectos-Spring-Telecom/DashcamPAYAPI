@@ -9,7 +9,7 @@ export interface Paginated {
   lastPage: number;
 }
 
-export interface ApiVariantesResponse {
+export interface ApiVarianteResponse {
   status: string;
   message: string;
   id: number;
@@ -28,6 +28,8 @@ export interface ApiCrudResponse {
 export interface ApiData {
   id: number;
   nombre: string;
+  ids?: number[];
+  cantidadPasajes?: number;
 }
 
 export interface ApiEstatus {

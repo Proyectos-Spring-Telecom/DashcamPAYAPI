@@ -1,42 +1,80 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  JoinTable,
+  ManyToMany,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
+import { Contadores } from './Contadores';
+import { Viajes } from './Viajes';
+import { ViajesConteos } from './ViajesConteos';
 import { applySchema } from "src/common/apply-schema.decorator";
-import { Contadores } from "./Contadores";
 
 @applySchema
 @Index(
-  "IX_ConteoPasajeros_Serie_FechaHora",
-  ["fechaHora", "numeroSerieContador"],
-  {}
+  'IX_ConteoPasajeros_Serie_FechaHora',
+  ['fechaHora', 'numeroSerieContador'],
+  {},
 )
-@Entity("ConteoPasajeros")
+@Entity('ConteoPasajeros')
 export class ConteoPasajeros {
-  @PrimaryGeneratedColumn({ type: "bigint", name: "Id" })
+  @PrimaryGeneratedColumn({ type: 'bigint', name: 'Id' })
   id: number;
 
-  @Column("int", { name: "Entradas", nullable: true, default: () => "'0'" })
+  @Column('int', { name: 'Entradas', nullable: true, default: () => "'0'" })
   entradas: number | null;
 
-  @Column("int", { name: "Salidas", nullable: true, default: () => "'0'" })
+  @Column('int', { name: 'Salidas', nullable: true, default: () => "'0'" })
   salidas: number | null;
 
-  @Column("int", { name: "Diferencia" })
+  @Column('int', { name: 'Diferencia' })
   diferencia: number;
 
-  @Column("datetime", { name: "FechaHora" })
+  @Column('datetime', { name: 'FechaHora' })
   fechaHora: Date;
 
-  @Column("datetime", {
-    name: "FHRegistro",
-    default: () => "CURRENT_TIMESTAMP",
+  @Column('datetime', {
+    name: 'FHRegistro',
+    default: () => 'CURRENT_TIMESTAMP',
   })
   fhRegistro: Date;
 
-  @Column("varchar", { name: "NumeroSerieContador", length: 100 })
+  @Column('varchar', { name: 'NumeroSerieContador', length: 100 })
   numeroSerieContador: string;
 
-  @ManyToOne(() => Contadores, (contador) => contador.conteoPasajeros)
+  @Column('bigint', { name: 'IdViaje', nullable: true })
+  idViaje: number | null;
+
+  @Column('tinyint', { name: 'Estatus', nullable: true, default: () => "'1'" })
+  estatus: number | null;
+
+  @ManyToOne(() => Contadores, (contadores) => contadores.conteoPasajeros, {
+    onDelete: 'NO ACTION',
+    onUpdate: 'NO ACTION',
+  })
   @JoinColumn([
-    { name: "NumeroSerieContador", referencedColumnName: "numeroSerie" },
+    { name: 'NumeroSerieContador', referencedColumnName: 'numeroSerie' },
   ])
-  numeroSerieContadores2: Contadores;
+  numeroSerieContador2: Contadores;
+
+  @ManyToOne(() => Viajes, (viajes) => viajes.conteoPasajerosDirectos, {
+    onDelete: 'NO ACTION',
+    onUpdate: 'NO ACTION',
+    nullable: true,
+  })
+  @JoinColumn([{ name: 'IdViaje', referencedColumnName: 'id' }])
+  idViaje2: Viajes | null;
+
+  @ManyToMany(() => Viajes, (viajes) => viajes.conteoPasajeros)
+  @JoinTable({
+    name: "ViajesConteos",
+    joinColumns: [{ name: "IdConteo", referencedColumnName: "id" }],
+    inverseJoinColumns: [{ name: "IdViaje", referencedColumnName: "id" }],
+    schema: "DashCamDev",
+  })
+  viajes: Viajes[];
 }

@@ -2,14 +2,17 @@ import {
   Column,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
 } from "typeorm";
+import { Validadores } from "./Validadores";
 import { applySchema } from "src/common/apply-schema.decorator";
 
 @applySchema
 @Index(
   "IX_Posiciones_NumeroSerieValidador_FechaHora",
-  [ "numeroSerieValidador","fechaHora"],
+  ["fechaHora", "numeroSerieValidador"],
   {}
 )
 @Entity("Posiciones")
@@ -44,7 +47,16 @@ export class Posiciones {
   })
   fhRegistro: Date;
 
-  @Column('varchar', { name: 'NumeroSerieValidador', length: 100 })
+  @Column("varchar", { name: "NumeroSerieValidador", length: 100 })
   numeroSerieValidador: string;
 
+  @ManyToOne(() => Validadores, (validadores) => validadores.posiciones, {
+    onDelete: "NO ACTION",
+    onUpdate: "NO ACTION",
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn([
+    { name: "NumeroSerieValidador", referencedColumnName: "numeroSerie" },
+  ])
+  numeroSerieValidador2: Validadores;
 }

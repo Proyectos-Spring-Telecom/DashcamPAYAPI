@@ -6,3 +6,4 @@ export class UpdateContadoresEstatusDto {
   @IsIn([0, 1], { message: 'Solo puede ser 0 ó 1'})
   estatus: number = 1;
 }
+

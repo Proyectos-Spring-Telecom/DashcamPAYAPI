@@ -6,37 +6,45 @@ import {
   UseGuards,
   Param,
   ParseIntPipe,
-} from "@nestjs/common";
-import { BitacoraLoggerService } from "./bitacora.service";
-import { CreateBitacoraDto } from "./dto/create-bitacora.dto";
-import { JwtAuthGuard } from "src/guard/jwt-auth.guard";
-import { ApiResponseCommon } from "src/common/ApiResponse";
+  Request,
+} from '@nestjs/common';
+import { BitacoraLoggerService } from './bitacora.service';
+import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { ApiResponseCommon } from 'src/common/ApiResponse';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Bitácora')
+@ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
-@Controller("bitacora")
+@Controller('bitacora')
 export class BitacoraController {
   constructor(private readonly bitacoraService: BitacoraLoggerService) {}
 
-  @Post()
-  create(@Body() createBitacoraDto: CreateBitacoraDto) {
-    return this.bitacoraService.createBitacora(createBitacoraDto);
+  @Get('list') //Obseleto
+  async findAllListBitacora(@Request() req): Promise<ApiResponseCommon> {
+    const idUser = req.user.userId;
+    const cliente = req.user.cliente;
+    const rol = req.user.rol;
+    return await this.bitacoraService.findAllListBitacora(+cliente, +rol);
   }
 
-  @Get("list") //Obseleto
-  async findAllListBitacora(): Promise<ApiResponseCommon> {
-    return await this.bitacoraService.findAllListBitacora();
-  }
-
-  @Get(":page/:limit")
+  @Get(':page/:limit')
   findAll(
-    @Param("page", ParseIntPipe) page: number,
-    @Param("limit", ParseIntPipe) limit: number
+    @Param('page', ParseIntPipe) page: number,
+    @Param('limit', ParseIntPipe) limit: number,
+    @Request() req,
   ): Promise<ApiResponseCommon> {
-    return this.bitacoraService.findAll(page, limit);
+    const idUser = req.user.userId;
+    const cliente = req.user.cliente;
+    const rol = req.user.rol;
+    return this.bitacoraService.findAll(+cliente, +rol, page, limit);
   }
 
-  @Get(":id")
-  async findOne(@Param("id", ParseIntPipe) id: number) {
+  @Get(':id')
+  async findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    const idUser = req.user.userId;
+    const cliente = req.user.cliente;
+    const rol = req.user.rol;
     return await this.bitacoraService.findOne(id);
   }
 }

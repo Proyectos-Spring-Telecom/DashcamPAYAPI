@@ -2,8 +2,14 @@ import {
   Column,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
 } from "typeorm";
+import { Clientes } from "./Clientes";
+import { Rutas } from "./Rutas";
+import { UsuariosZonas } from "./UsuariosZonas";
 import { applySchema } from "src/common/apply-schema.decorator";
 
 @applySchema
@@ -40,4 +46,20 @@ export class Zonas {
   @Column("bigint", { name: "IdCliente" })
   idCliente: number;
 
+  @ManyToOne(() => Clientes, (clientes) => clientes.zonas, {
+    onDelete: "NO ACTION",
+    onUpdate: "NO ACTION",
+  })
+  @JoinColumn([{ name: "IdCliente", referencedColumnName: "id" }])
+  idCliente2: Clientes;
+
+  @OneToMany(() => Rutas, (rutas) => rutas.idZona2)
+  rutas: Rutas[];
+
+  @OneToMany(
+    () => UsuariosZonas,
+    (usuariosZonas) => usuariosZonas.idZona2
+  )
+  usuariosZonas: UsuariosZonas[];
 }
+

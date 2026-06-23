@@ -1,8 +1,10 @@
 import {
+  BadRequestException,
   HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { CreateTurnoDto } from './dto/create-turno.dto';
 import { UpdateTurnoDto } from './dto/update-turno.dto';
@@ -17,6 +19,9 @@ import {
 } from 'src/common/ApiResponse';
 import { UpdateTurnosEstatusDto } from './dto/update-turno-estatus.dto';
 import { Clientes } from 'src/entities/Clientes';
+import { EnumModulos, EstatusEnum } from 'src/common/estatus.enum';
+import { Operadores } from 'src/entities/Operadores';
+import { Instalaciones } from 'src/entities/Instalaciones';
 
 @Injectable()
 export class TurnosService {
@@ -25,16 +30,76 @@ export class TurnosService {
     private readonly turnosRepository: Repository<Turnos>,
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
+    @InjectRepository(Operadores)
+    private readonly operadoresRepository: Repository<Operadores>,
+    @InjectRepository(Instalaciones)
+    private readonly instalacionesRepository: Repository<Instalaciones>,
     private readonly bitacoraLogger: BitacoraLoggerService,
-  ) {}
+  ) { }
 
   async create(
     idUser: number,
+    cliente: number,
+    idOperador: number,
     createTurnoDto: CreateTurnoDto,
   ): Promise<ApiCrudResponse> {
     try {
+      //validamos que el usuario sea rol operador
+      if (!idOperador) {
+        throw new UnauthorizedException(`El usuario no está autorizado para generar un turno.`)
+      }
+
+      // Validar que el operador no tenga 2 turnos activos al mismo tiempo
+      const turnosActivos = await this.turnosRepository.find({
+        where: {
+          idOperador: idOperador,
+          estatus: EstatusEnum.ACTIVO,
+        },
+      });
+
+      // Verificar si hay turnos activos sin fecha de fin (aún en curso)
+      const turnosActivosSinFin = turnosActivos.filter(turno => turno.fin === null);
+
+      if (turnosActivosSinFin.length > 0) {
+        throw new BadRequestException(
+          `El operador ya tiene un turno activo. No se puede crear otro turno hasta que se finalice el turno actual (ID: ${turnosActivosSinFin[0].id}).`
+        );
+      }
+
       //Creamos el turno
-      const newTurno = await this.turnosRepository.create(createTurnoDto);
+      function pad(n: number) {
+        return n < 10 ? '0' + n : n;
+      }
+      const ahora = new Date();
+      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
+      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+
+
+      const { numeroSerieValidador } = createTurnoDto
+
+      const query = `
+      SELECT
+	i.Id 
+FROM Validadores d
+LEFT JOIN Instalaciones i ON i.idValidador = d.Id
+WHERE d.NumeroSerie = '${numeroSerieValidador}'
+AND i.Estatus = 1
+      `
+
+      const instalacion = await this.turnosRepository.query(query);
+      if (instalacion.length === 0) {
+        throw new NotFoundException('No se ha encontrado la instalación asignada al validador.');
+      }
+
+      const body = {
+        estatus: EstatusEnum.ACTIVO,
+        idCliente: cliente,
+        idOperador: idOperador,
+        idInstalacion: instalacion[0].Id
+      }
+
+      const newTurno = await this.turnosRepository.create(body);
       const turnoSave = await this.turnosRepository.save(newTurno);
 
       //-----Registro en la bitacora----- SUCCESS
@@ -45,7 +110,7 @@ export class TurnosService {
         'CREATE',
         querylogger,
         idUser,
-        14,
+        EnumModulos.TURNOS,
         EstatusEnumBitcora.SUCCESS,
       );
 
@@ -70,7 +135,7 @@ export class TurnosService {
         'CREATE',
         querylogger,
         idUser,
-        14,
+        EnumModulos.TURNOS,
         EstatusEnumBitcora.ERROR,
         error.message,
       );
@@ -104,7 +169,7 @@ export class TurnosService {
     return { ids, placeholders };
   }
 
-    private async consultarTurnoPaginado(
+  private async consultarTurnoPaginado(
     cliente: number,
     limit: number,
     offset: number,
@@ -132,11 +197,16 @@ SELECT
   d.Marca AS marcaValidador,
   d.Modelo AS modeloValidador,
 
-  -- Contador
-  b.Id AS idContador,
-  b.NumeroSerie AS numeroSerieContador,
-  b.Marca AS marcaContador,
-  b.Modelo AS modeloContador,
+  -- Contadores (agregados)
+  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
+  -- Para compatibilidad con código antiguo (primer contador)
+  MIN(b.Id) AS idContador,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContador,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContador,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContador,
 
   -- Vehículo
   v.Id AS idVehiculo,
@@ -154,7 +224,6 @@ SELECT
 
   -- Operador
   o.Id AS idOperador,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimientoOperador,
   u.Nombre AS nombreOperador,
   u.ApellidoPaterno AS apellidoPaternoOperador,
@@ -163,13 +232,21 @@ SELECT
 FROM Turnos t
 INNER JOIN Instalaciones i ON t.IdInstalacion = i.Id
 INNER JOIN Validadores d ON i.IdValidador = d.Id
-INNER JOIN Contadores b ON i.IdContador = b.Id
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
 INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id
 INNER JOIN Clientes c ON t.IdCliente = c.Id
 INNER JOIN Operadores o ON t.IdOperador = o.Id
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
 
 WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+
+GROUP BY t.Id, t.Inicio, t.Fin, t.FechaCreacion, t.FechaActualizacion, t.Estatus,
+         i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
+         d.Id, d.NumeroSerie, d.Marca, d.Modelo,
+         v.Id, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico,
+         c.Id, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus,
+         o.Id, o.FechaNacimiento, u.Nombre, u.ApellidoPaterno, u.ApellidoMaterno
 
 ORDER BY t.Id DESC
   LIMIT ? OFFSET ?;
@@ -180,11 +257,12 @@ ORDER BY t.Id DESC
   private async consultarTotalTurnosPaginados(cliente: number) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `  
-  SELECT COUNT(*) AS total
+  SELECT COUNT(DISTINCT t.Id) AS total
 FROM Turnos t
 INNER JOIN Instalaciones i ON t.IdInstalacion = i.Id
 INNER JOIN Validadores d ON i.IdValidador = d.Id
-INNER JOIN Contadores b ON i.IdContador = b.Id
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
 INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id
 INNER JOIN Clientes c ON t.IdCliente = c.Id
 INNER JOIN Operadores o ON t.IdOperador = o.Id
@@ -233,11 +311,16 @@ SELECT
   d.Marca AS marcaValidador,
   d.Modelo AS modeloValidador,
 
-  -- Contador
-  b.Id AS idContador,
-  b.NumeroSerie AS numeroSerieContador,
-  b.Marca AS marcaContador,
-  b.Modelo AS modeloContador,
+  -- Contadores (agregados)
+  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
+  -- Para compatibilidad con código antiguo (primer contador)
+  MIN(b.Id) AS idContador,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContador,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContador,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContador,
 
   -- Vehículo
   v.Id AS idVehiculo,
@@ -255,7 +338,6 @@ SELECT
 
   -- Operador
   o.Id AS idOperador,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimientoOperador,
   u.Nombre AS nombreOperador,
   u.ApellidoPaterno AS apellidoPaternoOperador,
@@ -264,13 +346,19 @@ SELECT
 FROM Turnos t
 INNER JOIN Instalaciones i ON t.IdInstalacion = i.Id
 INNER JOIN Validadores d ON i.IdValidador = d.Id
-INNER JOIN Contadores b ON i.IdContador = b.Id
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
 INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id
 INNER JOIN Clientes c ON t.IdCliente = c.Id
 INNER JOIN Operadores o ON t.IdOperador = o.Id
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
 
-
+GROUP BY t.Id, t.Inicio, t.Fin, t.FechaCreacion, t.FechaActualizacion, t.Estatus,
+         i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
+         d.Id, d.NumeroSerie, d.Marca, d.Modelo,
+         v.Id, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico,
+         c.Id, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus,
+         o.Id, o.FechaNacimiento, u.Nombre, u.ApellidoPaterno, u.ApellidoMaterno
 
 ORDER BY t.Id DESC
   LIMIT ? OFFSET ?;
@@ -281,43 +369,39 @@ ORDER BY t.Id DESC
           // Query para total (sin paginación)
           totalResult = await this.turnosRepository.query(
             `
-  SELECT COUNT(*) AS total
+  SELECT COUNT(DISTINCT t.Id) AS total
 FROM Turnos t
 INNER JOIN Instalaciones i ON t.IdInstalacion = i.Id
 INNER JOIN Validadores d ON i.IdValidador = d.Id
-INNER JOIN Contadores b ON i.IdContador = b.Id
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
 INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id
 INNER JOIN Clientes c ON t.IdCliente = c.Id
 INNER JOIN Operadores o ON t.IdOperador = o.Id
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
-
-
   `,
           );
           break;
 
         case 2:
-          // Usuario SuperAdministrador
-          turnos = await this.consultarTurnoPaginado(cliente,limit,offset)
+          turnos = await this.consultarTurnoPaginado(cliente, limit, offset);
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalTurnosPaginados(cliente)
+          totalResult = await this.consultarTotalTurnosPaginados(cliente);
           break;
 
         case 8:
-          // Usuario 
-          turnos = await this.consultarTurnoPaginado(cliente,limit,offset)
+          turnos = await this.consultarTurnoPaginado(cliente, limit, offset);
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalTurnosPaginados(cliente)
+          totalResult = await this.consultarTotalTurnosPaginados(cliente);
           break;
-        
+
         case 10:
-          // Usuario 
-          turnos = await this.consultarTurnoPaginado(cliente,limit,offset)
+          turnos = await this.consultarTurnoPaginado(cliente, limit, offset);
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalTurnosPaginados(cliente)
+          totalResult = await this.consultarTotalTurnosPaginados(cliente);
           break;
 
         default:
@@ -344,11 +428,16 @@ SELECT
   d.Marca AS marcaValidador,
   d.Modelo AS modeloValidador,
 
-  -- Contador
-  b.Id AS idContador,
-  b.NumeroSerie AS numeroSerieContador,
-  b.Marca AS marcaContador,
-  b.Modelo AS modeloContador,
+  -- Contadores (agregados)
+  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
+  -- Para compatibilidad con código antiguo (primer contador)
+  MIN(b.Id) AS idContador,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContador,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContador,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContador,
 
   -- Vehículo
   v.Id AS idVehiculo,
@@ -366,7 +455,6 @@ SELECT
 
   -- Operador
   o.Id AS idOperador,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimientoOperador,
   u.Nombre AS nombreOperador,
   u.ApellidoPaterno AS apellidoPaternoOperador,
@@ -377,7 +465,8 @@ INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
 INNER JOIN Turnos t ON t.IdInstalacion = i.Id
 INNER JOIN Clientes c ON i.IdCliente = c.Id
 LEFT JOIN Validadores d ON i.IdValidador = d.Id AND i.IdCliente = d.IdCliente
-LEFT JOIN Contadores b ON i.IdContador = b.Id AND i.IdCliente = b.IdCliente
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
 LEFT JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
 LEFT JOIN Operadores o ON t.IdOperador = o.Id
 LEFT JOIN Usuarios u ON o.IdUsuario = u.Id
@@ -386,6 +475,13 @@ WHERE
   ui.IdUsuario = ?        -- 🔹 filtra por usuario
   AND ui.Estatus = 1
   AND i.Estatus = 1
+
+GROUP BY t.Id, t.Inicio, t.Fin, t.FechaCreacion, t.FechaActualizacion, t.Estatus,
+         i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
+         d.Id, d.NumeroSerie, d.Marca, d.Modelo,
+         v.Id, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico,
+         c.Id, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus,
+         o.Id, o.FechaNacimiento, u.Nombre, u.ApellidoPaterno, u.ApellidoMaterno
 
 ORDER BY t.Inicio DESC
 
@@ -397,19 +493,19 @@ ORDER BY t.Inicio DESC
           // Query para total (sin paginación)
           totalResult = await this.turnosRepository.query(
             `
-  SELECT COUNT(*) AS total
+  SELECT COUNT(DISTINCT t.Id) AS total
 FROM UsuariosInstalaciones ui
 INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
-INNER JOIN Turnos t ON t.IdInstalacion = i.Id
+INNER JOIN Turnos t ON t.IdInstalacion = i.Id AND t.IdCliente = i.IdCliente
+INNER JOIN Validadores d ON i.IdValidador = d.Id AND i.IdCliente = d.IdCliente
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
+INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
 INNER JOIN Clientes c ON i.IdCliente = c.Id
-LEFT JOIN Validadores d ON i.IdValidador = d.Id AND i.IdCliente = d.IdCliente
-LEFT JOIN Contadores b ON i.IdContador = b.Id AND i.IdCliente = b.IdCliente
-LEFT JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
-LEFT JOIN Operadores o ON t.IdOperador = o.Id
-LEFT JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Operadores o ON t.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
 
-WHERE 
-  ui.IdUsuario = ?        -- 🔹 filtra por usuario
+WHERE ui.IdUsuario = ?
   AND ui.Estatus = 1
   AND i.Estatus = 1
   `,
@@ -417,7 +513,6 @@ WHERE
           );
           break;
       }
-
 
       const total = Number(totalResult[0]?.total || 0);
 
@@ -453,9 +548,7 @@ WHERE
     }
   }
 
-      private async consultarTurnoListado(
-    cliente: number
-  ) {
+  private async consultarTurnoListado(cliente: number) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `
 SELECT
@@ -479,11 +572,16 @@ SELECT
   d.Marca AS marcaValidador,
   d.Modelo AS modeloValidador,
 
-  -- Contador
-  b.Id AS idContador,
-  b.NumeroSerie AS numeroSerieContador,
-  b.Marca AS marcaContador,
-  b.Modelo AS modeloContador,
+  -- Contadores (agregados)
+  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
+  -- Para compatibilidad con código antiguo (primer contador)
+  MIN(b.Id) AS idContador,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContador,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContador,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContador,
 
   -- Vehículo
   v.Id AS idVehiculo,
@@ -501,7 +599,6 @@ SELECT
 
   -- Operador
   o.Id AS idOperador,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimientoOperador,
   u.Nombre AS nombreOperador,
   u.ApellidoPaterno AS apellidoPaternoOperador,
@@ -510,17 +607,25 @@ SELECT
 FROM Turnos t
 INNER JOIN Instalaciones i ON t.IdInstalacion = i.Id
 INNER JOIN Validadores d ON i.IdValidador = d.Id
-INNER JOIN Contadores b ON i.IdContador = b.Id
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
 INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id
 INNER JOIN Clientes c ON t.IdCliente = c.Id
 INNER JOIN Operadores o ON t.IdOperador = o.Id
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
 
-WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+WHERE t.Estatus = 1
 AND c.Estatus = 1
-AND t.Estatus = 1
+AND c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
 
-ORDER BY t.Id DESC
+GROUP BY t.Id, t.Inicio, t.Fin, t.FechaCreacion, t.FechaActualizacion, t.Estatus,
+         i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
+         d.Id, d.NumeroSerie, d.Marca, d.Modelo,
+         v.Id, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico,
+         c.Id, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus,
+         o.Id, o.FechaNacimiento, u.Nombre, u.ApellidoPaterno, u.ApellidoMaterno
+
+ORDER BY t.Id DESC;
    `;
     return this.turnosRepository.query(query, [...ids]);
   }
@@ -554,11 +659,16 @@ SELECT
   d.Marca AS marcaValidador,
   d.Modelo AS modeloValidador,
 
-  -- Contador
-  b.Id AS idContador,
-  b.NumeroSerie AS numeroSerieContador,
-  b.Marca AS marcaContador,
-  b.Modelo AS modeloContador,
+  -- Contadores (agregados)
+  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
+  -- Para compatibilidad con código antiguo (primer contador)
+  MIN(b.Id) AS idContador,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContador,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContador,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContador,
 
   -- Vehículo
   v.Id AS idVehiculo,
@@ -576,7 +686,6 @@ SELECT
 
   -- Operador
   o.Id AS idOperador,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimientoOperador,
   u.Nombre AS nombreOperador,
   u.ApellidoPaterno AS apellidoPaternoOperador,
@@ -585,32 +694,39 @@ SELECT
 FROM Turnos t
 INNER JOIN Instalaciones i ON t.IdInstalacion = i.Id
 INNER JOIN Validadores d ON i.IdValidador = d.Id
-INNER JOIN Contadores b ON i.IdContador = b.Id
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
 INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id
 INNER JOIN Clientes c ON t.IdCliente = c.Id
 INNER JOIN Operadores o ON t.IdOperador = o.Id
 INNER JOIN Usuarios u ON o.IdUsuario = u.Id
 
-WHERE c.Estatus = 1
-AND t.Estatus = 1
+WHERE t.Estatus = 1
+AND c.Estatus = 1
 
-ORDER BY t.Id DESC
+GROUP BY t.Id, t.Inicio, t.Fin, t.FechaCreacion, t.FechaActualizacion, t.Estatus,
+         i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
+         d.Id, d.NumeroSerie, d.Marca, d.Modelo,
+         v.Id, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico,
+         c.Id, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus,
+         o.Id, o.FechaNacimiento, u.Nombre, u.ApellidoPaterno, u.ApellidoMaterno
+
+ORDER BY t.Id DESC;
             `,
           );
           break;
 
         case 2:
-          turnos = await this.consultarTurnoListado(cliente)
+          turnos = await this.consultarTurnoListado(cliente);
           break;
 
         case 8:
-          turnos = await this.consultarTurnoListado(cliente)
+          turnos = await this.consultarTurnoListado(cliente);
           break;
 
         case 10:
-          turnos = await this.consultarTurnoListado(cliente)
+          turnos = await this.consultarTurnoListado(cliente);
           break;
-
 
         default:
           turnos = await this.turnosRepository.query(
@@ -636,11 +752,16 @@ SELECT
   d.Marca AS marcaValidador,
   d.Modelo AS modeloValidador,
 
-  -- Contador
-  b.Id AS idContador,
-  b.NumeroSerie AS numeroSerieContador,
-  b.Marca AS marcaContador,
-  b.Modelo AS modeloContador,
+  -- Contadores (agregados)
+  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
+  -- Para compatibilidad con código antiguo (primer contador)
+  MIN(b.Id) AS idContador,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContador,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContador,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContador,
 
   -- Vehículo
   v.Id AS idVehiculo,
@@ -658,7 +779,6 @@ SELECT
 
   -- Operador
   o.Id AS idOperador,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimientoOperador,
   u.Nombre AS nombreOperador,
   u.ApellidoPaterno AS apellidoPaternoOperador,
@@ -666,28 +786,34 @@ SELECT
 
 FROM UsuariosInstalaciones ui
 INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
-INNER JOIN Turnos t ON t.IdInstalacion = i.Id
+INNER JOIN Turnos t ON t.IdInstalacion = i.Id AND t.IdCliente = i.IdCliente
+INNER JOIN Validadores d ON i.IdValidador = d.Id AND i.IdCliente = d.IdCliente
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
+INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
 INNER JOIN Clientes c ON i.IdCliente = c.Id
-LEFT JOIN Validadores d ON i.IdValidador = d.Id AND i.IdCliente = d.IdCliente
-LEFT JOIN Contadores b ON i.IdContador = b.Id AND i.IdCliente = b.IdCliente
-LEFT JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
-LEFT JOIN Operadores o ON t.IdOperador = o.Id
-LEFT JOIN Usuarios u ON o.IdUsuario = u.Id
+INNER JOIN Operadores o ON t.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
 
-WHERE 
-  ui.IdUsuario = ?        -- 🔹 filtra por usuario
+WHERE ui.IdUsuario = ?
   AND ui.Estatus = 1
-  AND c.Estatus = 1
-  AND t.Estatus = 1
   AND i.Estatus = 1
+  AND t.Estatus = 1
+  AND c.Estatus = 1
 
-ORDER BY t.Inicio DESC
+GROUP BY t.Id, t.Inicio, t.Fin, t.FechaCreacion, t.FechaActualizacion, t.Estatus,
+         i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
+         d.Id, d.NumeroSerie, d.Marca, d.Modelo,
+         v.Id, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico,
+         c.Id, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus,
+         o.Id, o.FechaNacimiento, u.Nombre, u.ApellidoPaterno, u.ApellidoMaterno
+
+ORDER BY t.Id DESC;
             `,
             [idUser],
           );
           break;
       }
-
 
       // 🔥 Transformación con map
       const data = turnos.map((item) => ({
@@ -714,10 +840,7 @@ ORDER BY t.Inicio DESC
     }
   }
 
-        private async consultarTurnoOne(
-    cliente: number,
-    id: number
-  ) {
+  private async consultarTurnoOne(cliente: number, id: number) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `
 SELECT
@@ -741,11 +864,16 @@ SELECT
   d.Marca AS marcaValidador,
   d.Modelo AS modeloValidador,
 
-  -- Contador
-  b.Id AS idContador,
-  b.NumeroSerie AS numeroSerieContador,
-  b.Marca AS marcaContador,
-  b.Modelo AS modeloContador,
+  -- Contadores (agregados)
+  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
+  -- Para compatibilidad con código antiguo (primer contador)
+  MIN(b.Id) AS idContador,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContador,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContador,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContador,
 
   -- Vehículo
   v.Id AS idVehiculo,
@@ -763,7 +891,6 @@ SELECT
 
   -- Operador
   o.Id AS idOperador,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimientoOperador,
   u.Nombre AS nombreOperador,
   u.ApellidoPaterno AS apellidoPaternoOperador,
@@ -772,7 +899,8 @@ SELECT
 FROM Turnos t
 INNER JOIN Instalaciones i ON t.IdInstalacion = i.Id
 INNER JOIN Validadores d ON i.IdValidador = d.Id
-INNER JOIN Contadores b ON i.IdContador = b.Id
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
 INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id
 INNER JOIN Clientes c ON t.IdCliente = c.Id
 INNER JOIN Operadores o ON t.IdOperador = o.Id
@@ -781,7 +909,14 @@ INNER JOIN Usuarios u ON o.IdUsuario = u.Id
 WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
 AND t.Id = ?
 
-ORDER BY t.Id DESC
+GROUP BY t.Id, t.Inicio, t.Fin, t.FechaCreacion, t.FechaActualizacion, t.Estatus,
+         i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
+         d.Id, d.NumeroSerie, d.Marca, d.Modelo,
+         v.Id, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico,
+         c.Id, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus,
+         o.Id, o.FechaNacimiento, u.Nombre, u.ApellidoPaterno, u.ApellidoMaterno
+
+ORDER BY t.Id DESC;
    `;
     return this.turnosRepository.query(query, [...ids, id]);
   }
@@ -815,11 +950,16 @@ SELECT
   d.Marca AS marcaValidador,
   d.Modelo AS modeloValidador,
 
-  -- Contador
-  b.Id AS idContador,
-  b.NumeroSerie AS numeroSerieContador,
-  b.Marca AS marcaContador,
-  b.Modelo AS modeloContador,
+  -- Contadores (agregados)
+  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
+  -- Para compatibilidad con código antiguo (primer contador)
+  MIN(b.Id) AS idContador,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContador,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContador,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContador,
 
   -- Vehículo
   v.Id AS idVehiculo,
@@ -837,7 +977,6 @@ SELECT
 
   -- Operador
   o.Id AS idOperador,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimientoOperador,
   u.Nombre AS nombreOperador,
   u.ApellidoPaterno AS apellidoPaternoOperador,
@@ -846,7 +985,8 @@ SELECT
 FROM Turnos t
 INNER JOIN Instalaciones i ON t.IdInstalacion = i.Id
 INNER JOIN Validadores d ON i.IdValidador = d.Id
-INNER JOIN Contadores b ON i.IdContador = b.Id
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
 INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id
 INNER JOIN Clientes c ON t.IdCliente = c.Id
 INNER JOIN Operadores o ON t.IdOperador = o.Id
@@ -854,7 +994,14 @@ INNER JOIN Usuarios u ON o.IdUsuario = u.Id
 
 WHERE t.Id = ?
 
-ORDER BY t.Id DESC
+GROUP BY t.Id, t.Inicio, t.Fin, t.FechaCreacion, t.FechaActualizacion, t.Estatus,
+         i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
+         d.Id, d.NumeroSerie, d.Marca, d.Modelo,
+         v.Id, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico,
+         c.Id, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus,
+         o.Id, o.FechaNacimiento, u.Nombre, u.ApellidoPaterno, u.ApellidoMaterno
+
+ORDER BY t.Id DESC;
             `,
             [id],
           );
@@ -896,11 +1043,16 @@ SELECT
   d.Marca AS marcaValidador,
   d.Modelo AS modeloValidador,
 
-  -- Contador
-  b.Id AS idContador,
-  b.NumeroSerie AS numeroSerieContador,
-  b.Marca AS marcaContador,
-  b.Modelo AS modeloContador,
+  -- Contadores (agregados)
+  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
+  -- Para compatibilidad con código antiguo (primer contador)
+  MIN(b.Id) AS idContador,
+  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContador,
+  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContador,
+  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContador,
 
   -- Vehículo
   v.Id AS idVehiculo,
@@ -918,30 +1070,42 @@ SELECT
 
   -- Operador
   o.Id AS idOperador,
-  o.NumeroLicencia AS numeroLicencia,
   o.FechaNacimiento AS fechaNacimientoOperador,
   u.Nombre AS nombreOperador,
   u.ApellidoPaterno AS apellidoPaternoOperador,
   u.ApellidoMaterno AS apellidoMaternoOperador
 
-FROM UsuariosInstalaciones ui
-INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
-INNER JOIN Turnos t ON t.IdInstalacion = i.Id
-INNER JOIN Clientes c ON i.IdCliente = c.Id
+FROM Turnos t
+INNER JOIN Instalaciones i ON t.IdInstalacion = i.Id
+INNER JOIN Clientes c ON t.IdCliente = c.Id
 LEFT JOIN Validadores d ON i.IdValidador = d.Id AND i.IdCliente = d.IdCliente
-LEFT JOIN Contadores b ON i.IdContador = b.Id AND i.IdCliente = b.IdCliente
+LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
+LEFT JOIN Contadores b ON ic.IdContador = b.Id
 LEFT JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
 LEFT JOIN Operadores o ON t.IdOperador = o.Id
 LEFT JOIN Usuarios u ON o.IdUsuario = u.Id
 
 WHERE 
-  ui.IdUsuario = ?        -- 🔹 filtra por usuario
-  AND ui.Estatus = 1
-  AND t.Id = ?
+  t.Id = ?              -- 🔹 filtra por cliente
+ 
+  AND EXISTS (                -- 🔹 asegura que el usuario está asignado a la instalación
+    SELECT 1 
+    FROM UsuariosInstalaciones ui
+    WHERE ui.IdInstalacion = i.Id 
+      AND ui.IdUsuario = ?
+      AND ui.Estatus = 1
+  )
 
-ORDER BY t.Inicio DESC
+GROUP BY t.Id, t.Inicio, t.Fin, t.FechaCreacion, t.FechaActualizacion, t.Estatus,
+         i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
+         d.Id, d.NumeroSerie, d.Marca, d.Modelo,
+         v.Id, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico,
+         c.Id, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus,
+         o.Id, o.FechaNacimiento, u.Nombre, u.ApellidoPaterno, u.ApellidoMaterno
+
+ORDER BY t.Inicio DESC;
             `,
-            [idUser, id],
+            [id, idUser],
           );
           break;
       }
@@ -996,7 +1160,7 @@ ORDER BY t.Inicio DESC
         'UPDATE',
         querylogger,
         idUser,
-        14,
+        EnumModulos.TURNOS,
         EstatusEnumBitcora.SUCCESS,
       );
 
@@ -1020,7 +1184,7 @@ ORDER BY t.Inicio DESC
         'UPDATE',
         querylogger,
         idUser,
-        14,
+        EnumModulos.TURNOS,
         EstatusEnumBitcora.ERROR,
         error.message,
       );
@@ -1034,10 +1198,56 @@ ORDER BY t.Inicio DESC
     }
   }
 
-  async update(id: number, idUser: number, updateTurnoDto: UpdateTurnoDto) {
+  async update(id: number, idUser: number,
+    cliente: number,
+    idOperador: number,
+    updateTurnoDto: UpdateTurnoDto) {
     try {
+      //validamos que el usuario sea rol operador
+      if (!idOperador) {
+        throw new UnauthorizedException(`El usuario no está autorizado para actualizar un turno.`)
+      }
+      const { numeroSerieValidador } = updateTurnoDto
+
+      const query = `
+      SELECT
+	i.Id 
+FROM Validadores d
+LEFT JOIN Instalaciones i ON i.idValidador = d.Id
+WHERE d.NumeroSerie = '${numeroSerieValidador}'
+AND i.Estatus = 1
+      `
+
+      const instalacion = await this.turnosRepository.query(query);
+      if (instalacion.length === 0) {
+        throw new NotFoundException('No se ha encontrado la instalación asignada al validador.');
+      }
+      const idInstalacion = instalacion[0].Id
+      //Generamos el desfase de horarios
+      function pad(n: number) {
+        return n < 10 ? '0' + n : n;
+      }
+      const ahora = new Date();
+      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
+      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      // buscamos el turno
+      const turnoFind = await this.turnosRepository.findOne({ where: { id: id } })
+
+      if (!turnoFind) {
+        throw new NotFoundException(`El turno con ID: ${id} no fue encontrado.`)
+      }
+
+      if (cliente != turnoFind.idCliente || idOperador != turnoFind.idOperador || idInstalacion != turnoFind.idInstalacion) {
+        throw new BadRequestException(`El turno con ID: ${id} no coincide los valores del turno con el del usuario.`)
+      }
+      const body = {
+        fin: fechaDesfasada,
+        estatus: EstatusEnum.INACTIVO,
+      }
+
       //actualizamos
-      await this.turnosRepository.update(id, updateTurnoDto);
+      await this.turnosRepository.update(id, body);
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updateTurnoDto };
@@ -1047,7 +1257,7 @@ ORDER BY t.Inicio DESC
         'UPDATE',
         querylogger,
         idUser,
-        14,
+        EnumModulos.TURNOS,
         EstatusEnumBitcora.SUCCESS,
       );
 
@@ -1070,7 +1280,7 @@ ORDER BY t.Inicio DESC
         'UPDATE',
         querylogger,
         idUser,
-        14,
+        EnumModulos.TURNOS,
         EstatusEnumBitcora.ERROR,
         error.message,
       );
@@ -1097,7 +1307,7 @@ ORDER BY t.Inicio DESC
         'UPDATE',
         querylogger,
         idUser,
-        14,
+        EnumModulos.TURNOS,
         EstatusEnumBitcora.SUCCESS,
       );
 
@@ -1120,7 +1330,7 @@ ORDER BY t.Inicio DESC
         'UPDATE',
         querylogger,
         idUser,
-        14,
+        EnumModulos.TURNOS,
         EstatusEnumBitcora.ERROR,
         error.message,
       );

@@ -17,7 +17,10 @@ import { UpdateInstalacioneDto } from './dto/update-instalacione.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdateInstalacioneEstatusDto } from './dto/update-instalacione-estatus.dto';
+import { ApiBearerAuth, ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 
+@ApiTags('Instalaciones')
+@ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
 @Controller('instalaciones')
 export class InstalacionesController {
@@ -39,6 +42,47 @@ export class InstalacionesController {
     );
   }
 
+  @Get('list')
+  async findAllList(@Request() req): Promise<ApiResponseCommon> {
+    const cliente = req.user.cliente;
+    const idUser = req.user.userId;
+    const rol = req.user.rol;
+    return await this.instalacionesService.findAllList(+idUser, +cliente, +rol);
+  }
+
+  @Get('by-idValidador/:idValidador')
+  @ApiOperation({
+    summary: 'Obtener instalaciones por ID de validador',
+    description: 'Obtiene todas las instalaciones activas asociadas al validador especificado.',
+  })
+  @ApiParam({
+    name: 'idValidador',
+    type: Number,
+    description: 'ID del validador del cual se desean obtener las instalaciones',
+    example: 1,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Instalaciones obtenidas exitosamente',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'No autorizado',
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Error interno del servidor',
+  })
+  async findByValidador(
+    @Param('idValidador', ParseIntPipe) idValidador: number,
+    @Request() req,
+  ): Promise<ApiResponseCommon> {
+    const cliente = req.user.cliente;
+    const idUser = req.user.userId;
+    const rol = req.user.rol;
+    return await this.instalacionesService.findByValidador(+idValidador, +idUser, +cliente, +rol);
+  }
+
   @Get(':page/:limit')
   async findAll(
     @Param('page', ParseIntPipe) page: number,
@@ -49,14 +93,6 @@ export class InstalacionesController {
     const idUser = req.user.userId;
     const rol = req.user.rol;
     return await this.instalacionesService.findAll(+idUser, +cliente, +rol, page, limit);
-  }
-
-  @Get('list')
-  async findAllList(@Request() req): Promise<ApiResponseCommon> {
-    const cliente = req.user.cliente;
-    const idUser = req.user.userId;
-    const rol = req.user.rol;
-    return await this.instalacionesService.findAllList(+idUser, +cliente, +rol);
   }
 
   @Get(':id')

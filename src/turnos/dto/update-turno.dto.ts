@@ -1,4 +1,13 @@
-import { PartialType } from '@nestjs/swagger';
-import { CreateTurnoDto } from './create-turno.dto';
+import { ApiProperty } from "@nestjs/swagger";
+import { IsDateString, IsNotEmpty, IsOptional, IsString } from "class-validator";
 
-export class UpdateTurnoDto extends PartialType(CreateTurnoDto) {}
+
+export class UpdateTurnoDto {
+  @ApiProperty({
+    description: 'Numero de serie del dispositivo.',
+    example: 300,
+  })
+  @IsString()
+  @IsNotEmpty()
+  numeroSerieValidador: string;
+}

@@ -33,7 +33,7 @@ export class PermisosService {
     });
 
     const result: ApiResponseCommon = {
-      data: data,
+      data,
       paginated: {
         total: total,
         page,
@@ -322,11 +322,11 @@ export class PermisosService {
               Permisos.Nombre AS PermisoNombre,
               Permisos.Descripcion AS PermisoDescripcion
             FROM 
-			DashCam.UsuariosPermisos
+			DashCamDev.UsuariosPermisos
             INNER JOIN 
-              DashCam.Permisos ON UsuariosPermisos.IdPermiso = Permisos.Id
+              DashCamDev.Permisos ON UsuariosPermisos.IdPermiso = Permisos.Id
             INNER JOIN 
-             DashCam.Modulos ON Permisos.IdModulo = Modulos.Id
+             DashCamDev.Modulos ON Permisos.IdModulo = Modulos.Id
             WHERE 
               UsuariosPermisos.IdUsuario = '${idUsuario}'`;
 
@@ -363,7 +363,6 @@ export class PermisosService {
 
       return permisosAgrupados;
     } catch (error) {
-      console.error('Error al obtener permisos agrupados:', error);
       throw error; // Lanzar el error para manejarlo en la capa superior si es necesario
     }
   }

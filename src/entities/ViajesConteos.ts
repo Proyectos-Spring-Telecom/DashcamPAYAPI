@@ -14,7 +14,13 @@ export class ViajesConteos {
   @PrimaryColumn('bigint', { name: 'IdConteo' })
   idConteo: number;
 
-
+  // Relación ManyToOne con la entidad Viajes
+  @ManyToOne(() => Viajes, (viaje) => viaje.viajesConteos, {
+    onDelete: 'CASCADE', // Si se elimina un viaje, se eliminan los conteos asociados
+    onUpdate: 'NO ACTION', // No hacer nada al actualizar
+  })
+  @JoinColumn([{ name: 'IdViaje', referencedColumnName: 'id' }])
+  viaje: Viajes;
 
 
 }

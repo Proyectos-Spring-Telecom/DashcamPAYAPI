@@ -5,24 +5,24 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { CreateUsuariosZonasDto } from './dto/create-usuarioszonas.dto';
-import { UpdateUsuarioszonaDto } from './dto/update-usuarioszonas.dto';
+import { CreateUsuariosZonasDto } from './dto/create-usuarioszona.dto';
+import { UpdateUsuarioszonaDto } from './dto/update-usuarioszona.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { UsuariosZonas } from 'src/entities/UsuariosZonas';
 import { Repository } from 'typeorm';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { ApiCrudResponse, ApiResponseCommon, EstatusEnumBitcora } from 'src/common/ApiResponse';
-import { UpdateUsuariosZonasEstatusDto } from './dto/update-usuarioszonas-estatus.dto';
+import { UpdateUsuariosZonasEstatusDto } from './dto/update-usuarioszona-estatus.dto';
 import { Zonas } from 'src/entities/Zonas';
 import { Usuarios } from 'src/entities/Usuarios';
 
 @Injectable()
-export class UsuariosZonasService {
+export class UsuarioszonasService {
   constructor(
     @InjectRepository(UsuariosZonas)
-    private readonly usuarioZonasRepository: Repository<UsuariosZonas>,
+    private readonly usuarioszonasRepository: Repository<UsuariosZonas>,
     @InjectRepository(Zonas)
-    private readonly ZonasRepository: Repository<Zonas>,
+    private readonly zonasRepository: Repository<Zonas>,
     @InjectRepository(Usuarios)
     private readonly usuariosRepository: Repository<Usuarios>,
     private readonly bitacoraLogger: BitacoraLoggerService,
@@ -53,7 +53,7 @@ export class UsuariosZonasService {
         default:
           // Usuarios normales - solo sus instalaciones asignadas
           for (const i of createUsuariosZonasDto.idsZonas) {
-            const zona = await this.ZonasRepository.findOne({
+            const zona = await this.zonasRepository.findOne({
               where: { id: i },
               select: { idCliente: true },
             });
@@ -62,7 +62,7 @@ export class UsuariosZonasService {
             }
             if (idUsuarioCliente !== zona.idCliente) {
               throw new BadRequestException(
-                `La Zona ${i} no pertenece al mismo cliente que el usuario`,
+                `La zona ${i} no pertenece al mismo cliente que el usuario`,
               );
             }
           }
@@ -71,16 +71,16 @@ export class UsuariosZonasService {
 
       //Creamos y guardamos el permiso para usuarios en zona del usuario
       if (createUsuariosZonasDto.idsZonas.length > 0) {
-        const usuariosZonasPermisos =
+        const usuarioszonasPermisos =
           createUsuariosZonasDto.idsZonas.map((idsZonas) =>
-            this.usuarioZonasRepository.create({
+            this.usuarioszonasRepository.create({
               idUsuario: createUsuariosZonasDto.idUsuario,
               idZona: idsZonas,
             }),
           );
 
-        const usuariosZonasave = await this.usuarioZonasRepository.save(
-          usuariosZonasPermisos,
+        const usuarioszonaSave = await this.usuarioszonasRepository.save(
+          usuarioszonasPermisos,
         );
       }
 
@@ -103,7 +103,7 @@ export class UsuariosZonasService {
         data: {
           id: Number(createUsuariosZonasDto.idUsuario),
           nombre:
-            `Id Usuario: ${createUsuariosZonasDto.idUsuario} Id zona: ${createUsuariosZonasDto.idsZonas} ` ||
+            `Id Usuario: ${createUsuariosZonasDto.idUsuario} Id Zona: ${createUsuariosZonasDto.idsZonas} ` ||
             '',
         },
       };
@@ -133,15 +133,15 @@ export class UsuariosZonasService {
   async findAllList(): Promise<ApiResponseCommon> {
     try {
       //Obtenemos ConteoPasajeros
-      const usuariosZonas = await this.usuarioZonasRepository.find({
+      const usuarioszonas = await this.usuarioszonasRepository.find({
         where: { estatus: 1 },
       });
-      if (usuariosZonas.length === 0) {
+      if (usuarioszonas.length === 0) {
         throw new NotFoundException('UsuariosZonas no encontrado');
       }
 
       //Forzamos a cambiar el id a number
-      const data = usuariosZonas.map((item) => ({
+      const data = usuarioszonas.map((item) => ({
         ...item,
         id: Number(item.id),
       }));
@@ -164,20 +164,20 @@ export class UsuariosZonasService {
 
   async findAll(page: number, limit: number): Promise<ApiResponseCommon> {
     try {
-      const [data, total] = await this.usuarioZonasRepository.findAndCount({
+      const [data, total] = await this.usuarioszonasRepository.findAndCount({
         skip: (page - 1) * limit,
         take: limit,
       });
 
       //Forzamos a cambiar el id a number
-      const usuariosZonas = data.map((item) => ({
+      const usuarioszonas = data.map((item) => ({
         ...item,
         id: Number(item.id),
       }));
 
       //APi response
       const result: ApiResponseCommon = {
-        data: usuariosZonas,
+        data: usuarioszonas,
         paginated: {
           total: total,
           page,
@@ -198,15 +198,15 @@ export class UsuariosZonasService {
 
   async findOneUsuario(id: number) {
     try {
-      const usuariosZonas = await this.usuarioZonasRepository.find({
+      const usuarioszonas = await this.usuarioszonasRepository.find({
         where: { idUsuario: id },
       });
-      if (!usuariosZonas) {
-        throw new NotFoundException('usuariosZonas no encontrado');
+      if (!usuarioszonas) {
+        throw new NotFoundException('usuarioszonas no encontrado');
       }
 
       //Forzamos a cambiar el id a number
-      const data = usuariosZonas.map((item) => ({
+      const data = usuarioszonas.map((item) => ({
         ...item,
         id: Number(item.id),
       }));
@@ -225,17 +225,17 @@ export class UsuariosZonasService {
 
   async findOne(id: number) {
     try {
-      const usuariosZonas = await this.usuarioZonasRepository.findOne({
+      const usuarioszonas = await this.usuarioszonasRepository.findOne({
         where: { id: id },
       });
-      if (!usuariosZonas) {
-        throw new NotFoundException('usuariosZonas no encontrado');
+      if (!usuarioszonas) {
+        throw new NotFoundException('usuarioszonas no encontrado');
       }
 
       //cambiamos el id a number
-      usuariosZonas.id = Number(usuariosZonas.id);
+      usuarioszonas.id = Number(usuarioszonas.id);
 
-      return { data: usuariosZonas };
+      return { data: usuarioszonas };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -250,18 +250,18 @@ export class UsuariosZonasService {
   async update(
     id: number,
     idUser: number,
-    UpdateUsuarioszonaDto: UpdateUsuarioszonaDto,
+    updateUsuarioszonaDto: UpdateUsuarioszonaDto,
   ): Promise<ApiCrudResponse> {
     try {
-      // Extraer Zonas del DTO
-      const { idsZonas, ...usuariozonaeUpdate } = UpdateUsuarioszonaDto;
+      // Extraer zonas del DTO
+      const { idsZonas, ...usuarioZonaUpdate } = updateUsuarioszonaDto;
 
-      // ----- ACTUALIZACIÓN DE Zonas -----
+      // ----- ACTUALIZACIÓN DE ZONAS -----
       if (idsZonas && Array.isArray(idsZonas)) {
-        const nuevaLista: number[] = idsZonas.map(Number); // lista nueva de Zonas (ej. [1,2,3])
+        const nuevaLista: number[] = idsZonas.map(Number); // lista nueva de zonas (ej. [1,2,3])
 
         // Zonas actuales en BD
-        const creadaLista = await this.usuarioZonasRepository.find({
+        const creadaLista = await this.usuarioszonasRepository.find({
           where: { idUsuario: id },
         });
 
@@ -283,7 +283,7 @@ export class UsuariosZonasService {
           if (enNueva && creado) {
             if (creado.estatus === 0) {
               // Caso: existe en ambas y en creada estatus=0 → activar
-              await this.usuarioZonasRepository.update(creado.id, {
+              await this.usuarioszonasRepository.update(creado.id, {
                 estatus: 1,
               });
             } else {
@@ -292,20 +292,20 @@ export class UsuariosZonasService {
             }
           } else if (enNueva && !creado) {
             // Caso: existe en nueva pero no en creada → crear
-            const existe = await this.usuarioZonasRepository.findOne({
+            const existe = await this.usuarioszonasRepository.findOne({
               where: { idUsuario: id, idZona: zonaId },
             });
             if (!existe) {
-              await this.usuarioZonasRepository.save({
+              await this.usuarioszonasRepository.save({
                 idUsuario: id,
-                idzona: zonaId,
+                idZona: zonaId,
                 estatus: 1,
               });
             }
           } else if (!enNueva && creado) {
             if (creado.estatus === 1) {
               // Caso: no está en nueva pero sí en creada activo → desactivar
-              await this.usuarioZonasRepository.update(creado.id, {
+              await this.usuarioszonasRepository.update(creado.id, {
                 estatus: 0,
               });
             } else {
@@ -320,10 +320,10 @@ export class UsuariosZonasService {
       }
 
       // ----- Registro en la bitácora ----- SUCCESS
-      const querylogger = { UpdateUsuarioszonaDto };
+      const querylogger = { updateUsuarioszonaDto };
       await this.bitacoraLogger.logToBitacora(
         'UsuariosZonas',
-        `Se actualizaron las Zonas del usuario: con ID: ${id}`,
+        `Se actualizaron las zonas del usuario: con ID: ${id}`,
         'UPDATE',
         querylogger,
         idUser,
@@ -338,7 +338,7 @@ export class UsuariosZonasService {
         data: {
           id: id,
           nombre:
-            `IdUsuario ${id} Zonas ${UpdateUsuarioszonaDto.idsZonas}` ||
+            `IdUsuario ${id} Zonas ${updateUsuarioszonaDto.idsZonas}` ||
             '',
         },
       };
@@ -346,10 +346,10 @@ export class UsuariosZonasService {
       return result;
     } catch (error) {
       // ----- Registro en la bitácora ----- ERROR
-      const querylogger = { UpdateUsuarioszonaDto };
+      const querylogger = { updateUsuarioszonaDto };
       await this.bitacoraLogger.logToBitacora(
         'UsuariosZonas',
-        `Se actualizaron las Zonas del usuario: con ID: ${id}`,
+        `Se actualizaron las zonas del usuario: con ID: ${id}`,
         'UPDATE',
         querylogger,
         idUser,
@@ -361,7 +361,7 @@ export class UsuariosZonasService {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: 'Error al actualizar Zonas del usuario',
+        message: 'Error al actualizar zonas del usuario',
         error,
       });
     }
@@ -373,7 +373,7 @@ export class UsuariosZonasService {
     updateUsuariosZonasEstatusDto: UpdateUsuariosZonasEstatusDto,
   ): Promise<ApiCrudResponse> {
     try {
-      const usuariozona = await this.usuarioZonasRepository.findOne({
+      const usuariozona = await this.usuarioszonasRepository.findOne({
         where: { id: id },
       });
       if (!usuariozona) {
@@ -385,7 +385,7 @@ export class UsuariosZonasService {
       const estatus = updateUsuariosZonasEstatusDto.estatus;
 
       //Actualizamos datos
-      await this.usuarioZonasRepository.update(id, { estatus: estatus });
+      await this.usuarioszonasRepository.update(id, { estatus: estatus });
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updateUsuariosZonasEstatusDto };
@@ -407,7 +407,7 @@ export class UsuariosZonasService {
         data: {
           id: id,
           nombre:
-            `${usuariozona.id} IdUsuario:${usuariozona.idUsuario} Idzona: ${usuariozona.idZona}` ||
+            `${usuariozona.id} IdUsuario:${usuariozona.idUsuario} IdZona: ${usuariozona.idZona}` ||
             '',
         },
       };
@@ -430,24 +430,24 @@ export class UsuariosZonasService {
         throw error;
       }
       throw new InternalServerErrorException(
-        `Error al actualizar estatus de Usuariozona con id: ${id}`,
+        `Error al actualizar estatus de UsuarioZona con id: ${id}`,
       );
     }
   }
 
   async remove(id: number, idUser: number): Promise<ApiCrudResponse> {
     try {
-      const usuariozona = await this.usuarioZonasRepository.findOne({
+      const usuariozona = await this.usuarioszonasRepository.findOne({
         where: { id: id },
       });
       if (!usuariozona) {
         throw new NotFoundException(
-          `UsuarioZonas con id: ${id} no encontrado`,
+          `UsuariosZonas con id: ${id} no encontrado`,
         );
       }
 
       //Actualizamos datos
-      await this.usuarioZonasRepository.update(id, { estatus: 0 });
+      await this.usuarioszonasRepository.update(id, { estatus: 0 });
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { id: id, estatus: 0 };
@@ -468,7 +468,7 @@ export class UsuariosZonasService {
         data: {
           id: id,
           nombre:
-            `${usuariozona.id} IdUsuario:${usuariozona.idUsuario} Idzona: ${usuariozona.idZona}` ||
+            `${usuariozona.id} IdUsuario:${usuariozona.idUsuario} IdZona: ${usuariozona.idZona}` ||
             '',
         },
       };
@@ -490,8 +490,9 @@ export class UsuariosZonasService {
         throw error;
       }
       throw new InternalServerErrorException(
-        `Error al eliminar de Usuariozona con id: ${id}`,
+        `Error al eliminar de UsuarioZona con id: ${id}`,
       );
     }
   }
 }
+

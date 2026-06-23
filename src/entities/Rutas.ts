@@ -2,13 +2,17 @@ import {
   Column,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import { Variantes } from './Variantes';
+import { Zonas } from './Zonas';
 import { applySchema } from "src/common/apply-schema.decorator";
 
 @applySchema
 @Index('FK_Rutas_Zonas', ['idZona'], {})
-@Index('FK_Rutas_ZonasFin', ['idZonaFin'], {})
 @Entity('Rutas')
 export class Rutas {
   @PrimaryGeneratedColumn({ type: 'bigint', name: 'Id' })
@@ -20,13 +24,13 @@ export class Rutas {
   @Column('json', { name: 'PuntoInicio', nullable: true })
   puntoInicio: object | null;
 
-  @Column('varchar', { name: 'NombreInicio', length: 100, nullable: true })
+  @Column('varchar', { name: 'NombreInicio', length: 200, nullable: true })
   nombreInicio: string | null;
 
   @Column('json', { name: 'PuntoFin', nullable: true })
   puntoFin: object | null;
 
-  @Column('varchar', { name: 'NombreFin', length: 100, nullable: true })
+  @Column('varchar', { name: 'NombreFin', length: 200, nullable: true })
   nombreFin: string | null;
 
   @Column('datetime', {
@@ -51,5 +55,20 @@ export class Rutas {
   @Column("bigint", { name: "IdZonaFin", nullable: true })
   idZonaFin: number | null;
 
+  @Column("bigint", { name: "IdRutaIda", nullable: true })
+  idRutaIda: number | null;
 
+  @OneToMany(() => Variantes, (variantes) => variantes.idRuta2)
+  variantes: Variantes[];
+
+  @ManyToOne(() => Zonas, (zonas) => zonas.rutas, {
+    onDelete: 'NO ACTION',
+    onUpdate: 'NO ACTION',
+  })
+  @JoinColumn([{ name: 'IdZona', referencedColumnName: 'id' }])
+  idZona2: Zonas;
+
+  @ManyToOne(() => Zonas, { nullable: true })
+  @JoinColumn([{ name: "IdZonaFin", referencedColumnName: "id" }])
+  idZonaFin2: Zonas | null;
 }

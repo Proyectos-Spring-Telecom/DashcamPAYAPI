@@ -20,7 +20,7 @@ export class CreateModuloDto {
   @IsIn([0, 1], { message: 'Estatus solo puede ser 0 ó 1' })
   @IsOptional()
   @ApiProperty({
-    description: 'Estatus del Modulo solo es 1 ó 0',
+    description: 'Estatus del validador solo es 1 ó 0',
     example: '1',
   })
   estatus?: number = 1;

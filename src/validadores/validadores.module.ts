@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { ValidadoresService } from './validadores.service'; 
-import { ValidadoresController } from './validadores.controller'; 
+import { ValidadoresService } from './validadores.service';
+import { ValidadoresController } from './validadores.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Validadores } from 'src/entities/Validadores';
 import { BitacoraModule } from 'src/bitacora/bitacora.module';

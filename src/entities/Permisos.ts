@@ -1,6 +1,15 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
-import { applySchema } from "src/common/apply-schema.decorator";
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+} from "typeorm";
 import { Modulos } from "./Modulos";
+import { UsuariosPermisos } from "./UsuariosPermisos";
+import { applySchema } from "src/common/apply-schema.decorator";
 
 @applySchema
 @Index("UQ_Permisos_IdModulo_Nombre", ["nombre", "idModulo"], { unique: true })
@@ -40,4 +49,10 @@ export class Permisos {
   })
   @JoinColumn([{ name: "IdModulo", referencedColumnName: "id" }])
   idModulo2: Modulos;
+
+  @OneToMany(
+    () => UsuariosPermisos,
+    (usuariosPermisos) => usuariosPermisos.idPermiso2
+  )
+  usuariosPermisos: UsuariosPermisos[];
 }

@@ -7,6 +7,7 @@ import {
   IsObject,
   IsInt,
   IsIn,
+  IsBoolean,
 } from 'class-validator';
 
 export class CreateRutaDto {
@@ -78,4 +79,13 @@ export class CreateRutaDto {
   @IsOptional()
   @IsNumber()
   idZonaFin?: number | null;
+
+  @ApiPropertyOptional({
+    description: 'Indica si la ruta registra regreso',
+    example: false,
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  registraRegreso?: boolean = false;
 }

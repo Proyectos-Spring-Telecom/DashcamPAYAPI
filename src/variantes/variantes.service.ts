@@ -4,23 +4,25 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-} from "@nestjs/common";
-import { CreateVariantesDto } from "./dto/create-variantes.dto";
-import { UpdateVariantesDto } from "./dto/update-variantes.dto";
-import { generarRecorridoDetallado } from "../utils/recorrido.utils";
+} from '@nestjs/common';
+import { CreateVarianteDto } from './dto/create-variante.dto';
+import { UpdateVarianteDto } from './dto/update-variante.dto';
+import { generarRecorridoDetallado } from '../utils/recorrido.utils';
 import {
-  ApiVariantesResponse,
+  
   ApiResponseCommon,
+  ApiVarianteResponse,
   EstatusEnumBitcora,
-} from "../common/ApiResponse";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Rutas } from "src/entities/Rutas";
-import { Repository } from "typeorm";
-import { Variantes } from "src/entities/Variantes";
-import { BitacoraLoggerService } from "src/bitacora/bitacora.service";
-import { UsuariosZonas } from "src/entities/UsuariosZonas";
-import { UpdateVariantesEstatusDto } from "./dto/update-variantes-estatus.dto";
-import { Clientes } from "src/entities/Clientes";
+} from '../common/ApiResponse';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Rutas } from 'src/entities/Rutas';
+import { Repository } from 'typeorm';
+import { Variantes } from 'src/entities/Variantes';
+import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
+import { UsuariosZonas } from 'src/entities/UsuariosZonas';
+import { UpdateVariantesEstatusDto } from './dto/update-variante-estatus.dto';
+import { Clientes } from 'src/entities/Clientes';
+import { CatTipoVariante } from 'src/entities/CatTipoVariante';
 
 @Injectable()
 export class VariantesService {
@@ -28,74 +30,146 @@ export class VariantesService {
     @InjectRepository(Rutas)
     private readonly rutasRepository: Repository<Rutas>,
     @InjectRepository(UsuariosZonas)
-    private readonly usuariosZonasRepository: Repository<UsuariosZonas>,
+    private readonly usuarioszonasRepository: Repository<UsuariosZonas>,
     @InjectRepository(Variantes)
-    private readonly VariantesRepository: Repository<Variantes>,
+    private readonly variantesRepository: Repository<Variantes>,
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
-    private readonly bitacoraLogger: BitacoraLoggerService
+    @InjectRepository(CatTipoVariante)
+    private readonly catTipoVarianteRepository: Repository<CatTipoVariante>,
+    private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
 
   async create(
     idUser: number,
     cliente: number,
     rol: number,
-    createVariantesDto: CreateVariantesDto
+    createVarianteDto: CreateVarianteDto,
   ) {
     try {
-      const { recorridoDetallado: puntos } = createVariantesDto;
-      const newVariantes =
-        await this.VariantesRepository.create(createVariantesDto);
+      const { recorridoDetallado: puntos } = createVarianteDto;
+      
+      // Si no viene idTipoVariante, asignar 1 por defecto
+      const idTipoVariante = createVarianteDto.idTipoVariante || 1;
+      
+      const newVariante =
+        await this.variantesRepository.create({
+          ...createVarianteDto,
+          idTipoVariante: idTipoVariante,
+        });
 
       // Aplicamos interpolación
       const { recorridoDetallado, distanciaKm } =
         await generarRecorridoDetallado(puntos as any);
 
-      newVariantes.recorridoInterpolar = recorridoDetallado;
+      newVariante.recorridoInterpolar = recorridoDetallado;
 
-      const Variantesave = await this.VariantesRepository.save(newVariantes);
+      const varianteSave = await this.variantesRepository.save(newVariante);
+
+      // Si registraRegreso es true, crear la variante de regreso
+      if (createVarianteDto.registraRegreso === true) {
+        // Hacer una copia del recorridoDetallado y aplicar reverse
+        const recorridoDetalladoRegreso = [...puntos].reverse();
+
+        // Crear datos de la variante de regreso
+        const varianteRegresoData = {
+          nombre: `${createVarianteDto.nombre} Regreso`,
+          puntoInicio: createVarianteDto.puntoFin || null,
+          puntoFin: createVarianteDto.puntoInicio || null,
+          recorridoDetallado: recorridoDetalladoRegreso,
+          distanciaKm: createVarianteDto.distanciaKm || null,
+          estatus: createVarianteDto.estatus || 1,
+          idRuta: createVarianteDto.idRuta,
+          idVarianteIda: varianteSave.id,
+          idTipoVariante: idTipoVariante,
+        };
+
+        const newVarianteRegreso =
+          await this.variantesRepository.create(varianteRegresoData);
+
+        // Aplicar interpolación a la variante de regreso
+        const { recorridoDetallado: recorridoInterpolarRegreso, distanciaKm: distanciaKmRegreso } =
+          await generarRecorridoDetallado(recorridoDetalladoRegreso as any);
+
+        newVarianteRegreso.recorridoInterpolar = recorridoInterpolarRegreso;
+        if (distanciaKmRegreso) {
+          newVarianteRegreso.distanciaKm = distanciaKmRegreso;
+        }
+
+        const varianteRegresoSave = await this.variantesRepository.save(newVarianteRegreso);
+
+        // La variante original mantiene idVarianteIda en null
+        // Solo la variante de regreso tiene idVarianteIda apuntando a la original
+
+        // Registro en la bitácora SUCCESS para ambas variantes
+        const querylogger = { createVarianteDto, varianteRegreso: varianteRegresoData };
+        await this.bitacoraLogger.logToBitacora(
+          'Variantes',
+          `Se creó un Variante con nombre: ${varianteSave.nombre} (Id: ${varianteSave.id}) y su variante de regreso: ${varianteRegresoSave.nombre} (Id: ${varianteRegresoSave.id})`,
+          'CREATE',
+          querylogger,
+          idUser,
+          18,
+          EstatusEnumBitcora.SUCCESS,
+        );
+
+        // API response
+        const result: any = {
+          status: 'succes',
+          message: 'Se creo correctamente Variante y variante de regreso',
+          id: Number(varianteSave.id),
+          nombre: varianteSave.nombre,
+          distancia: Number(varianteSave.distanciaKm),
+          estatus: varianteSave.estatus,
+          idVarianteIda: Number(varianteRegresoSave.id),
+          nombreVarianteRegreso: varianteRegresoSave.nombre,
+          distanciaVarianteRegreso: Number(varianteRegresoSave.distanciaKm),
+        };
+
+        return result;
+      }
 
       // Registro en la bitácora SUCCESS
-      const querylogger = { createVariantesDto };
+      const querylogger = { createVarianteDto };
       await this.bitacoraLogger.logToBitacora(
-        "Variantes",
-        `Se creó un Variantes con nombre: ${Variantesave.nombre} y Id: ${Variantesave.id}`,
-        "CREATE",
+        'Variantes',
+        `Se creó un Variante con nombre: ${varianteSave.nombre} y Id: ${varianteSave.id}`,
+        'CREATE',
         querylogger,
         idUser,
         18,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       //API response
-      const result: ApiVariantesResponse = {
-        status: "succes",
-        message: "Se creo correctamente Variantes",
-        id: Number(Variantesave.id),
-        nombre: Variantesave.nombre,
-        distancia: Number(Variantesave.distanciaKm),
-        estatus: Variantesave.estatus,
+      const result: ApiVarianteResponse = {
+        status: 'succes',
+        message: 'Se creo correctamente Variante',
+        id: Number(varianteSave.id),
+        nombre: varianteSave.nombre,
+        distancia: Number(varianteSave.distanciaKm),
+        estatus: varianteSave.estatus,
       };
 
       return result;
     } catch (error) {
       // Registro en la bitácora ERROR
-      const querylogger = { createVariantesDto };
+      const querylogger = { createVarianteDto };
       await this.bitacoraLogger.logToBitacora(
-        "Variantes",
-        `Se creó un Variantes con nombre: ${createVariantesDto.nombre}`,
-        "CREATE",
+        'Variantes',
+        `Se creó un Variante con nombre: ${createVarianteDto.nombre}`,
+        'CREATE',
         querylogger,
         idUser,
         18,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al crear Variantes",
+        message: 'Error al crear Variante',
         error: error.message,
       });
     }
@@ -105,7 +179,7 @@ export class VariantesService {
   private async clienteHijos(cliente: number) {
     const clientesFiltrado = await this.clienteRepository.query(
       `CALL spGetClientes(?);`,
-      [cliente]
+      [cliente],
     );
 
     const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
@@ -117,27 +191,27 @@ export class VariantesService {
     }
 
     // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => "?").join(", ");
+    const placeholders = ids.map(() => '?').join(', ');
     return { ids, placeholders };
   }
 
-  private async consultarVariantesPaginado(
+  private async consultarVariantePaginado(
     cliente: number,
     limit: number,
-    offset: number
+    offset: number,
   ) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `
   SELECT 
-    -- Datos del Variantes (datos principales)
+    -- Datos del Variante (datos principales)
     d.Id AS id,
-    d.Nombre AS nombreVariantes,
+    d.Nombre AS nombreVariante,
     d.PuntoInicio AS puntoInicio,
     d.PuntoFin AS puntoFin,
     d.RecorridoDetallado AS recorridoDetallado,
     d.DistanciaKm AS distanciaKm,
-    d.FechaCreacion AS fechaCreacionVariantes,
-    d.Estatus AS estatusVariantes,
+    d.FechaCreacion AS fechaCreacionVariante,
+    d.Estatus AS estatusVariante,
 
     -- Datos de la ruta asociada
     ru.Id AS idRuta,
@@ -147,26 +221,26 @@ export class VariantesService {
     ru.FechaCreacion AS fechaCreacionRuta,
     ru.Estatus AS estatusRuta,
 
-    -- Zonas de inicio
-    r.Id AS idZonasInicio,
-    r.Nombre AS nombreZonasInicio,
-    r.Descripcion AS descripcionZonasInicio,
-    r.FechaCreacion AS fechaCreacionZonasInicio,
-    r.FechaActualizacion AS fechaActualizacionZonasInicio,
-    r.Estatus AS estatusZonasInicio,
+    -- Zona de inicio
+    r.Id AS idZonaInicio,
+    r.Nombre AS nombreZonaInicio,
+    r.Descripcion AS descripcionZonaInicio,
+    r.FechaCreacion AS fechaCreacionZonaInicio,
+    r.FechaActualizacion AS fechaActualizacionZonaInicio,
+    r.Estatus AS estatusZonaInicio,
 
-    -- Zonas de fin
-    rf.Id AS idZonasFin,
-    rf.Nombre AS nombreZonasFin,
-    rf.Descripcion AS descripcionZonasFin,
-    rf.FechaCreacion AS fechaCreacionZonasFin,
-    rf.FechaActualizacion AS fechaActualizacionZonasFin,
-    rf.Estatus AS estatusZonasFin,
+    -- Zona de fin
+    rf.Id AS idZonaFin,
+    rf.Nombre AS nombreZonaFin,
+    rf.Descripcion AS descripcionZonaFin,
+    rf.FechaCreacion AS fechaCreacionZonaFin,
+    rf.FechaActualizacion AS fechaActualizacionZonaFin,
+    rf.Estatus AS estatusZonaFin,
 
     -- Cliente relacionado
     c.Id AS idCliente,
     c.Nombre AS nombreCliente,
-    c.ApellidoPaterno As apellidoPaternoCliente,
+    c.ApellidoPaterno AS apellidoPaternoCliente,
     c.ApellidoMaterno AS apellidoMaternoCliente,
     c.Estatus AS estatusCliente,
     CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
@@ -179,16 +253,20 @@ INNER JOIN Clientes c ON r.IdCliente = c.Id
 
 WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
   AND ru.Estatus = 1         -- Solo rutas activas
-  AND r.Estatus = 1          -- Solo ZonasUsuariosZonas activas
+  AND r.Estatus = 1          -- Solo zonas activas
 
 ORDER BY d.Id DESC
 
   LIMIT ? OFFSET ?;
     `;
-    return this.usuariosZonasRepository.query(query, [...ids, limit, offset]);
+    return this.usuarioszonasRepository.query(query, [
+      ...ids,
+      limit,
+      offset,
+    ]);
   }
 
-  private async consultarTotalVariantesPaginados(cliente: number) {
+  private async consultarTotalVariantePaginados(cliente: number) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `  
     SELECT COUNT(*) AS total
@@ -199,11 +277,10 @@ LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
 WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
-  AND c.Estatus = 1
   AND ru.Estatus = 1         -- Solo rutas activas
-  AND r.Estatus = 1          -- Solo ZonasUsuariosZonas activas
+  AND r.Estatus = 1          -- Solo zonas activas
 `;
-    return await this.usuariosZonasRepository.query(query, [...ids]);
+    return await this.usuarioszonasRepository.query(query, [...ids]);
   }
 
   async findAll(
@@ -211,7 +288,7 @@ WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que qu
     cliente: number,
     rol: number,
     page: number,
-    limit: number
+    limit: number,
   ): Promise<ApiResponseCommon> {
     try {
       const offset = (page - 1) * limit;
@@ -220,18 +297,18 @@ WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que qu
       switch (rol) {
         case 1:
           // Consulta de datos paginados Usuario SuperAdministrador
-          data = await this.usuariosZonasRepository.query(
+          data = await this.usuarioszonasRepository.query(
             `
   SELECT 
-    -- Datos del Variantes (datos principales)
+    -- Datos del Variante (datos principales)
     d.Id AS id,
-    d.Nombre AS nombreVariantes,
+    d.Nombre AS nombreVariante,
     d.PuntoInicio AS puntoInicio,
     d.PuntoFin AS puntoFin,
     d.RecorridoDetallado AS recorridoDetallado,
     d.DistanciaKm AS distanciaKm,
-    d.FechaCreacion AS fechaCreacionVariantes,
-    d.Estatus AS estatusVariantes,
+    d.FechaCreacion AS fechaCreacionVariante,
+    d.Estatus AS estatusVariante,
 
     -- Datos de la ruta asociada
     ru.Id AS idRuta,
@@ -241,26 +318,26 @@ WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que qu
     ru.FechaCreacion AS fechaCreacionRuta,
     ru.Estatus AS estatusRuta,
 
-    -- Zonas de inicio
-    r.Id AS idZonasInicio,
-    r.Nombre AS nombreZonasInicio,
-    r.Descripcion AS descripcionZonasInicio,
-    r.FechaCreacion AS fechaCreacionZonasInicio,
-    r.FechaActualizacion AS fechaActualizacionZonasInicio,
-    r.Estatus AS estatusZonasInicio,
+    -- Zona de inicio
+    r.Id AS idZonaInicio,
+    r.Nombre AS nombreZonaInicio,
+    r.Descripcion AS descripcionZonaInicio,
+    r.FechaCreacion AS fechaCreacionZonaInicio,
+    r.FechaActualizacion AS fechaActualizacionZonaInicio,
+    r.Estatus AS estatusZonaInicio,
 
-    -- Zonas de fin
-    rf.Id AS idZonasFin,
-    rf.Nombre AS nombreZonasFin,
-    rf.Descripcion AS descripcionZonasFin,
-    rf.FechaCreacion AS fechaCreacionZonasFin,
-    rf.FechaActualizacion AS fechaActualizacionZonasFin,
-    rf.Estatus AS estatusZonasFin,
+    -- Zona de fin
+    rf.Id AS idZonaFin,
+    rf.Nombre AS nombreZonaFin,
+    rf.Descripcion AS descripcionZonaFin,
+    rf.FechaCreacion AS fechaCreacionZonaFin,
+    rf.FechaActualizacion AS fechaActualizacionZonaFin,
+    rf.Estatus AS estatusZonaFin,
 
     -- Cliente relacionado
     c.Id AS idCliente,
     c.Nombre AS nombreCliente,
-    c.ApellidoPaterno As apellidoPaternoCliente,
+    c.ApellidoPaterno AS apellidoPaternoCliente,
     c.ApellidoMaterno AS apellidoMaternoCliente,
     c.Estatus AS estatusCliente,
     CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
@@ -272,19 +349,19 @@ LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
 WHERE ru.Estatus = 1         -- Solo rutas activas
-  AND r.Estatus = 1          -- Solo ZonasUsuariosZonas activas
+  AND r.Estatus = 1          -- Solo zonas activas
 
 ORDER BY d.Id DESC
 
   LIMIT ? OFFSET ?;
   `,
-            [limit, offset]
+            [limit, offset],
           );
 
           // Query para total (sin paginación)
-          totalResult = await this.usuariosZonasRepository.query(
+          totalResult = await this.usuarioszonasRepository.query(
             `
-    SELECT COUNT(*) AS total
+SELECT COUNT(*) AS total
 FROM Variantes d
 INNER JOIN Rutas ru ON d.IdRuta = ru.Id
 INNER JOIN Zonas r ON ru.IdZona = r.Id
@@ -292,49 +369,58 @@ LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
 WHERE ru.Estatus = 1         -- Solo rutas activas
-  AND r.Estatus = 1          -- Solo ZonasUsuariosZonas activas
-  `
+  AND r.Estatus = 1  
+  `,
           );
           break;
 
         case 2:
           // Consulta de datos paginados Usuario Administrador
-          data = await this.consultarVariantesPaginado(cliente, limit, offset);
+          data = await this.consultarVariantePaginado(cliente, limit, offset);
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalVariantesPaginados(cliente);
+          totalResult = await this.consultarTotalVariantePaginados(cliente);
+          break;
+
+        case 3:
+          // Consulta de datos paginados Usuario Operador
+          data = await this.consultarVariantePaginado(cliente, limit, offset);
+
+          // Query para total (sin paginación)
+          totalResult = await this.consultarTotalVariantePaginados(cliente);
           break;
 
         case 8:
           // Consulta de datos paginados Usuario Reportes
-          data = await this.consultarVariantesPaginado(cliente, limit, offset);
+          data = await this.consultarVariantePaginado(cliente, limit, offset);
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalVariantesPaginados(cliente);
+          totalResult = await this.consultarTotalVariantePaginados(cliente);
           break;
 
         case 10:
           // Consulta de datos paginados Usuario Capturista
-          data = await this.consultarVariantesPaginado(cliente, limit, offset);
+          data = await this.consultarVariantePaginado(cliente, limit, offset);
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalVariantesPaginados(cliente);
+          totalResult = await this.consultarTotalVariantePaginados(cliente);
           break;
 
         default:
           // Consulta de datos paginados Usuario
-          data = await this.usuariosZonasRepository.query(
+          const { ids, placeholders } = await this.clienteHijos(cliente)
+          data = await this.usuarioszonasRepository.query(
             `
   SELECT 
-    -- Datos del Variantes (datos principales)
+    -- Datos del Variante (datos principales)
     d.Id AS id,
-    d.Nombre AS nombreVariantes,
+    d.Nombre AS nombreVariante,
     d.PuntoInicio AS puntoInicio,
     d.PuntoFin AS puntoFin,
     d.RecorridoDetallado AS recorridoDetallado,
     d.DistanciaKm AS distanciaKm,
-    d.FechaCreacion AS fechaCreacionVariantes,
-    d.Estatus AS estatusVariantes,
+    d.FechaCreacion AS fechaCreacionVariante,
+    d.Estatus AS estatusVariante,
 
     -- Datos de la ruta asociada
     ru.Id AS idRuta,
@@ -344,26 +430,26 @@ WHERE ru.Estatus = 1         -- Solo rutas activas
     ru.FechaCreacion AS fechaCreacionRuta,
     ru.Estatus AS estatusRuta,
 
-    -- Zonas de inicio
-    r.Id AS idZonasInicio,
-    r.Nombre AS nombreZonasInicio,
-    r.Descripcion AS descripcionZonasInicio,
-    r.FechaCreacion AS fechaCreacionZonasInicio,
-    r.FechaActualizacion AS fechaActualizacionZonasInicio,
-    r.Estatus AS estatusZonasInicio,
+    -- Zona de inicio
+    r.Id AS idZonaInicio,
+    r.Nombre AS nombreZonaInicio,
+    r.Descripcion AS descripcionZonaInicio,
+    r.FechaCreacion AS fechaCreacionZonaInicio,
+    r.FechaActualizacion AS fechaActualizacionZonaInicio,
+    r.Estatus AS estatusZonaInicio,
 
-    -- Zonas de fin
-    rf.Id AS idZonasFin,
-    rf.Nombre AS nombreZonasFin,
-    rf.Descripcion AS descripcionZonasFin,
-    rf.FechaCreacion AS fechaCreacionZonasFin,
-    rf.FechaActualizacion AS fechaActualizacionZonasFin,
-    rf.Estatus AS estatusZonasFin,
+    -- Zona de fin
+    rf.Id AS idZonaFin,
+    rf.Nombre AS nombreZonaFin,
+    rf.Descripcion AS descripcionZonaFin,
+    rf.FechaCreacion AS fechaCreacionZonaFin,
+    rf.FechaActualizacion AS fechaActualizacionZonaFin,
+    rf.Estatus AS estatusZonaFin,
 
     -- Cliente relacionado
     c.Id AS idCliente,
     c.Nombre AS nombreCliente,
-    c.ApellidoPaterno As apellidoPaternoCliente,
+    c.ApellidoPaterno AS apellidoPaternoCliente,
     c.ApellidoMaterno AS apellidoMaternoCliente,
     c.Estatus AS estatusCliente,
     CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
@@ -375,33 +461,33 @@ WHERE ru.Estatus = 1         -- Solo rutas activas
   INNER JOIN Clientes c ON r.IdCliente = c.Id
   INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
 
-  WHERE ur.IdUsuario = 1
-    AND ur.Estatus = 1
-    AND r.Estatus = 1
-    AND ru.Estatus = 1
-
-  ORDER BY d.Id DESC
-  LIMIT ? OFFSET ?
-  `,
-            [idUser, limit, offset]
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.usuariosZonasRepository.query(
-            `
-SELECT COUNT(*) AS total
-  INNER JOIN Rutas ru ON d.IdRuta = ru.Id
-  INNER JOIN Zonas r ON ru.IdZona = r.Id
-  LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
-  INNER JOIN Clientes c ON r.IdCliente = c.Id
-  INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
-
   WHERE ur.IdUsuario = ?
     AND ur.Estatus = 1
     AND r.Estatus = 1
     AND ru.Estatus = 1
+    AND c.Id = IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+
+  ORDER BY d.Id DESC
+  LIMIT ? OFFSET ?
   `,
-            [idUser]
+            [idUser, ...ids, limit, offset],
+          );
+
+          // Query para total (sin paginación)
+          totalResult = await this.usuarioszonasRepository.query(
+            `
+SELECT COUNT(*) AS total
+FROM Variantes d
+INNER JOIN Rutas ru ON d.IdRuta = ru.Id
+INNER JOIN Zonas r ON ru.IdZona = r.Id
+INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
+WHERE ur.IdUsuario = ?
+  AND ur.Estatus = 1
+  AND r.Estatus = 1
+  AND ru.Estatus = 1
+  AND r.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+  `,
+            [idUser, ...ids],
           );
           break;
       }
@@ -412,8 +498,8 @@ SELECT COUNT(*) AS total
         ...item,
         id: Number(item.id),
         idRuta: Number(item.idRuta),
-        idZonasInicio: Number(item.idZonasInicio),
-        idZonasFin: item.idZonasFin ? Number(item.idZonasFin) : null,
+        idZonaInicio: Number(item.idZonaInicio),
+        idZonaFin: item.idZonaFin ? Number(item.idZonaFin) : null,
         idCliente: Number(item.idCliente),
         distanciaKm: Number(item.distanciaKm),
       }));
@@ -433,25 +519,25 @@ SELECT COUNT(*) AS total
       if (error instanceof HttpException) throw error;
 
       throw new InternalServerErrorException({
-        message: "Error al obtener paginado Variantes",
+        message: 'Error al obtener paginado Variantes',
         error: error.message,
       });
     }
   }
 
-  private async consultarVariantesListado(cliente: number) {
+  private async consultarVarianteListado(cliente: number) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `
   SELECT 
-    -- Datos del Variantes (datos principales)
+    -- Datos del Variante (datos principales)
     d.Id AS id,
-    d.Nombre AS nombreVariantes,
+    d.Nombre AS nombreVariante,
     d.PuntoInicio AS puntoInicio,
     d.PuntoFin AS puntoFin,
     d.RecorridoDetallado AS recorridoDetallado,
     d.DistanciaKm AS distanciaKm,
-    d.FechaCreacion AS fechaCreacionVariantes,
-    d.Estatus AS estatusVariantes,
+    d.FechaCreacion AS fechaCreacionVariante,
+    d.Estatus AS estatusVariante,
 
     -- Datos de la ruta asociada
     ru.Id AS idRuta,
@@ -461,26 +547,26 @@ SELECT COUNT(*) AS total
     ru.FechaCreacion AS fechaCreacionRuta,
     ru.Estatus AS estatusRuta,
 
-    -- Zonas de inicio
-    r.Id AS idZonasInicio,
-    r.Nombre AS nombreZonasInicio,
-    r.Descripcion AS descripcionZonasInicio,
-    r.FechaCreacion AS fechaCreacionZonasInicio,
-    r.FechaActualizacion AS fechaActualizacionZonasInicio,
-    r.Estatus AS estatusZonasInicio,
+    -- Zona de inicio
+    r.Id AS idZonaInicio,
+    r.Nombre AS nombreZonaInicio,
+    r.Descripcion AS descripcionZonaInicio,
+    r.FechaCreacion AS fechaCreacionZonaInicio,
+    r.FechaActualizacion AS fechaActualizacionZonaInicio,
+    r.Estatus AS estatusZonaInicio,
 
-    -- Zonas de fin
-    rf.Id AS idZonasFin,
-    rf.Nombre AS nombreZonasFin,
-    rf.Descripcion AS descripcionZonasFin,
-    rf.FechaCreacion AS fechaCreacionZonasFin,
-    rf.FechaActualizacion AS fechaActualizacionZonasFin,
-    rf.Estatus AS estatusZonasFin,
+    -- Zona de fin
+    rf.Id AS idZonaFin,
+    rf.Nombre AS nombreZonaFin,
+    rf.Descripcion AS descripcionZonaFin,
+    rf.FechaCreacion AS fechaCreacionZonaFin,
+    rf.FechaActualizacion AS fechaActualizacionZonaFin,
+    rf.Estatus AS estatusZonaFin,
 
     -- Cliente relacionado
     c.Id AS idCliente,
     c.Nombre AS nombreCliente,
-    c.ApellidoPaterno As apellidoPaternoCliente,
+    c.ApellidoPaterno AS apellidoPaternoCliente,
     c.ApellidoMaterno AS apellidoMaternoCliente,
     c.Estatus AS estatusCliente,
     CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
@@ -494,12 +580,12 @@ INNER JOIN Clientes c ON r.IdCliente = c.Id
 WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
   AND c.Estatus = 1
   AND ru.Estatus = 1         -- Solo rutas activas
-  AND r.Estatus = 1          -- Solo ZonasUsuariosZonas activas
+  AND r.Estatus = 1          -- Solo zonas activas
   AND d.Estatus = 1
 
-ORDER BY d.Id DESC
+ORDER BY d.Id DESC;
     `;
-    return this.usuariosZonasRepository.query(query, [...ids]);
+    return this.usuarioszonasRepository.query(query, [...ids]);
   }
 
   async findAllList(idUser: number, cliente: number, rol: number) {
@@ -508,18 +594,18 @@ ORDER BY d.Id DESC
       switch (rol) {
         case 1:
           // Consulta de datos paginados Usuario SuperAdministrador
-          data = await this.usuariosZonasRepository.query(
+          data = await this.usuarioszonasRepository.query(
             `
   SELECT 
-    -- Datos del Variantes (datos principales)
+    -- Datos del Variante (datos principales)
     d.Id AS id,
-    d.Nombre AS nombreVariantes,
+    d.Nombre AS nombreVariante,
     d.PuntoInicio AS puntoInicio,
     d.PuntoFin AS puntoFin,
     d.RecorridoDetallado AS recorridoDetallado,
     d.DistanciaKm AS distanciaKm,
-    d.FechaCreacion AS fechaCreacionVariantes,
-    d.Estatus AS estatusVariantes,
+    d.FechaCreacion AS fechaCreacionVariante,
+    d.Estatus AS estatusVariante,
 
     -- Datos de la ruta asociada
     ru.Id AS idRuta,
@@ -529,26 +615,26 @@ ORDER BY d.Id DESC
     ru.FechaCreacion AS fechaCreacionRuta,
     ru.Estatus AS estatusRuta,
 
-    -- Zonas de inicio
-    r.Id AS idZonasInicio,
-    r.Nombre AS nombreZonasInicio,
-    r.Descripcion AS descripcionZonasInicio,
-    r.FechaCreacion AS fechaCreacionZonasInicio,
-    r.FechaActualizacion AS fechaActualizacionZonasInicio,
-    r.Estatus AS estatusZonasInicio,
+    -- Zona de inicio
+    r.Id AS idZonaInicio,
+    r.Nombre AS nombreZonaInicio,
+    r.Descripcion AS descripcionZonaInicio,
+    r.FechaCreacion AS fechaCreacionZonaInicio,
+    r.FechaActualizacion AS fechaActualizacionZonaInicio,
+    r.Estatus AS estatusZonaInicio,
 
-    -- Zonas de fin
-    rf.Id AS idZonasFin,
-    rf.Nombre AS nombreZonasFin,
-    rf.Descripcion AS descripcionZonasFin,
-    rf.FechaCreacion AS fechaCreacionZonasFin,
-    rf.FechaActualizacion AS fechaActualizacionZonasFin,
-    rf.Estatus AS estatusZonasFin,
+    -- Zona de fin
+    rf.Id AS idZonaFin,
+    rf.Nombre AS nombreZonaFin,
+    rf.Descripcion AS descripcionZonaFin,
+    rf.FechaCreacion AS fechaCreacionZonaFin,
+    rf.FechaActualizacion AS fechaActualizacionZonaFin,
+    rf.Estatus AS estatusZonaFin,
 
     -- Cliente relacionado
     c.Id AS idCliente,
     c.Nombre AS nombreCliente,
-    c.ApellidoPaterno As apellidoPaternoCliente,
+    c.ApellidoPaterno AS apellidoPaternoCliente,
     c.ApellidoMaterno AS apellidoMaternoCliente,
     c.Estatus AS estatusCliente,
     CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
@@ -559,94 +645,102 @@ INNER JOIN Zonas r ON ru.IdZona = r.Id
 LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
-WHERE c.Estatus = 1
-  AND ru.Estatus = 1         -- Solo rutas activas
-  AND r.Estatus = 1          -- Solo ZonasUsuariosZonas activas
+WHERE ru.Estatus = 1         -- Solo rutas activas
+  AND r.Estatus = 1          -- Solo zonas activas
   AND d.Estatus = 1
+  AND c.Estatus = 1
 
-ORDER BY d.Id DESC
-      `
+ORDER BY d.Id DESC;
+      `,
           );
           break;
 
         case 2:
           // Consulta de datos paginados Usuario Administrador
-          data = await this.consultarVariantesListado(cliente);
+          data = await this.consultarVarianteListado(cliente);
+          break;
+
+        case 3:
+          // Consulta de datos paginados Usuario Operador
+          data = await this.consultarVarianteListado(cliente);
           break;
 
         case 8:
           // Consulta de datos paginados Usuario Reportes
-          data = await this.consultarVariantesListado(cliente);
+          data = await this.consultarVarianteListado(cliente);
           break;
 
         case 10:
           // Consulta de datos paginados Usuario Capturista
-          data = await this.consultarVariantesListado(cliente);
+          data = await this.consultarVarianteListado(cliente);
           break;
 
         default:
           // Consulta de datos paginados Usuario
-          data = await this.usuariosZonasRepository.query(
+          const { ids, placeholders } = await this.clienteHijos(cliente)
+          data = await this.usuarioszonasRepository.query(
             `
-  SELECT 
-    -- Datos del Variantes (datos principales)
-    d.Id AS id,
-    d.Nombre AS nombreVariantes,
-    d.PuntoInicio AS puntoInicio,
-    d.PuntoFin AS puntoFin,
-    d.RecorridoDetallado AS recorridoDetallado,
-    d.DistanciaKm AS distanciaKm,
-    d.FechaCreacion AS fechaCreacionVariantes,
-    d.Estatus AS estatusVariantes,
+      SELECT 
+  -- Datos del Variante (datos principales)
+  d.Id AS id,
+  d.Nombre AS nombreVariante,
+  d.PuntoInicio AS puntoInicio,
+  d.PuntoFin AS puntoFin,
+  d.RecorridoDetallado AS recorridoDetallado,
+  d.DistanciaKm AS distanciaKm,
+  d.FechaCreacion AS fechaCreacionVariante,
+  d.Estatus AS estatusVariante,
 
-    -- Datos de la ruta asociada
-    ru.Id AS idRuta,
-    ru.Nombre AS nombreRuta,
-    ru.NombreInicio AS nombreInicio,
-    ru.NombreFin AS nombreFin,
-    ru.FechaCreacion AS fechaCreacionRuta,
-    ru.Estatus AS estatusRuta,
+  -- Datos de la ruta asociada
+  ru.Id AS idRuta,
+  ru.Nombre AS nombreRuta,
+  ru.NombreInicio AS nombreInicio,
+  ru.NombreFin AS nombreFin,
+  ru.FechaCreacion AS fechaCreacionRuta,
+  ru.Estatus AS estatusRuta,
 
-    -- Zonas de inicio
-    r.Id AS idZonasInicio,
-    r.Nombre AS nombreZonasInicio,
-    r.Descripcion AS descripcionZonasInicio,
-    r.FechaCreacion AS fechaCreacionZonasInicio,
-    r.FechaActualizacion AS fechaActualizacionZonasInicio,
-    r.Estatus AS estatusZonasInicio,
+  -- Zona de inicio
+  r.Id AS idZonaInicio,
+  r.Nombre AS nombreZonaInicio,
+  r.Descripcion AS descripcionZonaInicio,
+  r.FechaCreacion AS fechaCreacionZonaInicio,
+  r.FechaActualizacion AS fechaActualizacionZonaInicio,
+  r.Estatus AS estatusZonaInicio,
 
-    -- Zonas de fin
-    rf.Id AS idZonasFin,
-    rf.Nombre AS nombreZonasFin,
-    rf.Descripcion AS descripcionZonasFin,
-    rf.FechaCreacion AS fechaCreacionZonasFin,
-    rf.FechaActualizacion AS fechaActualizacionZonasFin,
-    rf.Estatus AS estatusZonasFin,
+  -- Zona de fin
+  rf.Id AS idZonaFin,
+  rf.Nombre AS nombreZonaFin,
+  rf.Descripcion AS descripcionZonaFin,
+  rf.FechaCreacion AS fechaCreacionZonaFin,
+  rf.FechaActualizacion AS fechaActualizacionZonaFin,
+  rf.Estatus AS estatusZonaFin,
 
-    -- Cliente relacionado
-    c.Id AS idCliente,
-    c.Nombre AS nombreCliente,
-    c.ApellidoPaterno As apellidoPaternoCliente,
-    c.ApellidoMaterno AS apellidoMaternoCliente,
-    c.Estatus AS estatusCliente,
-    CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
+  -- Cliente relacionado
+  c.Id AS idCliente,
+  c.Nombre AS nombreCliente,
+  c.ApellidoPaterno AS apellidoPaternoCliente,
+  c.ApellidoMaterno AS apellidoMaternoCliente,
+  c.Estatus AS estatusCliente,
+  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
 
-  FROM Variantes d
-  INNER JOIN Rutas ru ON d.IdRuta = ru.Id
-  INNER JOIN Zonas r ON ru.IdZona = r.Id
-  LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
-  INNER JOIN Clientes c ON r.IdCliente = c.Id
-  INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
+FROM Variantes d
+INNER JOIN Rutas ru ON d.IdRuta = ru.Id
+INNER JOIN Zonas r ON ru.IdZona = r.Id
+LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
+INNER JOIN Clientes c ON r.IdCliente = c.Id
+INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
 
-  WHERE ur.IdUsuario = ?
-    AND ur.Estatus = 1
-    AND r.Estatus = 1
-    AND ru.Estatus = 1
-    AND d.Estatus = 1
+WHERE 
+ ur.Estatus = 1
+  AND r.Estatus = 1
+  AND ru.Estatus = 1
+  AND d.Estatus = 1
+  AND c.Estatus = 1
+   
 
-  ORDER BY d.Id DESC
+ORDER BY d.Id DESC;
       `,
-            [idUser] // parámetro seguro
+            [idUser, ids], // parámetro seguro
           );
           break;
       }
@@ -655,8 +749,8 @@ ORDER BY d.Id DESC
         ...item,
         id: Number(item.id),
         idRuta: Number(item.idRuta),
-        idZonasInicio: Number(item.idZonasInicio),
-        idZonasFin: item.idZonasFin ? Number(item.idZonasFin) : null,
+        idZonaInicio: Number(item.idZonaInicio),
+        idZonaFin: item.idZonaFin ? Number(item.idZonaFin) : null,
         idCliente: Number(item.idCliente),
         distanciaKm: Number(item.distanciaKm),
       }));
@@ -670,25 +764,122 @@ ORDER BY d.Id DESC
       if (error instanceof HttpException) throw error;
 
       throw new InternalServerErrorException({
-        message: "Error al obtener listado Variantes",
+        message: 'Error al obtener listado Variantes',
         error: error.message,
       });
     }
   }
 
-  private async consultarVariantesOne(cliente: number, id: number) {
+  // ========================================
+  // 🔹 OBTENER VARIANTES POR RUTA
+  // ========================================
+  async findByRuta(idRuta: number, idUser: number, rol: number) {
+    try {
+      // Consulta directa de variantes por ruta (solo la ruta especificada)
+      const variantes = await this.variantesRepository.query(
+        `
+SELECT 
+  -- Datos del variante (datos principales)
+  d.Id AS id,
+  d.Nombre AS nombreVariante,
+  d.PuntoInicio AS puntoInicio,
+  d.PuntoFin AS puntoFin,
+  d.RecorridoDetallado AS recorridoDetallado,
+  d.DistanciaKm AS distanciaKm,
+  d.FechaCreacion AS fechaCreacionVariante,
+  d.Estatus AS estatusVariante,
+
+  -- Datos de la ruta asociada
+  ru.Id AS idRuta,
+  ru.Nombre AS nombreRuta,
+  ru.NombreInicio AS nombreInicio,
+  ru.NombreFin AS nombreFin,
+  ru.FechaCreacion AS fechaCreacionRuta,
+  ru.Estatus AS estatusRuta,
+
+  -- Región de inicio
+  r.Id AS idRegionInicio,
+  r.Nombre AS nombreRegionInicio,
+  r.Descripcion AS descripcionRegionInicio,
+  r.FechaCreacion AS fechaCreacionRegionInicio,
+  r.FechaActualizacion AS fechaActualizacionRegionInicio,
+  r.Estatus AS estatusRegionInicio,
+
+  -- Región de fin
+  rf.Id AS idRegionFin,
+  rf.Nombre AS nombreRegionFin,
+  rf.Descripcion AS descripcionRegionFin,
+  rf.FechaCreacion AS fechaCreacionRegionFin,
+  rf.FechaActualizacion AS fechaActualizacionRegionFin,
+  rf.Estatus AS estatusRegionFin,
+
+  -- Cliente relacionado
+  c.Id AS idCliente,
+  c.Nombre AS nombreCliente,
+  c.ApellidoPaterno AS apellidoPaternoCliente,
+  c.ApellidoMaterno AS apellidoMaternoCliente,
+  c.Estatus AS estatusCliente,
+  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
+
+FROM Variantes d
+INNER JOIN Rutas ru ON d.IdRuta = ru.Id
+INNER JOIN Zonas r ON ru.IdZona = r.Id
+LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
+INNER JOIN Clientes c ON r.IdCliente = c.Id
+
+WHERE 
+  d.IdRuta = ?
+  AND r.Estatus = 1
+  AND ru.Estatus = 1
+  AND d.Estatus = 1
+  AND c.Estatus = 1
+
+ORDER BY d.Id DESC
+        `,
+        [idRuta],
+      );
+
+      // Mapeo de resultados con conversión de tipos
+      const data = variantes.map((item) => ({
+        ...item,
+        id: Number(item.id),
+        idRuta: Number(item.idRuta),
+        idRegionInicio: Number(item.idRegionInicio),
+        idRegionFin: item.idRegionFin ? Number(item.idRegionFin) : null,
+        idCliente: Number(item.idCliente),
+        distanciaKm: Number(item.distanciaKm),
+      }));
+
+      // API response
+      const result: ApiResponseCommon = {
+        data: data,
+      };
+
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException({
+        message: 'Error al obtener variantes por ruta',
+        error: error.message,
+      });
+    }
+  }
+
+  private async consultarVarianteByRuta(cliente: number, id: number) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `
   SELECT 
-    -- Datos del Variantes (datos principales)
+    -- Datos del Variante (datos principales)
     d.Id AS id,
-    d.Nombre AS nombreVariantes,
+    d.Nombre AS nombreVariante,
     d.PuntoInicio AS puntoInicio,
     d.PuntoFin AS puntoFin,
     d.RecorridoDetallado AS recorridoDetallado,
     d.DistanciaKm AS distanciaKm,
-    d.FechaCreacion AS fechaCreacionVariantes,
-    d.Estatus AS estatusVariantes,
+    d.FechaCreacion AS fechaCreacionVariante,
+    d.Estatus AS estatusVariante,
 
     -- Datos de la ruta asociada
     ru.Id AS idRuta,
@@ -698,26 +889,26 @@ ORDER BY d.Id DESC
     ru.FechaCreacion AS fechaCreacionRuta,
     ru.Estatus AS estatusRuta,
 
-    -- Zonas de inicio
-    r.Id AS idZonasInicio,
-    r.Nombre AS nombreZonasInicio,
-    r.Descripcion AS descripcionZonasInicio,
-    r.FechaCreacion AS fechaCreacionZonasInicio,
-    r.FechaActualizacion AS fechaActualizacionZonasInicio,
-    r.Estatus AS estatusZonasInicio,
+    -- Zona de inicio
+    r.Id AS idZonaInicio,
+    r.Nombre AS nombreZonaInicio,
+    r.Descripcion AS descripcionZonaInicio,
+    r.FechaCreacion AS fechaCreacionZonaInicio,
+    r.FechaActualizacion AS fechaActualizacionZonaInicio,
+    r.Estatus AS estatusZonaInicio,
 
-    -- Zonas de fin
-    rf.Id AS idZonasFin,
-    rf.Nombre AS nombreZonasFin,
-    rf.Descripcion AS descripcionZonasFin,
-    rf.FechaCreacion AS fechaCreacionZonasFin,
-    rf.FechaActualizacion AS fechaActualizacionZonasFin,
-    rf.Estatus AS estatusZonasFin,
+    -- Zona de fin
+    rf.Id AS idZonaFin,
+    rf.Nombre AS nombreZonaFin,
+    rf.Descripcion AS descripcionZonaFin,
+    rf.FechaCreacion AS fechaCreacionZonaFin,
+    rf.FechaActualizacion AS fechaActualizacionZonaFin,
+    rf.Estatus AS estatusZonaFin,
 
     -- Cliente relacionado
     c.Id AS idCliente,
     c.Nombre AS nombreCliente,
-    c.ApellidoPaterno As apellidoPaternoCliente,
+    c.ApellidoPaterno AS apellidoPaternoCliente,
     c.ApellidoMaterno AS apellidoMaternoCliente,
     c.Estatus AS estatusCliente,
     CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
@@ -729,34 +920,29 @@ LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
 WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
-  AND c.Estatus = 1
   AND ru.Estatus = 1         -- Solo rutas activas
-  AND r.Estatus = 1          -- Solo ZonasUsuariosZonas activas
+  AND r.Estatus = 1          -- Solo zonas activas
+  AND d.Estatus = 1
   AND d.Id = ?
 
-ORDER BY d.Id DESC
+ORDER BY d.Id DESC;
     `;
-    return this.usuariosZonasRepository.query(query, [...ids, id]);
+    return this.usuarioszonasRepository.query(query, [...ids, id]);
   }
 
-  async findOne(id: number, idUser: number, cliente: number, rol: number) {
-    try {
-      let data;
-      switch (rol) {
-        case 1:
-          // Consulta de datos paginados Usuario SuperAdministrador
-          data = await this.usuariosZonasRepository.query(
-            `
+  private async consultarVarianteOne(cliente: number, id: number) {
+    const { ids, placeholders } = await this.clienteHijos(cliente);
+    const query = `
   SELECT 
-    -- Datos del Variantes (datos principales)
+    -- Datos del Variante (datos principales)
     d.Id AS id,
-    d.Nombre AS nombreVariantes,
+    d.Nombre AS nombreVariante,
     d.PuntoInicio AS puntoInicio,
     d.PuntoFin AS puntoFin,
     d.RecorridoDetallado AS recorridoDetallado,
     d.DistanciaKm AS distanciaKm,
-    d.FechaCreacion AS fechaCreacionVariantes,
-    d.Estatus AS estatusVariantes,
+    d.FechaCreacion AS fechaCreacionVariante,
+    d.Estatus AS estatusVariante,
 
     -- Datos de la ruta asociada
     ru.Id AS idRuta,
@@ -766,26 +952,26 @@ ORDER BY d.Id DESC
     ru.FechaCreacion AS fechaCreacionRuta,
     ru.Estatus AS estatusRuta,
 
-    -- Zonas de inicio
-    r.Id AS idZonasInicio,
-    r.Nombre AS nombreZonasInicio,
-    r.Descripcion AS descripcionZonasInicio,
-    r.FechaCreacion AS fechaCreacionZonasInicio,
-    r.FechaActualizacion AS fechaActualizacionZonasInicio,
-    r.Estatus AS estatusZonasInicio,
+    -- Zona de inicio
+    r.Id AS idZonaInicio,
+    r.Nombre AS nombreZonaInicio,
+    r.Descripcion AS descripcionZonaInicio,
+    r.FechaCreacion AS fechaCreacionZonaInicio,
+    r.FechaActualizacion AS fechaActualizacionZonaInicio,
+    r.Estatus AS estatusZonaInicio,
 
-    -- Zonas de fin
-    rf.Id AS idZonasFin,
-    rf.Nombre AS nombreZonasFin,
-    rf.Descripcion AS descripcionZonasFin,
-    rf.FechaCreacion AS fechaCreacionZonasFin,
-    rf.FechaActualizacion AS fechaActualizacionZonasFin,
-    rf.Estatus AS estatusZonasFin,
+    -- Zona de fin
+    rf.Id AS idZonaFin,
+    rf.Nombre AS nombreZonaFin,
+    rf.Descripcion AS descripcionZonaFin,
+    rf.FechaCreacion AS fechaCreacionZonaFin,
+    rf.FechaActualizacion AS fechaActualizacionZonaFin,
+    rf.Estatus AS estatusZonaFin,
 
     -- Cliente relacionado
     c.Id AS idCliente,
     c.Nombre AS nombreCliente,
-    c.ApellidoPaterno As apellidoPaternoCliente,
+    c.ApellidoPaterno AS apellidoPaternoCliente,
     c.ApellidoMaterno AS apellidoMaternoCliente,
     c.Estatus AS estatusCliente,
     CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
@@ -796,119 +982,196 @@ INNER JOIN Zonas r ON ru.IdZona = r.Id
 LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
-WHERE c.Estatus = 1
+WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
   AND ru.Estatus = 1         -- Solo rutas activas
-  AND r.Estatus = 1          -- Solo ZonasUsuariosZonas activas
+  AND r.Estatus = 1          -- Solo zonas activas
+  AND d.Estatus = 1
   AND d.Id = ?
 
-ORDER BY d.Id DESC
+ORDER BY d.Id DESC;
+    `;
+    return this.usuarioszonasRepository.query(query, [...ids, id]);
+  }
+
+  async findOne(id: number, idUser: number, cliente: number, rol: number) {
+    try {
+      let data;
+      switch (rol) {
+        case 1:
+          // Consulta de datos paginados Usuario SuperAdministrador
+          data = await this.usuarioszonasRepository.query(
+            `
+    SELECT 
+  -- Datos del Variante (datos principales)
+  d.Id AS id,
+  d.Nombre AS nombreVariante,
+  d.PuntoInicio AS puntoInicio,
+  d.PuntoFin AS puntoFin,
+  d.RecorridoDetallado AS recorridoDetallado,
+  d.RecorridoInterpolar AS recorridoInterpolar,
+  d.DistanciaKm AS distanciaKm,
+  d.FechaCreacion AS fechaCreacionVariante,
+  d.FechaActualizacion AS fechaActualizacion,
+  d.Estatus AS estatusVariante,
+
+  -- Datos de la ruta asociada
+  ru.Id AS idRuta,
+  ru.Nombre AS nombreRuta,
+  ru.NombreInicio AS nombreInicio,
+  ru.NombreFin AS nombreFin,
+  ru.FechaCreacion AS fechaCreacionRuta,
+  ru.Estatus AS estatusRuta,
+
+  -- Zona de inicio
+  r.Id AS idZonaInicio,
+  r.Nombre AS nombreZonaInicio,
+  r.Descripcion AS descripcionZonaInicio,
+  r.FechaCreacion AS fechaCreacionZonaInicio,
+  r.FechaActualizacion AS fechaActualizacionZonaInicio,
+  r.Estatus AS estatusZonaInicio,
+
+  -- Zona de fin
+  rf.Id AS idZonaFin,
+  rf.Nombre AS nombreZonaFin,
+  rf.Descripcion AS descripcionZonaFin,
+  rf.FechaCreacion AS fechaCreacionZonaFin,
+  rf.FechaActualizacion AS fechaActualizacionZonaFin,
+  rf.Estatus AS estatusZonaFin,
+
+  -- Cliente relacionado
+  c.Id AS idCliente,
+  c.Nombre AS nombreCliente,
+  c.ApellidoPaterno AS apellidoPaternoCliente,
+  c.ApellidoMaterno AS apellidoMaternoCliente,
+  c.Estatus AS estatusCliente,
+  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
+
+FROM Variantes d
+INNER JOIN Rutas ru ON d.IdRuta = ru.Id
+INNER JOIN Zonas r ON ru.IdZona = r.Id
+LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
+INNER JOIN Clientes c ON r.IdCliente = c.Id
+INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
+
+WHERE ur.IdUsuario = ?
+  AND ur.Estatus = 1
+  AND r.Estatus = 1
+  AND ru.Estatus = 1
+  AND d.Id = ? -- Id del Variante
       `,
-            [id] // parámetro seguro
+            [idUser, id], // parámetro seguro
           );
           break;
 
         case 2:
           // Consulta de datos paginados Usuario Administrador
-          data = await this.consultarVariantesOne(cliente, id);
+          data = await this.consultarVarianteOne(cliente, id);
+          break;
+
+        case 3:
+          // Consulta de datos paginados Usuario Operador
+          data = await this.consultarVarianteOne(cliente, id);
           break;
 
         case 8:
           // Consulta de datos paginados Usuario Reportes
-          data = await this.consultarVariantesOne(cliente, id);
+          data = await this.consultarVarianteOne(cliente, id);
           break;
 
         case 10:
           // Consulta de datos paginados Usuario Capturista
-          data = await this.consultarVariantesOne(cliente, id);
+          data = await this.consultarVarianteOne(cliente, id);
           break;
 
         default:
           // Consulta de datos paginados Usuario
-          data = await this.usuariosZonasRepository.query(
+          const { ids, placeholders } = await this.clienteHijos(cliente)
+          data = await this.usuarioszonasRepository.query(
             `
-  SELECT 
-    -- Datos del Variantes (datos principales)
-    d.Id AS id,
-    d.Nombre AS nombreVariantes,
-    d.PuntoInicio AS puntoInicio,
-    d.PuntoFin AS puntoFin,
-    d.RecorridoDetallado AS recorridoDetallado,
-    d.DistanciaKm AS distanciaKm,
-    d.FechaCreacion AS fechaCreacionVariantes,
-    d.Estatus AS estatusVariantes,
+    SELECT 
+  -- Datos del Variante (datos principales)
+  d.Id AS id,
+  d.Nombre AS nombreVariante,
+  d.PuntoInicio AS puntoInicio,
+  d.PuntoFin AS puntoFin,
+  d.RecorridoDetallado AS recorridoDetallado,
+  d.RecorridoInterpolar AS recorridoInterpolar,
+  d.DistanciaKm AS distanciaKm,
+  d.FechaCreacion AS fechaCreacionVariante,
+  d.FechaActualizacion AS fechaActualizacion,
+  d.Estatus AS estatusVariante,
 
-    -- Datos de la ruta asociada
-    ru.Id AS idRuta,
-    ru.Nombre AS nombreRuta,
-    ru.NombreInicio AS nombreInicio,
-    ru.NombreFin AS nombreFin,
-    ru.FechaCreacion AS fechaCreacionRuta,
-    ru.Estatus AS estatusRuta,
+  -- Datos de la ruta asociada
+  ru.Id AS idRuta,
+  ru.Nombre AS nombreRuta,
+  ru.NombreInicio AS nombreInicio,
+  ru.NombreFin AS nombreFin,
+  ru.FechaCreacion AS fechaCreacionRuta,
+  ru.Estatus AS estatusRuta,
 
-    -- Zonas de inicio
-    r.Id AS idZonasInicio,
-    r.Nombre AS nombreZonasInicio,
-    r.Descripcion AS descripcionZonasInicio,
-    r.FechaCreacion AS fechaCreacionZonasInicio,
-    r.FechaActualizacion AS fechaActualizacionZonasInicio,
-    r.Estatus AS estatusZonasInicio,
+  -- Zona de inicio
+  r.Id AS idZonaInicio,
+  r.Nombre AS nombreZonaInicio,
+  r.Descripcion AS descripcionZonaInicio,
+  r.FechaCreacion AS fechaCreacionZonaInicio,
+  r.FechaActualizacion AS fechaActualizacionZonaInicio,
+  r.Estatus AS estatusZonaInicio,
 
-    -- Zonas de fin
-    rf.Id AS idZonasFin,
-    rf.Nombre AS nombreZonasFin,
-    rf.Descripcion AS descripcionZonasFin,
-    rf.FechaCreacion AS fechaCreacionZonasFin,
-    rf.FechaActualizacion AS fechaActualizacionZonasFin,
-    rf.Estatus AS estatusZonasFin,
+  -- Zona de fin
+  rf.Id AS idZonaFin,
+  rf.Nombre AS nombreZonaFin,
+  rf.Descripcion AS descripcionZonaFin,
+  rf.FechaCreacion AS fechaCreacionZonaFin,
+  rf.FechaActualizacion AS fechaActualizacionZonaFin,
+  rf.Estatus AS estatusZonaFin,
 
-    -- Cliente relacionado
-    c.Id AS idCliente,
-    c.Nombre AS nombreCliente,
-    c.ApellidoPaterno As apellidoPaternoCliente,
-    c.ApellidoMaterno AS apellidoMaternoCliente,
-    c.Estatus AS estatusCliente,
-    CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
+  -- Cliente relacionado
+  c.Id AS idCliente,
+  c.Nombre AS nombreCliente,
+  c.ApellidoPaterno AS apellidoPaternoCliente,
+  c.ApellidoMaterno AS apellidoMaternoCliente,
+  c.Estatus AS estatusCliente,
+  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
 
-  FROM Variantes d
-  INNER JOIN Rutas ru ON d.IdRuta = ru.Id
-  INNER JOIN Zonas r ON ru.IdZona = r.Id
-  LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
-  INNER JOIN Clientes c ON r.IdCliente = c.Id
-  INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
+FROM Variantes d
+INNER JOIN Rutas ru ON d.IdRuta = ru.Id
+INNER JOIN Zonas r ON ru.IdZona = r.Id
+LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
+INNER JOIN Clientes c ON r.IdCliente = c.Id
+INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
 
-  WHERE ur.IdUsuario = ?
-    AND ur.Estatus = 1
-    AND r.Estatus = 1
-    AND ru.Estatus = 1
-    AND d.Id = ?
-
-  ORDER BY d.Id DESC
+WHERE ur.IdUsuario = ?
+  AND ur.Estatus = 1
+  AND r.Estatus = 1
+  AND ru.Estatus = 1
+  AND d.Id = ? -- Id del Variante
+  AND c.Id = IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
       `,
-            [idUser, id] // parámetro seguro
+            [idUser, id, ids], // parámetro seguro
           );
           break;
       }
 
       if (data.length === 0) {
-        throw new NotFoundException("Variantes no encontradas");
+        throw new NotFoundException('Variante no encontradas');
       }
 
-      const Variantes = data.map((item) => ({
+      const variantes = data.map((item) => ({
         ...item,
         id: Number(item.id),
         idRuta: Number(item.idRuta),
-        idZonasInicio: Number(item.idZonasInicio),
-        idZonasFin: item.idZonasFin ? Number(item.idZonasFin) : null,
+        idZonaInicio: Number(item.idZonaInicio),
+        idZonaFin: item.idZonaFin ? Number(item.idZonaFin) : null,
         idCliente: Number(item.idCliente),
         distanciaKm: Number(item.distanciaKm),
       }));
 
-      return { data: Variantes };
+      return { data: variantes };
     } catch (error) {
       if (error instanceof HttpException) throw error;
 
       throw new InternalServerErrorException({
-        message: "Error al obtener Variantes por ID",
+        message: 'Error al obtener Variantes por ID',
         error: error.message,
       });
     }
@@ -919,38 +1182,38 @@ ORDER BY d.Id DESC
     idUser: number,
     cliente: number,
     rol: number,
-    updateVariantesEstatusDto: UpdateVariantesEstatusDto
+    updateVariantesEstatusDto: UpdateVariantesEstatusDto,
   ) {
     try {
-      let Variantes;
-      Variantes = await this.VariantesRepository.findOne({
+      let variante;
+      variante = await this.variantesRepository.findOne({
         where: { id: id },
       });
-      if (!Variantes) throw new NotFoundException("Variantes no encontrado");
+      if (!variante) throw new NotFoundException('Variante no encontrado');
 
       //actualizacion de estatus
       const estatus = updateVariantesEstatusDto.estatus;
-      await this.VariantesRepository.update(id, { estatus: estatus });
+        await this.variantesRepository.update(id, { estatus: estatus });
 
       // Registro en la bitácora SUCCESS
       const querylogger = { updateVariantesEstatusDto };
       await this.bitacoraLogger.logToBitacora(
-        "Variantes",
-        `Se actualizo estatus a ${updateVariantesEstatusDto.estatus} de un Variantes con nombre: ${Variantes.nombre}  y Id ${id}`,
-        "UPDATE",
+        'Variantes',
+        `Se actualizo estatus a ${updateVariantesEstatusDto.estatus} de un Variante con nombre: ${variante.nombre}  y Id ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         18,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       //API response
-      const result: ApiVariantesResponse = {
-        status: "success",
-        message: "Se actualizo correctamente estatus del Variantes",
-        id: Number(Variantes.id),
-        nombre: Variantes.nombre,
-        distancia: Number(Variantes.distanciaKm),
+      const result: ApiVarianteResponse = {
+        status: 'success',
+        message: 'Se actualizo correctamente estatus del Variante',
+        id: Number(variante.id),
+        nombre: variante.nombre,
+        distancia: Number(variante.distanciaKm),
         estatus: estatus,
       };
 
@@ -959,19 +1222,19 @@ ORDER BY d.Id DESC
       // Registro en la bitácora ERROR
       const querylogger = { updateVariantesEstatusDto };
       await this.bitacoraLogger.logToBitacora(
-        "Variantes",
-        `Se actualizo estatus a ${updateVariantesEstatusDto.estatus} de un Variantes con ID: ${id} y Id ${id}`,
-        "UPDATE",
+        'Variantes',
+        `Se actualizo estatus a ${updateVariantesEstatusDto.estatus} de un Variante con ID: ${id} y Id ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         18,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) throw error;
 
       throw new InternalServerErrorException({
-        message: "Error al actualizar estatus Variantes",
+        message: 'Error al actualizar estatus Variantes',
         error: error.message,
       });
     }
@@ -982,66 +1245,75 @@ ORDER BY d.Id DESC
     idUser: number,
     cliente: number,
     rol: number,
-    updateVariantesDto: UpdateVariantesDto
+    updateVarianteDto: UpdateVarianteDto,
   ) {
     try {
-      let newVariantes = this.VariantesRepository.create(updateVariantesDto);
+      let newVariante = this.variantesRepository.create(updateVarianteDto);
 
       if (
-        Array.isArray(updateVariantesDto.recorridoDetallado) &&
-        updateVariantesDto.recorridoDetallado.length > 0
+        Array.isArray(updateVarianteDto.recorridoDetallado) &&
+        updateVarianteDto.recorridoDetallado.length > 0
       ) {
-        const puntos = updateVariantesDto.recorridoDetallado;
+        const puntos = updateVarianteDto.recorridoDetallado;
 
         const { recorridoDetallado: nuevoRecorrido, distanciaKm } =
           await generarRecorridoDetallado(puntos as any);
 
-        newVariantes.recorridoInterpolar = nuevoRecorrido;
+        newVariante.recorridoInterpolar = nuevoRecorrido;
       }
 
-      await this.VariantesRepository.update(id, newVariantes);
+      await this.variantesRepository.update(id, newVariante);
+
+      // Obtenemos la variante actualizada
+      const varianteActualizada = await this.variantesRepository.findOne({
+        where: { id: id },
+      });
+
+      if (!varianteActualizada) {
+        throw new NotFoundException(`Variante con id: ${id} no encontrada`);
+      }
 
       // Registro en la bitácora SUCCESS
-      const querylogger = { updateVariantesDto };
+      const querylogger = { updateVarianteDto };
       await this.bitacoraLogger.logToBitacora(
-        "Variantes",
-        `Se actualizo un Variantes con nombre: ${newVariantes.nombre} y Id ${id}`,
-        "UPDATE",
+        'Variantes',
+        `Se actualizo un Variante con nombre: ${varianteActualizada.nombre} y Id ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         18,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       //API response
-      const result: ApiVariantesResponse = {
-        status: "succes",
-        message: "Se actualizo correctamente Variantes",
+      const result: ApiVarianteResponse = {
+        status: 'succes',
+        message: 'Se actualizo correctamente Variante',
         id: id,
-        nombre: newVariantes.nombre,
-        distancia: Number(newVariantes.distanciaKm),
-        estatus: newVariantes.estatus,
+        nombre: varianteActualizada.nombre,
+        distancia: Number(varianteActualizada.distanciaKm),
+        estatus: varianteActualizada.estatus,
       };
 
       return result;
     } catch (error) {
       // Registro en la bitácora ERROR
-      const querylogger = { updateVariantesDto };
+      const querylogger = { updateVarianteDto };
       await this.bitacoraLogger.logToBitacora(
-        "Variantes",
-        `Se actualizo un Variantes con ID: ${id}`,
-        "UPDATE",
+        'Variantes',
+        `Se actualizo un Variante con ID: ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         18,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al actualizar Variantes",
+        message: 'Error al actualizar Variante',
         error: error.message,
       });
     }
@@ -1049,34 +1321,34 @@ ORDER BY d.Id DESC
 
   async remove(id: number, idUser: number, cliente: number, rol: number) {
     try {
-      let Variantes;
-      Variantes = await this.VariantesRepository.findOne({
+      let variante;
+      variante = await this.variantesRepository.findOne({
         where: { id: id },
       });
-      if (!Variantes) throw new NotFoundException("Variantes no encontrado");
+      if (!variante) throw new NotFoundException('Variante no encontrado');
 
       //eliminado logico
-      await this.VariantesRepository.update(id, { estatus: 0 });
+        await this.variantesRepository.update(id, { estatus: 0 });
 
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Variantes",
-        `Se elimino estatus a ${0} de un Variantes con nombre: ${Variantes.nombre} y Id ${id}`,
-        "UPDATE",
+        'Variantes',
+        `Se elimino estatus a ${0} de un Variante con nombre: ${variante.nombre} y Id ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         18,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       //API response
-      const result: ApiVariantesResponse = {
-        status: "succes",
-        message: "Se elimino correctamente el Variantes",
-        id: Number(Variantes.id),
-        nombre: Variantes.nombre,
-        distancia: Number(Variantes.distanciaKm),
+      const result: ApiVarianteResponse = {
+        status: 'succes',
+        message: 'Se elimino correctamente el Variante',
+        id: Number(variante.id),
+        nombre: variante.nombre,
+        distancia: Number(variante.distanciaKm),
         estatus: 0,
       };
 
@@ -1085,19 +1357,51 @@ ORDER BY d.Id DESC
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Variantes",
-        `Se elimino a estatus a ${0} de un Variantes con ID: ${id}`,
-        "UPDATE",
+        'Variantes',
+        `Se elimino a estatus a ${0} de un Variante con ID: ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         18,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) throw error;
 
       throw new InternalServerErrorException({
-        message: "Error al eliminado logico Variantes",
+        message: 'Error al eliminado logico Variantes',
+        error: error.message,
+      });
+    }
+  }
+
+  // ========================================
+  // 🔹 OBTENER TIPOS DE VARIANTE
+  // ========================================
+  async findAllTiposVariante(): Promise<ApiResponseCommon> {
+    try {
+      const tiposVariante = await this.catTipoVarianteRepository.find({
+        where: { estatus: 1 },
+        order: { nombre: 'ASC' },
+      });
+
+      const data = tiposVariante.map((item) => ({
+        id: Number(item.id),
+        nombre: item.nombre,
+        fhRegistro: item.fhRegistro,
+        estatus: Number(item.estatus),
+      }));
+
+      const result: ApiResponseCommon = {
+        data: data,
+      };
+
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+
+      throw new InternalServerErrorException({
+        message: 'Error al obtener tipos de variante',
         error: error.message,
       });
     }
@@ -1105,15 +1409,16 @@ ORDER BY d.Id DESC
 
   async removeTotal(id: number, idUser: number, cliente: number, rol: number) {
     try {
-      let Variantes;
+      let variante;
       switch (rol) {
         case 1:
-          // Usuario SuperAdministrador
-          Variantes = await this.VariantesRepository.findOne({
+        case 2:
+          // Usuario SuperAdministrador y Administrador
+          variante = await this.variantesRepository.findOne({
             where: { id: id },
           });
-          if (!Variantes)
-            throw new NotFoundException("Variantes no encontrado");
+          if (!variante)
+            throw new NotFoundException('Variante no encontrado');
           break;
 
         default:
@@ -1122,27 +1427,27 @@ ORDER BY d.Id DESC
       }
 
       //eliminado completo
-      await this.VariantesRepository.delete({ id: id });
+        await this.variantesRepository.delete({ id: id });
 
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Variantes",
-        `Se elimino  un Variantes con nombre: ${Variantes.nombre} y Id ${id}`,
-        "DELETE",
+        'Variantes',
+        `Se elimino  un Variante con nombre: ${variante.nombre} y Id ${id}`,
+        'DELETE',
         querylogger,
         idUser,
         18,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       //API response
-      const result: ApiVariantesResponse = {
-        status: "succes",
-        message: "Se elimino correctamente el Variantes",
-        id: Number(Variantes.id),
-        nombre: Variantes.nombre,
-        distancia: Number(Variantes.distanciaKm),
+      const result: ApiVarianteResponse = {
+        status: 'succes',
+        message: 'Se elimino correctamente el Variante',
+        id: Number(variante.id),
+        nombre: variante.nombre,
+        distancia: Number(variante.distanciaKm),
         estatus: 0,
       };
 
@@ -1151,19 +1456,19 @@ ORDER BY d.Id DESC
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Variantes",
-        `Se elimino Variantes con ID: ${id}`,
-        "DELETE",
+        'Variantes',
+        `Se elimino Variante con ID: ${id}`,
+        'DELETE',
         querylogger,
         idUser,
         18,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) throw error;
 
       throw new InternalServerErrorException({
-        message: "Error al eliminado total Variantes",
+        message: 'Error al eliminado total Variantes',
         error: error.message,
       });
     }

@@ -7,10 +7,13 @@ import { BitacoraModule } from 'src/bitacora/bitacora.module';
 import { ClientesModule } from 'src/clientes/clientes.module';
 import { PasajerosModule } from 'src/pasajeros/pasajeros.module';
 import { Clientes } from 'src/entities/Clientes';
+import { TransaccionesRecarga } from 'src/entities/TransaccionesRecarga';
+import { Pasajeros } from 'src/entities/Pasajeros';
+import { QRCodes } from 'src/entities/QRCodes';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Monederos,Clientes]),
+    TypeOrmModule.forFeature([Monederos, Clientes, TransaccionesRecarga, Pasajeros, QRCodes]),
     BitacoraModule,
     ClientesModule,
     PasajerosModule,

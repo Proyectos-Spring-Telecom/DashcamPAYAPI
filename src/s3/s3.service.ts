@@ -8,6 +8,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuid } from 'uuid';
@@ -71,9 +72,7 @@ export class S3Service {
           ContentType: file.mimetype,
           ACL: 'private', // sigue siendo privado
         }),
-      ); 
-
-      console.log(this.bucket)
+      );
 
       const publicUrl = `https://${this.bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 
@@ -116,5 +115,67 @@ export class S3Service {
       Key: key,
     });
     return getSignedUrl(this.client, cmd, { expiresIn: expiresInSeconds });
+  }
+
+  async deleteFile(
+    url: string,
+    idUser: number,
+    idModule: number,
+  ): Promise<void> {
+    try {
+      if (!url) return;
+
+      // Extraer la key de la URL
+      // Formato: https://bucket.s3.region.amazonaws.com/folder/filename.ext
+      const urlPattern = new RegExp(
+        `https://${this.bucket}\\.s3\\.${process.env.AWS_REGION}\\.amazonaws\\.com/(.+)`,
+      );
+      const match = url.match(urlPattern);
+      
+      if (!match || !match[1]) {
+        console.warn(`No se pudo extraer la key de la URL: ${url}`);
+        return;
+      }
+
+      const key = match[1];
+
+      await this.client.send(
+        new DeleteObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+        }),
+      );
+
+      //-----Registro en la bitacora----- SUCCESS
+      const querylogger = {
+        data: `DELETE FROM S3 -> bucket: ${this.bucket} key: ${key}`,
+      };
+      await this.bitacoraLogger.logToBitacora(
+        'S3',
+        `Se eliminó archivo del bucket: ${this.bucket}`,
+        'DELETE',
+        querylogger,
+        idUser,
+        idModule,
+        EstatusEnumBitcora.SUCCESS,
+      );
+    } catch (error) {
+      //-----Registro en la bitacora----- ERROR
+      const querylogger = {
+        data: `DELETE FROM S3 -> bucket: ${this.bucket} url: ${url}`,
+      };
+      await this.bitacoraLogger.logToBitacora(
+        'S3',
+        `Error al eliminar archivo del bucket: ${this.bucket}`,
+        'DELETE',
+        querylogger,
+        idUser,
+        idModule,
+        EstatusEnumBitcora.ERROR,
+        error.message,
+      );
+      // No lanzar error para que no falle la actualización si no se puede eliminar el archivo anterior
+      console.error('Error eliminando archivo de S3:', error);
+    }
   }
 }

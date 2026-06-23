@@ -1,17 +1,29 @@
-import { Controller, Post, Body, HttpCode, Get, Query, UseGuards, Patch } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  Get,
+  Query,
+  UseGuards,
+  Patch,
+  Request,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginAuthDto } from './dto/login-auth.dto';
-import {  LoginAuthCodigoDto } from './dto/login-codigo.dto';
+import { LoginAuthPinDto } from './dto/login-pin.dto';
 import { LoginAuthConfirmacionDto } from './dto/login-confirmacion.dto';
 import { LoginAuthResetDto } from './dto/login-recuperacion.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
-import { CreateAltaPasajaroDto } from './dto/create-pasajero.dto';
 import { CodigoPasajeroAutenticacion } from './dto/login-autenticacion.dto';
+import { CreateAltaPasajaroDto } from './dto/create-pasajero.dto';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Autenticación')
+@ApiBearerAuth('bearer-token')
 @Controller('login')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
-
 
   // ========================================
   // 🔹 POST ROUTES - Rutas específicas primero
@@ -38,8 +50,8 @@ export class AuthController {
 
   @Post('operador/login')
   @HttpCode(200)
-  async loginCodigo(@Body() loginAuthCodigoDto: LoginAuthCodigoDto) {
-    return this.authService.singInCodigo(loginAuthCodigoDto);
+  async loginPin(@Body() loginAuthPinDto: LoginAuthPinDto) {
+    return this.authService.singInPin(loginAuthPinDto);
   }
 
   @Post()

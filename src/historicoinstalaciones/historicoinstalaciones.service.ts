@@ -1,17 +1,20 @@
-import { HttpException, Injectable, InternalServerErrorException } from "@nestjs/common";
-import { UpdateHistoricoinstalacioneDto } from "./dto/update-historicoinstalacione.dto";
-import { EstatusEnumBitcora } from "src/common/ApiResponse";
-import { InjectRepository } from "@nestjs/typeorm";
-import { HistoricoInstalaciones } from "src/entities/HistoricoInstalaciones";
-import { IsNull, Repository } from "typeorm";
-import { BitacoraLoggerService } from "src/bitacora/bitacora.service";
-
+import {
+  HttpException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
+import { EstatusEnumBitcora } from 'src/common/ApiResponse';
+import { HistoricoInstalaciones } from 'src/entities/historico-instalaciones';
+import { IsNull, Repository } from 'typeorm';
+import { UpdateHistoricoDto } from './dto/update-historico.dto';
 @Injectable()
 export class HistoricoinstalacionesService {
   constructor(
     @InjectRepository(HistoricoInstalaciones)
     private readonly historicoInstalacionesRepository: Repository<HistoricoInstalaciones>,
-    private readonly bitacoraLogger: BitacoraLoggerService
+    private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
 
   findAll() {
@@ -22,17 +25,6 @@ export class HistoricoinstalacionesService {
     return `This action returns a #${id} historicoinstalacione`;
   }
 
-  update(
-    id: number,
-    updateHistoricoinstalacioneDto: UpdateHistoricoinstalacioneDto
-  ) {
-    return `This action updates a #${id} historicoinstalacione`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} historicoinstalacione`;
-  }
-
   //Crear un historico
   async createHistorico(
     idInstalacion: number,
@@ -40,7 +32,7 @@ export class HistoricoinstalacionesService {
     idContador: number,
     idVehiculo: number,
     idCliente: number,
-    idUser: number
+    idUser: number,
   ) {
     try {
       const historico = {
@@ -59,32 +51,32 @@ export class HistoricoinstalacionesService {
       // Registro en la bitácora SUCCESS
       const querylogger = { historico };
       await this.bitacoraLogger.logToBitacora(
-        "HistoricoInstalaciones",
+        'HistoricoInstalaciones',
         `El historico de la instalacion ${idInstalacion} ha sido creada exitosamente.`,
-        "CREATE",
+        'CREATE',
         querylogger,
         idUser,
-        26,
-        EstatusEnumBitcora.SUCCESS
+        27,
+        EstatusEnumBitcora.SUCCESS,
       );
     } catch (error) {
       // Registro en la bitácora SUCCESS
       const querylogger = {
         instalacion: idInstalacion,
-        Validador: idValidador,
-        Contadors: idContador,
+        validador: idValidador,
+        contadores: idContador,
         vehiculo: idVehiculo,
         cliente: idCliente,
       };
       await this.bitacoraLogger.logToBitacora(
-        "HistoricoInstalaciones",
+        'HistoricoInstalaciones',
         `El historico de la instalacion ${idInstalacion} ha sido creada exitosamente.`,
-        "CREATE",
+        'CREATE',
         querylogger,
         idUser,
-        26,
+        27,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
@@ -97,7 +89,7 @@ export class HistoricoinstalacionesService {
   }
 
   async updateHistorico(
-    instalacion: UpdateHistoricoinstalacioneDto,
+    instalacion: UpdateHistoricoDto,
     idValidadorUp: number,
     idContadorUp: number,
     idVehiculoUp: number,
@@ -124,10 +116,21 @@ export class HistoricoinstalacionesService {
         return;
       }
 
+      //afiliamos el monedero al pasajero y cambiamos estatus activo
+      function pad(n: number) {
+        return n < 10 ? '0' + n : n;
+      }
+
+      const ahora = new Date();
+      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
+      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+
+      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+
       // ✅ Si existe un registro activo con datos distintos, cerrarlo
       if (historicoActivo) {
         await this.historicoInstalacionesRepository.update(historicoActivo.id, {
-          fechaBaja: new Date(),
+          fechaBaja: fechaDesfasada,
           comentario: comentario,
         });
       }
@@ -152,15 +155,15 @@ export class HistoricoinstalacionesService {
         'CREATE',
         querylogger,
         idUser,
-        26,
+        27,
         EstatusEnumBitcora.SUCCESS,
       );
     } catch (error) {
       // Registro en la bitácora de errores
       const querylogger = {
         instalacion: instalacion.idInstalacion,
-        Validador: idValidadorUp,
-        Contadors: idContadorUp,
+        validador: idValidadorUp,
+        contadores: idContadorUp,
         vehiculo: idVehiculoUp,
         cliente: idClienteUp,
       };
@@ -170,7 +173,7 @@ export class HistoricoinstalacionesService {
         'CREATE',
         querylogger,
         idUser,
-        26,
+        27,
         EstatusEnumBitcora.ERROR,
         error.message,
       );

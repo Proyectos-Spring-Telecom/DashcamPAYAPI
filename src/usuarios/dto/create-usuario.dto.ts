@@ -41,21 +41,23 @@ export class CreateUsuarioDto {
     description: 'Confirmación de email (0=No, 1=Sí)',
     example: 0,
   })
-  emailConfirmado: number = 0;
+  emailConfirmado: number;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
+  @IsNotEmpty({ message: 'El nombre es obligatorio' })
+  @IsString({ message: 'El nombre debe ser una cadena de texto' })
+  @MinLength(1, { message: 'El nombre debe tener al menos 1 carácter' })
+  @MaxLength(100, { message: 'El nombre no puede exceder los 100 caracteres' })
   @ApiProperty({
     description: 'Nombre del usuario',
     example: 'Juan',
-    required: false,
+    required: true,
   })
-  nombre?: string;
+  nombre: string;
 
-  @IsNotEmpty()
-  @IsString()
-  @MaxLength(100)
+  @IsNotEmpty({ message: 'El apellido paterno es obligatorio' })
+  @IsString({ message: 'El apellido paterno debe ser una cadena de texto' })
+  @MinLength(1, { message: 'El apellido paterno debe tener al menos 1 carácter' })
+  @MaxLength(100, { message: 'El apellido paterno no puede exceder los 100 caracteres' })
   @ApiProperty({
     description: 'Apellido paterno',
     example: 'Pérez',
@@ -108,8 +110,8 @@ export class CreateUsuarioDto {
 
   @IsInt()
   @ApiProperty({ description: 'Cliente asignado', example: 5 })
-  @IsOptional()
-  idCliente?: number;
+  @IsNotEmpty()
+  idCliente: number;
 
   @IsNotEmpty()
   @IsArray()

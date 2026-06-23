@@ -9,9 +9,7 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 import { Usuarios } from './Usuarios'; 
-import { applySchema } from "src/common/apply-schema.decorator";
 
-@applySchema
 @Entity('CodigoAutenticacion')
 export class CodigoAutenticacion {
   @PrimaryGeneratedColumn({ name: 'Id', type: 'bigint' })

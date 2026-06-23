@@ -1,20 +1,24 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
 
 export class CreateInstalacionesDto {
   @ApiProperty({
-    description: 'ID del validador asignado a la instalación',
-    example: 1,
+    description: 'ID del validador asociado a la instalación',
+    example: 101,
   })
+  @IsNotEmpty({ message: 'El IdValidador es obligatorio' })
   @IsNumber()
   idValidador: number;
 
   @ApiProperty({
-    description: 'ID del contador asignado a la instalación',
-    example: 2,
+    description: 'IDs de los contadores asociados a la instalación',
+    example: [202, 203],
+    type: [Number],
   })
-  @IsNumber()
-  idContador: number;
+  @IsNotEmpty({ message: 'Los IdContadores son obligatorios' })
+  @IsArray({ message: 'IdContadores debe ser un array' })
+  @IsNumber({}, { each: true, message: 'Cada IdContador debe ser un número' })
+  idContadores: number[];
 
   @ApiProperty({
     description: 'ID del vehículo asociado a la instalación',

@@ -37,6 +37,7 @@ export class UsuariosinstalacionesService {
         where: {
           id: createUsuariosInstalacionesDto.idUsuario,
         },
+        select: { idCliente: true },
       });
       if (!usuario) {
         throw new NotFoundException(
@@ -53,14 +54,14 @@ export class UsuariosinstalacionesService {
         default:
           // Usuarios normales - solo sus instalaciones asignadas
           for (const i of createUsuariosInstalacionesDto.idsInstalaciones) {
-            const zona = await this.instalacionesRepository.findOne({
+            const instalacion = await this.instalacionesRepository.findOne({
               where: { id: i },
               select: { idCliente: true },
             });
-            if (!zona) {
-              throw new NotFoundException(`Zona con ID ${i} no encontrada`);
+            if (!instalacion) {
+              throw new NotFoundException(`Instalación con ID ${i} no encontrada`);
             }
-            if (idUsuarioCliente !== zona.idCliente) {
+            if (idUsuarioCliente !== instalacion.idCliente) {
               throw new BadRequestException(
                 `La instalacion ${i} no pertenece al mismo cliente que el usuario`,
               );
@@ -103,7 +104,7 @@ export class UsuariosinstalacionesService {
         data: {
           id: Number(createUsuariosInstalacionesDto.idUsuario),
           nombre:
-            `Id Usuario: ${createUsuariosInstalacionesDto.idUsuario} Id zona: ${createUsuariosInstalacionesDto.idsInstalaciones} ` ||
+            `Id Usuario: ${createUsuariosInstalacionesDto.idUsuario} Id Instalación: ${createUsuariosInstalacionesDto.idsInstalaciones} ` ||
             '',
         },
       };
@@ -188,7 +189,7 @@ export class UsuariosinstalacionesService {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: 'Error al obtener Paginado Usuarioszonaes',
+        message: 'Error al obtener Paginado UsuariosZonas',
         error,
       });
     }
@@ -239,7 +240,7 @@ export class UsuariosinstalacionesService {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: 'Error al obtener Usuarioszonaes Por ID',
+        message: 'Error al obtener UsuariosZonas Por ID',
         error,
       });
     }
@@ -378,7 +379,7 @@ export class UsuariosinstalacionesService {
         });
       if (!usuarioinstalacion) {
         throw new NotFoundException(
-          `Usuarioszonaes con id: ${id} no encontrado`,
+          `UsuariosZonas con id: ${id} no encontrado`,
         );
       }
 
@@ -445,7 +446,7 @@ export class UsuariosinstalacionesService {
         });
       if (!usuarioinstalacion) {
         throw new NotFoundException(
-          `Usuarioszonaes con id: ${id} no encontrado`,
+          `UsuariosZonas con id: ${id} no encontrado`,
         );
       }
 

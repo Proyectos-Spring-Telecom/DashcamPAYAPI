@@ -8,18 +8,6 @@ import {
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateOperadoreDto {
-  @IsString()
-  @IsOptional()
-  @MaxLength(20, {
-    message: 'El número de licencia no puede exceder 20 caracteres',
-  })
-  @ApiProperty({
-    description: 'Número de licencia único del operador',
-    example: 'LIC12345678',
-  })
-  numeroLicencia?: string;
-
-  @IsOptional()
   @IsDateString(
     {},
     {
@@ -30,6 +18,7 @@ export class UpdateOperadoreDto {
     description: 'Fecha de nacimiento del operador',
     example: '1990-05-15',
   })
+  @IsOptional()
   fechaNacimiento?: string;
 
   @IsOptional()
@@ -42,15 +31,16 @@ export class UpdateOperadoreDto {
   })
   identificacion?: string;
 
-  @IsOptional()
   @IsString()
-  @MaxLength(500)
-  @ApiProperty({
-    description: 'Licencia escaneada',
-    example: 'licencia.pdf',
-    required: false,
+  @IsOptional({ message: 'Subir foto del operador' })
+  @MaxLength(500, {
+    message: 'la url de la foto no puede pasar de 500 carecteres.',
   })
-  licencia?: string;
+  @ApiProperty({
+    description: 'Foto de perfil del operador',
+    example: 'www.bucket.us.foto.com',
+  })
+  foto?: string;
 
   @IsOptional()
   @IsString()
@@ -61,6 +51,16 @@ export class UpdateOperadoreDto {
     required: false,
   })
   comprobanteDomicilio?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  @ApiProperty({
+    description: 'Certificado Medico',
+    example: 'Certificado Medico.pdf',
+    required: false,
+  })
+  certificadoMedico?: string;
 
   @IsOptional()
   @IsString()
@@ -81,11 +81,10 @@ export class UpdateOperadoreDto {
   })
   estatus?: number = 1;
 
-  @IsOptional()
   @IsInt({ message: 'El IdUsuario debe ser un número entero' })
   @ApiProperty({
     description: 'Id del usuario asociado al operador',
     example: 10,
   })
-  idUsuario?: number;
+  idUsuario: number;
 }

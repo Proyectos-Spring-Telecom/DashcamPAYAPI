@@ -25,7 +25,7 @@ export class MailService {
     token: string,
     codigo: string
   ) {
-    const url = `http://localhost:3000/login/verify?token=${token}`;
+    const url = `https://dashcampay.com/dev/login/verify?token=${token}`;
     await this.transporter.sendMail({
       from: `<${process.env.E_MAIL}>`,
       to,
@@ -129,7 +129,7 @@ export class MailService {
   }
 
   async sendResetPasswordEmail(to: string, name: string, token: string) {
-    const url = `https://dashcampay.com/signup?token=${token}`;
+    const url = `https://dashcampay.com/dev/signup?token=${token}`;
 
     await this.transporter.sendMail({
       from: ` <${process.env.E_MAIL}>`,

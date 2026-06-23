@@ -1,100 +1,102 @@
 import {
+  BadRequestException,
   HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-} from "@nestjs/common";
-import { CreateZonasDto } from "./dto/create-zonas.dto";
-import { UpdateZonasDto } from "./dto/update-zonas.dto";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Zonas } from "src/entities/Zonas";
-import { Repository } from "typeorm";
-import { BitacoraLoggerService } from "src/bitacora/bitacora.service";
+} from '@nestjs/common';
+import { CreateZonasDto } from './dto/create-zona.dto';
+import { UpdateZonaDto } from './dto/update-zona.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Zonas } from 'src/entities/Zonas';
+import { Repository } from 'typeorm';
+import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import {
   ApiCrudResponse,
   ApiResponseCommon,
   EstatusEnumBitcora,
-} from "src/common/ApiResponse";
-import { UsuariosZonas } from "src/entities/UsuariosZonas";
-import { UpdateZonasEstatusDto } from "./dto/update-zonas-estatus.dto";
-import { Clientes } from "src/entities/Clientes";
+} from 'src/common/ApiResponse';
+import { UsuariosZonas } from 'src/entities/UsuariosZonas';
+import { UpdateZonasEstatusDto } from './dto/update-zona-estatus.dto';
+import { Clientes } from 'src/entities/Clientes';
 
 @Injectable()
 export class ZonasService {
   constructor(
     @InjectRepository(Zonas)
-    private readonly ZonasRepository: Repository<Zonas>,
+    private readonly zonasRepository: Repository<Zonas>,
     @InjectRepository(UsuariosZonas)
-    private readonly usuarioZonasRepository: Repository<UsuariosZonas>,
+    private readonly usuarioszonasRepository: Repository<UsuariosZonas>,
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
-    private readonly bitacoraLogger: BitacoraLoggerService
-  ) {}
+    private readonly bitacoraLogger: BitacoraLoggerService,
+  ) { }
 
+  //Crear Zona
   async create(
     idUser: number,
     cliente: number,
     rol: number,
-    createZonasDto: CreateZonasDto
+    createZonasDto: CreateZonasDto,
   ): Promise<ApiCrudResponse> {
     try {
       let rootPermisos;
       createZonasDto.nombre = createZonasDto.nombre.toUpperCase();
 
-      const newZona = await this.ZonasRepository.create(createZonasDto);
-      const ZonaSave = await this.ZonasRepository.save(newZona);
+      const newZona = await this.zonasRepository.create(createZonasDto);
+      const zonaSave = await this.zonasRepository.save(newZona);
 
-      //Asignamos a root la Zona
+      //Asignamos a root la zona
       switch (rol) {
         case 1:
           rootPermisos = {
             idUsuario: 1, //Se asigna al usuario supremo
-            idZona: ZonaSave.id,
+            idZona: zonaSave.id,
           };
-          await this.usuarioZonasRepository.save(rootPermisos);
+          await this.usuarioszonasRepository.save(rootPermisos);
           break;
 
         case 2:
           rootPermisos = {
             idUsuario: 1, //Se asigna al usuario supremo SuperAdministrador
-            idZona: ZonaSave.id,
+            idZona: zonaSave.id,
           };
-          await this.usuarioZonasRepository.save(rootPermisos);
+          await this.usuarioszonasRepository.save(rootPermisos);
           const userPermisos = {
             idUsuario: idUser, //Se asigna al Administrador
-            idZona: ZonaSave.id,
+            idZona: zonaSave.id,
           };
-          await this.usuarioZonasRepository.save(userPermisos);
+          await this.usuarioszonasRepository.save(userPermisos);
           break;
 
         default:
           rootPermisos = {
             idUsuario: 1, //Se asigna al usuario supremo SuperAdministrador
-            idZona: ZonaSave.id,
+            idZona: zonaSave.id,
           };
-          await this.usuarioZonasRepository.save(rootPermisos);
+          await this.usuarioszonasRepository.save(rootPermisos);
           break;
       }
 
       // Registro en la bitácora SUCCESS
       const querylogger = { createZonasDto };
       await this.bitacoraLogger.logToBitacora(
-        "Zonas",
-        `Se creó una Zona con nombre: ${ZonaSave.nombre}`,
-        "CREATE",
+        'Zonas',
+        `Se creó una Zona con nombre: ${zonaSave.nombre}`,
+        'CREATE',
         querylogger,
         idUser,
         16,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // API response (con mensajes corregidos)
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Zona creada correctamente.",
+        status: 'success',
+        message: 'Zona creada correctamente',
         data: {
-          id: Number(ZonaSave.id),
-          nombre: `Zona ${ZonaSave.id} Nombre: ${ZonaSave.nombre} Descripción: ${ZonaSave.descripcion}`, // ✅ Mejorado
+          id: Number(zonaSave.id),
+          nombre: `Zona ${zonaSave.id} Nombre: ${zonaSave.nombre} Descripción:${zonaSave.descripcion}`, // ✅ Mejorado
         },
       };
       return result;
@@ -102,21 +104,21 @@ export class ZonasService {
       // Registro en la bitácora en caso ERROR
       const querylogger = { createZonasDto };
       await this.bitacoraLogger.logToBitacora(
-        "Zonas",
+        'Zonas',
         `Se creó una Zona con nombre: ${createZonasDto.nombre}`,
-        "CREATE",
+        'CREATE',
         querylogger,
         idUser,
         16,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
 
       throw new InternalServerErrorException({
-        message: "Error al crear Zona.",
+        message: 'Error al crear Zona',
         error: error.message,
       });
     }
@@ -126,7 +128,7 @@ export class ZonasService {
   private async clienteHijos(cliente: number) {
     const clientesFiltrado = await this.clienteRepository.query(
       `CALL spGetClientes(?);`,
-      [cliente]
+      [cliente],
     );
 
     const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
@@ -138,19 +140,20 @@ export class ZonasService {
     }
 
     // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => "?").join(", ");
+    const placeholders = ids.map(() => '?').join(', ');
     return { ids, placeholders };
   }
 
-  private async consultarZonasPaginado(
+  //Funcion para obtener paginado por clientes
+  private async consultarZonasPagina(
     cliente: number,
     limit: number,
-    offset: number
+    offset: number,
   ) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `
 SELECT
-  -- Zonas
+  -- Zona
   r.Id AS id,
   r.Nombre AS nombre,
   r.Descripcion AS descripcion,
@@ -168,24 +171,28 @@ SELECT
 
 FROM Zonas r
 INNER JOIN Clientes c ON r.IdCliente = c.Id
-WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consulta
+
+WHERE 
+  r.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
 
 ORDER BY r.Id DESC
-
   LIMIT ? OFFSET ?;
     `;
-    return this.usuarioZonasRepository.query(query, [...ids, limit, offset]);
+    return this.zonasRepository.query(query, [...ids, limit, offset]);
   }
 
+  //Obtener total para la funcion de paginado
   private async consultarTotalZonasPaginados(cliente: number) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `  
-    SELECT COUNT(*) AS total
-FROM Zonas r
+  SELECT COUNT(*) AS total
+  FROM Zonas r
 INNER JOIN Clientes c ON r.IdCliente = c.Id
-WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+WHERE 
+  r.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+
 `;
-    return await this.usuarioZonasRepository.query(query, [...ids]);
+    return await this.zonasRepository.query(query, [...ids]);
   }
 
   //Paginado
@@ -194,20 +201,20 @@ WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que qu
     idUser: number,
     rol: number,
     page: number,
-    limit: number
+    limit: number,
   ) {
     try {
       const offset = (page - 1) * limit;
       let totalResult;
-      let Zonas;
+      let zonas;
       //Obtenemos ConteoPasajeros
       switch (rol) {
         case 1:
-          // Usuario SuperAdministrador - obtiene todas las Zonas
-          Zonas = await this.ZonasRepository.query(
+          // Usuario SuperAdministrador - obtiene todas las zonas
+          zonas = await this.zonasRepository.query(
             `
 SELECT
-  -- Zonas
+  -- Zona
   r.Id AS id,
   r.Nombre AS nombre,
   r.Descripcion AS descripcion,
@@ -226,56 +233,62 @@ SELECT
 FROM Zonas r
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
-
 ORDER BY r.Id DESC
   LIMIT ? OFFSET ?;
 
             `,
-            [limit, offset]
+            [limit, offset],
           );
 
           // Query para total (sin paginación)
-          totalResult = await this.ZonasRepository.query(
+          totalResult = await this.zonasRepository.query(
             `
-    SELECT COUNT(*) AS total
-FROM Zonas r
+  SELECT COUNT(*) AS total
+  FROM Zonas r
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
-
-  `
+  `,
           );
           break;
 
         case 2:
-          // Usuario administrador - obtiene todas las Zonas de su cliente
-          Zonas = await this.consultarZonasPaginado(cliente, limit, offset);
+          // Usuario administrador - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasPagina(cliente, limit, offset);
+
+          // Query para total (sin paginación)
+          totalResult = await this.consultarTotalZonasPaginados(cliente);
+          break;
+
+        case 3:
+          // Usuario operador - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasPagina(cliente, limit, offset);
 
           // Query para total (sin paginación)
           totalResult = await this.consultarTotalZonasPaginados(cliente);
           break;
 
         case 8:
-          // Usuario Reportes - obtiene todas las Zonas de su cliente
-          Zonas = await this.consultarZonasPaginado(cliente, limit, offset);
+          // Usuario Reportes - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasPagina(cliente, limit, offset);
 
           // Query para total (sin paginación)
           totalResult = await this.consultarTotalZonasPaginados(cliente);
           break;
 
         case 10:
-          // Usuario Capturistas - obtiene todas las Zonas de su cliente
-          Zonas = await this.consultarZonasPaginado(cliente, limit, offset);
+          // Usuario Capturistas - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasPagina(cliente, limit, offset);
 
           // Query para total (sin paginación)
           totalResult = await this.consultarTotalZonasPaginados(cliente);
           break;
 
         default:
-          // Usuarios normales - solo sus Zonas asignadas
-          Zonas = await this.ZonasRepository.query(
+          // Usuarios normales - solo sus zonas asignadas
+          zonas = await this.zonasRepository.query(
             `
 SELECT
-  -- Zonas
+  -- Zona
   r.Id AS id,
   r.Nombre AS nombre,
   r.Descripcion AS descripcion,
@@ -304,11 +317,11 @@ ORDER BY r.Id DESC
   LIMIT ? OFFSET ?;
 
             `,
-            [idUser, limit, offset]
+            [idUser, limit, offset],
           );
 
           // Query para total (sin paginación)
-          totalResult = await this.ZonasRepository.query(
+          totalResult = await this.zonasRepository.query(
             `
   SELECT COUNT(*) AS total
 FROM Zonas r
@@ -321,7 +334,7 @@ WHERE
   AND ur.Estatus = 1
 
   `,
-            [idUser]
+            [idUser],
           );
           break;
       }
@@ -329,7 +342,7 @@ WHERE
       const total = Number(totalResult[0]?.total || 0);
 
       // 🔥 Forzamos ids a number y agregamos nombreCompleto
-      const data = Zonas.map((item) => ({
+      const data = zonas.map((item) => ({
         ...item,
         id: Number(item.id),
         idCliente: Number(item.idCliente),
@@ -351,17 +364,18 @@ WHERE
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al obtener paginado Zonas.",
+        message: 'Error al obtener paginado Zonas',
         error: error.message,
       });
     }
   }
 
+  //Funcion Obtener listado por cliente
   private async consultarZonasListado(cliente: number) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `
 SELECT
-  -- Zonas
+  -- Zona
   r.Id AS id,
   r.Nombre AS nombre,
   r.Descripcion AS descripcion,
@@ -379,25 +393,25 @@ SELECT
 
 FROM Zonas r
 INNER JOIN Clientes c ON r.IdCliente = c.Id
-WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
-AND r.Estatus = 1
-AND c.Estatus = 1
+
+WHERE 
+  r.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+  AND r.Estatus = 1
+  AND c.Estatus = 1
 
 ORDER BY r.Id DESC
     `;
-    return this.usuarioZonasRepository.query(query, [...ids]);
+    return this.zonasRepository.query(query, [...ids]);
   }
 
-  async findAllList(cliente: number, idUser: number, rol: number) {
+  //Obtener listado por idCliente recibido por ruta (solo del cliente, sin hijos)
+  async findByCliente(idCliente: number, idUser: number, rol: number) {
     try {
-      let Zonas;
-      switch (rol) {
-        case 1:
-          // Usuario SuperAdministrador - obtiene todas las Zonas
-          Zonas = await this.ZonasRepository.query(
-            `
+      // Consulta directa sin incluir clientes hijos
+      const zonas = await this.zonasRepository.query(
+        `
 SELECT
-  -- Zonas
+  -- Región
   r.Id AS id,
   r.Nombre AS nombre,
   r.Descripcion AS descripcion,
@@ -415,35 +429,105 @@ SELECT
 
 FROM Zonas r
 INNER JOIN Clientes c ON r.IdCliente = c.Id
-WHERE r.Estatus = 1
-AND c.Estatus = 1
+
+WHERE 
+  r.IdCliente = ?
+  AND r.Estatus = 1
+  AND c.Estatus = 1
 
 ORDER BY r.Id DESC
+        `,
+        [idCliente],
+      );
 
+      // 🔥 Forzamos ids a number
+      const data = zonas.map((item) => ({
+        ...item,
+        id: Number(item.id),
+        idCliente: Number(item.idCliente),
+      }));
+
+      const result: ApiResponseCommon = {
+        data: data,
+      };
+
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException({
+        message: 'Error al obtener zonas por cliente',
+        error: error.message,
+      });
+    }
+  }
+
+  //Obtener listado
+  async findAllList(cliente: number, idUser: number, rol: number) {
+    try {
+      let zonas;
+      switch (rol) {
+        case 1:
+          // Usuario SuperAdministrador - obtiene todas las zonas
+          zonas = await this.zonasRepository.query(
             `
+SELECT
+  -- Zona
+  r.Id AS id,
+  r.Nombre AS nombre,
+  r.Descripcion AS descripcion,
+  r.Geocerca AS geocerca,
+  r.FechaCreacion AS fechaCreacion,
+  r.FechaActualizacion AS fechaActualizacion,
+  r.Estatus AS estatus,
+
+  -- Cliente
+  c.Id AS idCliente,
+  c.Nombre AS nombreCliente,
+  c.ApellidoPaterno AS apellidoPaternoCliente,
+  c.ApellidoMaterno AS apellidoMaternoCliente,
+  c.Estatus AS estatusCliente
+
+FROM Zonas r
+INNER JOIN Clientes c ON r.IdCliente = c.Id
+
+WHERE 
+  r.Estatus = 1
+  AND c.Estatus = 1
+  
+
+ORDER BY r.Id DESC;
+
+            `,
           );
           break;
 
         case 2:
-          // Usuario administrador - obtiene todas las Zonas de su cliente
-          Zonas = await this.consultarZonasListado(cliente);
+          // Usuario administrador - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasListado(cliente);
+          break;
+        case 3:
+          // Usuario Operador - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasListado(cliente);
           break;
         case 8:
-          // Usuario Reportes - obtiene todas las Zonas de su cliente
-          Zonas = await this.consultarZonasListado(cliente);
+          // Usuario Reportes - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasListado(cliente);
           break;
 
         case 10:
-          // Usuario Capturistas - obtiene todas las Zonas de su cliente
-          Zonas = await this.consultarZonasListado(cliente);
+          // Usuario Capturistas - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasListado(cliente);
           break;
 
         default:
-          // Usuarios normales - solo sus Zonas asignadas
-          Zonas = await this.ZonasRepository.query(
+          // Usuarios normales - solo sus zonas asignadas
+          console.log(rol);
+          zonas = await this.zonasRepository.query(
             `
 SELECT
-  -- Zonas
+  -- Zona
   r.Id AS id,
   r.Nombre AS nombre,
   r.Descripcion AS descripcion,
@@ -465,21 +549,20 @@ INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
 INNER JOIN Usuarios u ON ur.IdUsuario = u.Id
 
 WHERE 
-  ur.IdUsuario = ?       -- 🔹 ID del usuario a filtrar
-  AND ur.Estatus = 1
+ ur.Estatus = 1
   AND r.Estatus = 1
   AND c.Estatus = 1
 
 ORDER BY r.Id DESC;
 
             `,
-            [idUser]
+            [idUser],
           );
           break;
       }
 
       // 🔥 Forzamos ids a number y agregamos nombreCompleto
-      const data = Zonas.map((item) => ({
+      const data = zonas.map((item) => ({
         ...item,
         id: Number(item.id),
         idCliente: Number(item.idCliente),
@@ -495,17 +578,17 @@ ORDER BY r.Id DESC;
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al obtener listado Zonas",
+        message: 'Error al obtener listado Zonas',
         error: error.message,
       });
     }
   }
 
-  private async consultarZonasOne(id: number, cliente: number) {
+  private async consultarZonasOne(cliente: number, id: number) {
     const { ids, placeholders } = await this.clienteHijos(cliente);
     const query = `
 SELECT
-  -- Zonas
+  -- Zona
   r.Id AS id,
   r.Nombre AS nombre,
   r.Descripcion AS descripcion,
@@ -523,26 +606,29 @@ SELECT
 
 FROM Zonas r
 INNER JOIN Clientes c ON r.IdCliente = c.Id
-WHERE r.Id = ?
-AND c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+
+WHERE 
+  r.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+  AND r.Id = ?
 
 ORDER BY r.Id DESC
     `;
-    return this.usuarioZonasRepository.query(query, [id, ...ids]);
+    return this.zonasRepository.query(query, [...ids, id]);
   }
+
 
   async findOne(idUser: number, id: number, cliente: number, rol: number) {
     try {
-      let Zonas;
+      let zonas;
       //Obtenemos ConteoPasajeros
 
       switch (rol) {
         case 1:
-          // Usuario SuperAdministrador - obtiene todas las Zonas
-          Zonas = await this.ZonasRepository.query(
+          // Usuario SuperAdministrador - obtiene todas las zonas
+          zonas = await this.zonasRepository.query(
             `
 SELECT
-  -- Zonas
+  -- Zona
   r.Id AS id,
   r.Nombre AS nombre,
   r.Descripcion AS descripcion,
@@ -560,35 +646,42 @@ SELECT
 
 FROM Zonas r
 INNER JOIN Clientes c ON r.IdCliente = c.Id
-WHERE r.Id = ?
 
-ORDER BY r.Id DESC
+WHERE 
+  r.Id = ?
+  
+
+ORDER BY r.Id DESC;
 
             `,
-            [id]
+            [id],
           );
           break;
 
         case 2:
-          // Usuario administrador - obtiene todas las Zonas de su cliente
-          Zonas = await this.consultarZonasOne(id, cliente);
+          // Usuario administrador - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasOne(cliente, id)
+          break;
+        case 3:
+          // Usuario operador - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasOne(cliente, id)
           break;
         case 8:
-          // Usuario Reportes - obtiene todas las Zonas de su cliente
-          Zonas = await this.consultarZonasOne(id, cliente);
+          // Usuario Reportes - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasOne(cliente, id)
           break;
 
         case 10:
-          // Usuario Capturistas - obtiene todas las Zonas de su cliente
-          Zonas = await this.consultarZonasOne(id, cliente);
+          // Usuario Capturistas - obtiene todas las zonas de su cliente
+          zonas = await this.consultarZonasOne(cliente, id)
           break;
 
         default:
-          // Usuarios normales - solo sus Zonas asignadas
-          Zonas = await this.ZonasRepository.query(
+          // Usuarios normales - solo sus zonas asignadas
+          zonas = await this.zonasRepository.query(
             `
 SELECT
-  -- Zonas
+  -- Zona
   r.Id AS id,
   r.Nombre AS nombre,
   r.Descripcion AS descripcion,
@@ -617,17 +710,17 @@ WHERE
 ORDER BY r.Id DESC;
 
             `,
-            [id, idUser]
+            [idUser, id],
           );
           break;
       }
 
-      if (Zonas.length === 0) {
-        throw new NotFoundException("Zona no encontrado");
+      if (zonas.length === 0) {
+        throw new NotFoundException('zona no encontrada');
       }
 
       // 🔥 Forzamos ids a number y agregamos nombreCompleto
-      const data = Zonas.map((item) => ({
+      const data = zonas.map((item) => ({
         ...item,
         id: Number(item.id),
         idCliente: Number(item.idCliente),
@@ -643,7 +736,7 @@ ORDER BY r.Id DESC;
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al obtener una Zona",
+        message: 'Error al obtener una zona',
         error: error.message,
       });
     }
@@ -654,41 +747,59 @@ ORDER BY r.Id DESC;
     idUser: number,
     cliente: number,
     rol: number,
-    updateZonasEstatusDto: UpdateZonasEstatusDto
+    updateZonasEstatusDto: UpdateZonasEstatusDto,
   ) {
     try {
-      let Zonas;
-      Zonas = await this.ZonasRepository.findOne({
-        where: { id: id },
-      });
+      let zonas;
+      switch (rol) {
+        case 1:
+          // Usuario SuperAdministrador - obtiene todas las zonas
+          zonas = await this.zonasRepository.findOne({
+            where: { id: id },
+          });
+          break;
 
-      if (!Zonas) {
-        throw new NotFoundException("Zona no encontrado");
+        case 2:
+          // Usuario administrador - obtiene todas las zonas
+          zonas = await this.zonasRepository.findOne({
+            where: { id: id, idCliente: cliente },
+          });
+          break;
+
+        default:
+          // Usuarios normales - solo sus zonas asignadas
+          zonas = await this.zonasRepository.findOne({
+            where: { id: id },
+          });
+          break;
+      }
+      if (!zonas) {
+        throw new NotFoundException('Zona no encontrada');
       }
 
       const estatus = updateZonasEstatusDto.estatus;
 
-      await this.ZonasRepository.update(id, { estatus: estatus });
+      await this.zonasRepository.update(id, { estatus: estatus });
 
       // Registro en la bitácora SUCESS
       const querylogger = { updateZonasEstatusDto };
       await this.bitacoraLogger.logToBitacora(
-        "Zonas",
-        `Se actualizo estatus a ${estatus} una Zona con nombre: ${Zonas.nombre}  y Id ${id}`,
-        "UPDATE",
+        'Zonas',
+        `Se actualizo estatus a ${estatus} una Zona con nombre: ${zonas.nombre}  y Id ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         16,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // API response (con mensajes corregidos)
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Estatus de Zona actualizado correctamente", // ✅ Corregido
+        status: 'success',
+        message: 'Estatus de zona actualizado correctamente', // ✅ Corregido
         data: {
           id: id,
-          nombre: `Zona ${id} Nombre: ${Zonas.nombre} Descripción: ${Zonas.descripcion}`, // ✅ Mejorado
+          nombre: `Zona ${id} Nombre: ${zonas.nombre} Descripción:${zonas.descripcion}`, // ✅ Mejorado
         },
       };
       return result;
@@ -696,20 +807,20 @@ ORDER BY r.Id DESC;
       // Registro en la bitácora ERROR
       const querylogger = { updateZonasEstatusDto };
       await this.bitacoraLogger.logToBitacora(
-        "Zonas",
+        'Zonas',
         `Se actualizo estatus a ${updateZonasEstatusDto.estatus} en Zona con ID: ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
         16,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al actualizar estatus de una Zona",
+        message: 'Error al actualizar estatus de una zona',
         error: error.message,
       });
     }
@@ -720,56 +831,56 @@ ORDER BY r.Id DESC;
     cliente: number,
     idUser: number,
     rol: number,
-    updateZonaDto: UpdateZonasDto
+    updateZonaDto: UpdateZonaDto,
   ): Promise<ApiCrudResponse> {
     try {
-      let Zonas;
+      let zonas;
 
       switch (rol) {
         case 1:
-          // Usuario SuperAdministrador - obtiene todas las Zonas
-          Zonas = await this.ZonasRepository.findOne({
+          // Usuario SuperAdministrador - obtiene todas las zonas
+          zonas = await this.zonasRepository.findOne({
             where: { id: id },
           });
           break;
 
         case 2:
-          // Usuario Administrador - obtiene todas las Zonas
-          Zonas = await this.ZonasRepository.findOne({
+          // Usuario Administrador - obtiene todas las zonas
+          zonas = await this.zonasRepository.findOne({
             where: { id: id, idCliente: cliente },
           });
           break;
 
         default:
-          // Usuarios normales - solo sus Zonas asignadas
-          Zonas = await this.ZonasRepository.findOne({
+          // Usuarios normales - solo sus zonas asignadas
+          zonas = await this.zonasRepository.findOne({
             where: { id: id, idCliente: cliente },
           });
           break;
       }
-      if (!Zonas) {
-        throw new NotFoundException("Zona no encontrado");
+      if (!zonas) {
+        throw new NotFoundException('Zona no encontrada');
       }
 
       //actualizamos datos
-      await this.ZonasRepository.update(id, updateZonaDto);
+      await this.zonasRepository.update(id, updateZonaDto);
 
       // Registro en la bitácora SUCCESS
       const querylogger = { updateZonaDto };
       await this.bitacoraLogger.logToBitacora(
-        "Zonas",
+        'Zonas',
         `Se actualizo una Zona con nombre: ${updateZonaDto.nombre} y Id ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
         16,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // API response
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Zona actualizada correctamente", // ✅ Corregido
+        status: 'success',
+        message: 'Zona actualizada correctamente', // ✅ Corregido
         data: {
           id: id,
           nombre: `Zona ${id} Nombre: ${updateZonaDto.nombre} Descripción: ${updateZonaDto.descripcion}`, // ✅ Mejorado
@@ -780,20 +891,20 @@ ORDER BY r.Id DESC;
       // Registro en la bitácora ERROR
       const querylogger = { updateZonaDto };
       await this.bitacoraLogger.logToBitacora(
-        "Zonas",
+        'Zonas',
         `Se actualizo una Zona con nombre: ${updateZonaDto.nombre}  y Id ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
         16,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al actualizar una Zona",
+        message: 'Error al actualizar una zona',
         error: error.message,
       });
     }
@@ -801,54 +912,54 @@ ORDER BY r.Id DESC;
 
   async remove(id: number, cliente: number, idUser: number, rol: number) {
     try {
-      let Zonas;
+      let zonas;
       switch (rol) {
         case 1:
-          // Usuario SuperAdministrador - obtiene todas las Zonas
-          Zonas = await this.ZonasRepository.findOne({
+          // Usuario SuperAdministrador - obtiene todas las zonas
+          zonas = await this.zonasRepository.findOne({
             where: { id: id },
           });
           break;
 
         case 2:
-          // Usuario administrador - obtiene todas las Zonas
-          Zonas = await this.ZonasRepository.findOne({
+          // Usuario administrador - obtiene todas las zonas
+          zonas = await this.zonasRepository.findOne({
             where: { id: id, idCliente: cliente },
           });
           break;
 
         default:
-          // Usuarios normales - solo sus Zonas asignadas
-          Zonas = await this.ZonasRepository.findOne({
+          // Usuarios normales - solo sus zonas asignadas
+          zonas = await this.zonasRepository.findOne({
             where: { id: id, idCliente: cliente },
           });
           break;
       }
-      if (!Zonas) {
-        throw new NotFoundException("Zona no encontrado");
+      if (!zonas) {
+        throw new NotFoundException('Zona no encontrada');
       }
 
-      await this.ZonasRepository.update(id, { estatus: 0 });
+      await this.zonasRepository.update(id, { estatus: 0 });
 
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Zonas",
-        `Se elimino una Zona con nombre: ${Zonas.nombre} y Id ${id}`,
-        "UPDATE",
+        'Zonas',
+        `Se elimino una Zona con nombre: ${zonas.nombre} y Id ${id}`,
+        'UPDATE',
         querylogger,
         idUser,
         16,
-        EstatusEnumBitcora.SUCCESS
+        EstatusEnumBitcora.SUCCESS,
       );
 
       // API response (con mensajes corregidos)
       const result: ApiCrudResponse = {
-        status: "success",
-        message: "Zona eliminada correctamente", // ✅ Corregido
+        status: 'success',
+        message: 'Zona eliminada correctamente', // ✅ Corregido
         data: {
           id: id,
-          nombre: `Zona ${id} Nombre: ${Zonas.nombre} Descripción: ${Zonas.descripcion}`, // ✅ Mejorado
+          nombre: `Zona ${id} Nombre: ${zonas.nombre} Descripción:${zonas.descripcion}`, // ✅ Mejorado
         },
       };
       return result;
@@ -856,20 +967,20 @@ ORDER BY r.Id DESC;
       // Registro en la bitácora ERROR
       const querylogger = { id: id, estatus: 0 };
       await this.bitacoraLogger.logToBitacora(
-        "Zonas",
+        'Zonas',
         `Se elimino una Zona con ID: ${id}`,
-        "UPDATE",
+        'UPDATE',
         querylogger,
         idUser,
         16,
         EstatusEnumBitcora.ERROR,
-        error.message
+        error.message,
       );
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: "Error al eliminar una Zona.",
+        message: 'Error al eliminar una zona',
         error: error.message,
       });
     }

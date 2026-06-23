@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   HttpException,
+  HttpStatus,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -89,7 +90,6 @@ export class ModulosService {
         relations: ['permisos'],
         where: { estatus: 1 },
       });
-
       // 🔥 Forzamos ids a number y agregamos nombreCompleto
       const data = modulos.map((item) => ({
         ...item,
@@ -100,9 +100,8 @@ export class ModulosService {
           idModulo: Number(permiso.idModulo),
         }))
       }));
-
       const result: ApiResponseCommon = {
-        data: data,
+        data: modulos,
       };
       return result;
     } catch (error) {
@@ -117,7 +116,6 @@ export class ModulosService {
         skip: (page - 1) * limit,
         take: limit,
       });
-
       // 🔥 Forzamos ids a number y agregamos nombreCompleto
       const modulos = data.map((item) => ({
         ...item,
@@ -130,7 +128,7 @@ export class ModulosService {
       }));
 
       const result: ApiResponseCommon = {
-        data: modulos,
+        data,
         paginated: {
           total: total,
           page,
@@ -149,11 +147,21 @@ export class ModulosService {
         where: { id: id },
         relations: ['permisos'],
       });
-      if (!modulo) throw new NotFoundException('Módulo no encontrado');
+      if (!modulo)      throw new NotFoundException({ message: 'Módulo no encontrado' });
+
       return { data: modulo };
     } catch (error) {
-      throw new BadRequestException(error);
-    }
+    if (error instanceof HttpException) throw error;
+
+
+    throw new HttpException(
+      {
+        message: 'Error interno al buscar el módulo',
+        details: error.message,
+      },
+      HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
   }
 
   async update(

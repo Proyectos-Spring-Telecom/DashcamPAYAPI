@@ -11,18 +11,21 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { UsuariosZonasService } from './usuarioszonas.service';
-import { CreateUsuariosZonasDto } from './dto/create-usuarioszonas.dto';
-import { UpdateUsuarioszonaDto } from './dto/update-usuarioszonas.dto';
+import { UsuarioszonasService } from './usuarioszonas.service';
+import { CreateUsuariosZonasDto } from './dto/create-usuarioszona.dto';
+import { UpdateUsuarioszonaDto } from './dto/update-usuarioszona.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
-import { UpdateUsuariosZonasEstatusDto } from './dto/update-usuarioszonas-estatus.dto';
+import { UpdateUsuariosZonasEstatusDto } from './dto/update-usuarioszona-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Usuarios Zonas')
+@ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
 @Controller('usuarioszonas')
-export class UsuariosZonasController {
+export class UsuarioszonasController {
   constructor(
-    private readonly usuariosZonasService: UsuariosZonasService,
+    private readonly usuarioszonasService: UsuarioszonasService,
   ) {}
 
   @Post()
@@ -31,7 +34,7 @@ export class UsuariosZonasController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.usuariosZonasService.create(
+    return await this.usuarioszonasService.create(
       +idUser,
       createUsuariosZonasDto,
     );
@@ -39,12 +42,12 @@ export class UsuariosZonasController {
 
   @Get('list')
   async findAllList(): Promise<ApiResponseCommon> {
-    return await this.usuariosZonasService.findAllList();
+    return await this.usuarioszonasService.findAllList();
   }
 
   @Get('usuario/:idUsuario')
   async findOneUsuario(@Param('idUsuario',ParseIntPipe) id: number) {
-    return await this.usuariosZonasService.findOneUsuario(id);
+    return await this.usuarioszonasService.findOneUsuario(id);
   }
 
   @Get(':page/:limit')
@@ -53,12 +56,12 @@ export class UsuariosZonasController {
     @Param('limit', ParseIntPipe) limit: number,
     @Request() req,
   ): Promise<ApiResponseCommon> {
-    return await this.usuariosZonasService.findAll(page, limit);
+    return await this.usuarioszonasService.findAll(page, limit);
   }
 
   @Get(':id')
   async findOne(@Param('id') id: string) {
-    return await this.usuariosZonasService.findOne(+id);
+    return await this.usuarioszonasService.findOne(+id);
   }
 
   @Patch('estatus/:id')
@@ -68,7 +71,7 @@ export class UsuariosZonasController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.usuariosZonasService.updateEstatus(
+    return await this.usuarioszonasService.updateEstatus(
       +id,
       idUser,
       updateUsuariosZonasEstatusDto,
@@ -78,20 +81,21 @@ export class UsuariosZonasController {
   @Put(':idUsuario')
   async update(
     @Param('idUsuario') id: string,
-    @Body() UpdateUsuarioszonaDto: UpdateUsuarioszonaDto,
+    @Body() updateUsuarioszonaDto: UpdateUsuarioszonaDto,
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return this.usuariosZonasService.update(
+    return this.usuarioszonasService.update(
       +id,
       idUser,
-      UpdateUsuarioszonaDto,
+      updateUsuarioszonaDto,
     );
   }
 
   @Delete(':id')
   async remove(@Param('id') id: string, @Request() req): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.usuariosZonasService.remove(+id, idUser);
+    return await this.usuarioszonasService.remove(+id, idUser);
   }
 }
+

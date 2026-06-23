@@ -11,13 +11,13 @@ import {
   Request,
   ParseIntPipe,
 } from '@nestjs/common';
-import { ValidadoresService } from './validadores.service'; 
-import { CreateValidadoresDto } from './dto/create-validadores.dto';
-import { UpdateValidadoresDto } from './dto/update-validadores.dto';
+import { ValidadoresService } from './validadores.service';
+import { CreateValidadorDto } from './dto/create-validador.dto';
+import { UpdateValidadorDto } from './dto/update-validador.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
-import { UpdateValidadoresEstatusDto } from './dto/update-validadores-estatus.dto';
+import { UpdateValidadorEstatusDto } from './dto/update-validador-estatus.dto';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
-import { UpdateValidadoresEstadoDto } from './dto/update-validadores-estado.dto';
+import { UpdateValidadorEstadoDto } from './dto/update-validador-estado.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('validadores')
@@ -25,13 +25,13 @@ export class ValidadoresController {
   constructor(private readonly ValidadoresService: ValidadoresService) {}
 
   @Post()
-  createValidadores(
-    @Body() createValidadoresDto: CreateValidadoresDto,
+  createValidador(
+    @Body() createValidadorDto: CreateValidadorDto,
     @Request() req,
   ) {
     const idUser = req.user.userId;
-    return this.ValidadoresService.createValidadores(
-      createValidadoresDto,
+    return this.ValidadoresService.createValidador(
+      createValidadorDto,
       +idUser,
     );
   }
@@ -44,7 +44,7 @@ export class ValidadoresController {
     return this.ValidadoresService.findAllList(+cliente, +rol);
   }
 
-  @Get('clientes/:id')
+  @Get('/clientes/:id')
   async findAllValidadoresClientes(
     @Param('id', ParseIntPipe) id: number,
     @Request() req,
@@ -68,58 +68,58 @@ export class ValidadoresController {
   }
 
   @Get(':id')
-  findOneValidadores(@Param('id') id: string, @Request() req) {
+  findOneValidador(@Param('id') id: string, @Request() req) {
     const idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.ValidadoresService.findOneValidadores(+id, +cliente, +rol);
+    return this.ValidadoresService.findOneValidador(+id, +cliente, +rol);
   }
 
-  @Patch('actualizar/estado/:id')
+    @Patch('actualizar/estado/:id')
   updateValidadorEstado(
     @Param('id') id: string,
     @Request() req,
-    @Body() updateValidadoresEstadoDto: UpdateValidadoresEstadoDto,
+    @Body() updateValidadorEstadoDto: UpdateValidadorEstadoDto,
   ) {
     const idUser = req.user.userId;
     return this.ValidadoresService.updateValidadorEstado(
       +id,
       +idUser,
-      updateValidadoresEstadoDto,
+      updateValidadorEstadoDto,
     );
   }
 
   @Patch('estatus/:id')
-  updateValidadoresEstatus(
+  updateValidadorEstatus(
     @Param('id') id: string,
     @Request() req,
-    @Body() updateValidadoresEstatusDto: UpdateValidadoresEstatusDto,
+    @Body() updateValidadorEstatusDto: UpdateValidadorEstatusDto,
   ) {
     const idUser = req.user.userId;
-    return this.ValidadoresService.updateValidadoresEstatus(
+    return this.ValidadoresService.updateValidadorEstatus(
       +id,
       +idUser,
-      updateValidadoresEstatusDto,
+      updateValidadorEstatusDto,
     );
   }
 
   @Put(':id')
-  updateValidadores(
+  updateValidador(
     @Param('id') id: string,
     @Request() req,
-    @Body() updateValidadoresDto: UpdateValidadoresDto,
+    @Body() updateValidadorDto: UpdateValidadorDto,
   ) {
     const idUser = req.user.userId;
-    return this.ValidadoresService.updateValidadores(
+    return this.ValidadoresService.updateValidador(
       +id,
       +idUser,
-      updateValidadoresDto,
+      updateValidadorDto,
     );
   }
 
   @Delete(':id')
-  removeValidadores(@Param('id') id: string, @Request() req) {
+  removeValidador(@Param('id') id: string, @Request() req) {
     const idUser = req.user.userId;
-    return this.ValidadoresService.removeValidadores(+id, +idUser);
+    return this.ValidadoresService.removeValidador(+id, +idUser);
   }
 }

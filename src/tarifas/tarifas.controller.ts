@@ -16,7 +16,10 @@ import { CreateTarifaDto } from './dto/create-tarifa.dto';
 import { UpdateTarifaDto } from './dto/update-tarifa.dto';
 import { UpdateTarifasEstatusDto } from './dto/update-tarifa-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { ApiBearerAuth, ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 
+@ApiTags('Tarifas')
+@ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
 @Controller('tarifas')
 export class TarifasController {
@@ -36,6 +39,52 @@ export class TarifasController {
     const idUser = req.user.userId;
     const rol = req.user.rol;
     return this.tarifasService.findAllList(+idUser, +cliente, +rol);
+  }
+
+  @Get('variante/:idVariante')
+  @ApiOperation({
+    summary: 'Obtener tarifa por ID de variante',
+    description: 'Obtiene la tarifa activa asociada a una variante específica',
+  })
+  @ApiParam({
+    name: 'idVariante',
+    description: 'ID de la variante',
+    type: Number,
+    example: 1,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Tarifa encontrada exitosamente',
+    schema: {
+      example: {
+        data: [
+          {
+            id: 1,
+            tarifaBase: 10.5,
+            distanciaBaseKm: 5.0,
+            incrementoCadaMetros: 100,
+            costoAdicional: 1.5,
+            tipoTarifa: 1,
+            fechaCreacion: '2025-01-01T00:00:00.000Z',
+            fechaActualizacion: '2025-01-01T00:00:00.000Z',
+            estatus: 1,
+            idVariante: 1,
+            nombreVariante: 'Variante Centro',
+          },
+        ],
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Variante o tarifa no encontrada',
+  })
+  findByVariante(
+    @Param('idVariante', ParseIntPipe) idVariante: number,
+    @Request() req,
+  ) {
+    const idUser = req.user.userId;
+    return this.tarifasService.findByVariante(idVariante, +idUser);
   }
 
   @Get(':page/:limit')

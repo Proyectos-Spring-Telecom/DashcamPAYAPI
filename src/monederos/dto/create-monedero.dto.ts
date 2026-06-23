@@ -51,7 +51,7 @@ export class CreateMonederoDto {
   })
   @IsOptional()
   @IsInt()
-  idPasajero?: number | null;
+  idPasajero: number | null;
 
   @ApiProperty({
     example: 1,
@@ -59,4 +59,21 @@ export class CreateMonederoDto {
   })
   @IsInt()
   idCliente: number;
+
+  @ApiProperty({
+    example: 1,
+    description: 'ID del tipo pasajero propietario del monedero',
+  })
+  @IsInt()
+  @IsOptional()
+  idTipoPasajero?: number;
+
+  @ApiProperty({
+    example: 'CARD123456789',
+    description: 'ID de la tarjeta asociada al monedero',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  idCard?: string;
 }
