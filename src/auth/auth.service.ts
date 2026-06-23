@@ -35,7 +35,10 @@ import { Pasajeros } from 'src/entities/Pasajeros';
 import { Monederos } from 'src/entities/Monederos';
 import { Turnos } from 'src/entities/Turnos';
 import { Viajes } from 'src/entities/Viajes';
+import { RefreshSessions } from 'src/entities/RefreshSessions';
 import { LoggerService } from 'src/common/logger.service';
+import { createHash, randomInt, randomUUID } from 'crypto';
+import { IsNull } from 'typeorm';
 
 @Injectable()
 export class AuthService {
@@ -54,6 +57,8 @@ export class AuthService {
     private readonly turnosRepository: Repository<Turnos>,
     @InjectRepository(Viajes)
     private readonly viajesRepository: Repository<Viajes>,
+    @InjectRepository(RefreshSessions)
+    private readonly refreshSessionsRepository: Repository<RefreshSessions>,
     private readonly jwtService: JwtService,
     private readonly emailService: MailService,
     private readonly bitacoraLogger: BitacoraLoggerService,
@@ -62,6 +67,238 @@ export class AuthService {
     private readonly netpayService: NetpayService,
     private readonly loggerService: LoggerService,
   ) {}
+
+  private async generateTokens(
+    payload: Record<string, unknown>,
+    userId: number,
+  ): Promise<{ token: string; refreshToken: string }> {
+    const token = this.jwtService.sign(payload);
+
+    const jti = randomUUID();
+    const refreshToken = this.jwtService.sign(
+      { sub: userId, jti },
+      {
+        secret: process.env.JWT_REFRESH_SECRET,
+        expiresIn: process.env.JWT_REFRESH_EXPIRES ?? '7d',
+      },
+    );
+
+    const tokenHash = createHash('sha256').update(refreshToken).digest('hex');
+
+    const decoded = this.jwtService.decode(refreshToken);
+    const expiresAt = new Date(decoded.exp * 1000);
+
+    await this.refreshSessionsRepository.save(
+      this.refreshSessionsRepository.create({
+        idUsuario: userId,
+        jti,
+        tokenHash,
+        expiresAt,
+      }),
+    );
+
+    return { token, refreshToken };
+  }
+
+  private padFecha(n: number): string {
+    return n < 10 ? '0' + n : String(n);
+  }
+
+  private formatFechaDesfasada(): string {
+    const ahora = new Date();
+    const desfaseMs = -6 * 60 * 60 * 1000;
+    const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+    return `${fechaDesfasada.getFullYear()}-${this.padFecha(fechaDesfasada.getMonth() + 1)}-${this.padFecha(fechaDesfasada.getDate())} ${this.padFecha(fechaDesfasada.getHours())}:${this.padFecha(fechaDesfasada.getMinutes())}:${this.padFecha(fechaDesfasada.getSeconds())}`;
+  }
+
+  private fetchOperadorDatosByUserId(userId: number) {
+    return this.usuariosRepository.query(
+      `
+          WITH DatosUsuario AS (
+    SELECT
+        u.Id AS IdUsuario,
+        u.UserName AS userName,
+        u.Nombre AS nombre,
+        u.ApellidoPaterno AS apellidoPaterno,
+        u.ApellidoMaterno AS apellidoMaterno,
+        u.Telefono AS telefono,
+        u.UltimoLogin AS ultimoLogin,
+        u.FechaCreacion AS fechaCreacion,
+        u.FotoPerfil AS fotoPerfil,
+        u.ValidadorId AS validadorId,
+        c.Id AS idCliente,
+        c.Nombre AS nombreCliente,
+        c.ApellidoPaterno AS apellidoPaternoCliente,
+        c.ApellidoMaterno AS apellidoMaternoCliente,
+        COALESCE(c.Logotipo, cp.Logotipo) AS logotipo,
+        o.Id AS idOperador,
+        o.FechaNacimiento AS fechaNacimiento,
+        o.Identificacion AS identificacion,
+        o.Foto AS fotoOperador,
+        o.ComprobanteDomicilio AS comprobanteDomicilioOperador,
+        o.CertificadoMedico AS certificadoMedicoOperador,
+        o.AntecedentesNoPenales AS antecedentesNoPenalesOperador,
+        o.Estatus AS estatusOperador
+    FROM Usuarios u
+    INNER JOIN Clientes c ON c.Id = u.IdCliente
+    LEFT JOIN Clientes cp ON c.IdPadre = cp.Id
+    LEFT JOIN Operadores o ON o.IdUsuario = u.Id
+    WHERE u.Id = ?
+),
+LicenciasJSON AS (
+    SELECT
+        o.IdUsuario,
+        JSON_ARRAYAGG(
+            JSON_OBJECT(
+                'IdLicencia', l.Id,
+                'Licencia', l.Licencia,
+                'NumeroLicencia', l.NumeroLicencia,
+                'FechaExpedicion', l.FechaExpedicion,
+                'FechaVencimiento', l.FechaVencimiento,
+                'IdTipoLicencia', l.IdTipoLicencia,
+                'IdCategoriaLicencia', l.IdCategoriaLicencia
+            )
+        ) AS Licencias
+    FROM Operadores o
+    LEFT JOIN Licencias l ON l.IdOperador = o.Id
+    GROUP BY o.IdUsuario
+)
+SELECT 
+    du.*,
+    lj.Licencias
+FROM DatosUsuario du
+LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
+          `,
+      [userId],
+    );
+  }
+
+  private async resolveTurnoViajeActivo(idOperador: number | null): Promise<{
+    idTurno: number | null;
+    idViaje: number | null;
+  }> {
+    let idTurno: number | null = null;
+    let idViaje: number | null = null;
+
+    if (!idOperador) {
+      return { idTurno, idViaje };
+    }
+
+    const turnoActivo = await this.turnosRepository.findOne({
+      where: { idOperador, estatus: 1 },
+      order: { inicio: 'DESC' },
+    });
+
+    if (turnoActivo) {
+      idTurno = turnoActivo.id;
+      const viajeActivo = await this.viajesRepository.findOne({
+        where: { idTurno: turnoActivo.id, estatus: 1 },
+        order: { inicio: 'DESC' },
+      });
+      if (viajeActivo) {
+        idViaje = viajeActivo.id;
+      }
+    }
+
+    return { idTurno, idViaje };
+  }
+
+  async getMe(userId: number) {
+    try {
+      const user = await this.usuariosRepository.findOne({
+        relations: ['idRol2', 'idCliente2', 'idCliente2.idPadre2'],
+        where: { id: userId, estatus: 1 },
+      });
+
+      if (!user) {
+        throw new UnauthorizedException('Usuario no válido');
+      }
+
+      const permisos = await this.permisosRepository.find({
+        select: ['idPermiso'],
+        where: { idUsuario: user.id, estatus: 1 },
+      });
+
+      if (Number(user.idRol) === 3) {
+        const operador = await this.fetchOperadorDatosByUserId(userId);
+        if (!operador?.length || !operador[0]) {
+          throw new NotFoundException(
+            'No se encontró información del operador.',
+          );
+        }
+
+        const op = operador[0];
+        const { idTurno, idViaje } = await this.resolveTurnoViajeActivo(
+          op.idOperador,
+        );
+        const pin = user.codigoHash ? 1 : 0;
+
+        return {
+          message: 'login exitoso',
+          id: Number(op.IdUsuario),
+          nombre: op.nombre,
+          apellidoPaterno: op.apellidoPaterno,
+          apellidoMaterno: op.apellidoMaterno,
+          fechaNacimiento: op.fechaNacimiento,
+          identificacion: op.identificacion,
+          comprobanteDomicilioOperador: op.comprobanteDomicilioOperador,
+          certificadoMedicoOperador: op.certificadoMedicoOperador,
+          antecedentesNoPenalesOperador: op.antecedentesNoPenalesOperador,
+          estatusOperador: op.estatusOperador,
+          idCliente: Number(op.idCliente),
+          nombreCliente: op.nombreCliente,
+          apellidoPaternoCliente: op.apellidoPaternoCliente,
+          apellidoMaternoCliente: op.apellidoMaternoCliente,
+          logotipo: op.logotipo,
+          telefono: op.telefono,
+          ultimoLogin: op.ultimoLogin,
+          fechaCreacion: op.fechaCreacion,
+          fotoPerfil: op.fotoOperador,
+          validadorId: op.validadorId,
+          pinExist: pin,
+          userName: user.userName,
+          Licencias: op.Licencias,
+          rol: user.idRol2,
+          permisos,
+          idTurno,
+          idViaje,
+        };
+      }
+
+      const logotipo =
+        user.idCliente2?.logotipo ||
+        user.idCliente2?.idPadre2?.logotipo ||
+        null;
+
+      return {
+        message: 'login exitoso',
+        id: Number(user.id),
+        nombre: `${user.nombre}`,
+        apellidoPaterno: `${user.apellidoPaterno}`,
+        apellidoMaterno: `${user.apellidoMaterno}`,
+        idCliente: Number(`${user.idCliente}`),
+        nombreCliente: `${user.idCliente2?.nombre}`,
+        apellidoPaternoCliente: `${user.idCliente2?.apellidoPaterno}`,
+        apellidoMaternoCliente: `${user.idCliente2?.apellidoMaterno}`,
+        logotipo: logotipo ? `${logotipo}` : null,
+        telefono: `${user.telefono}`,
+        ultimoLogin: `${user.ultimoLogin}`,
+        fechaCreacion: `${user.fechaCreacion}`,
+        fotoPerfil: `${user.fotoPerfil}`,
+        userName: `${user.userName}`,
+        rol: user.idRol2,
+        permisos,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.loggerService.error('AuthService', 'getMe failed', error);
+      throw new InternalServerErrorException(
+        'Internal error occurred. Please contact support.',
+      );
+    }
+  }
 
   // ========================================
   // 🔹 FUNCIÓN PRIVADA PARA GENERAR NÚMERO DE SERIE ÚNICO
@@ -505,87 +742,13 @@ export class AuthService {
       ) {
         throw new UnauthorizedException('Credenciales invalidas');
       }
-      const permisos = await this.permisosRepository.find({
-        select: ['idPermiso'],
-        where: { idUsuario: user.id, estatus: 1 },
-      });
-
-      function pad(n: number) {
-        return n < 10 ? '0' + n : n;
-      }
-
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
       await this.usuariosRepository.update(user.id, {
-        ultimoLogin: fechaActual,
+        ultimoLogin: this.formatFechaDesfasada(),
       });
-      const pin = user.codigoHash ? 1 : 0;
-      const operador = await this.usuariosRepository.query(`
-          WITH DatosUsuario AS (
-    SELECT
-        u.Id AS IdUsuario,
-        u.UserName AS userName,
-        u.Nombre AS nombre,
-        u.ApellidoPaterno AS apellidoPaterno,
-        u.ApellidoMaterno AS apellidoMaterno,
-        u.Telefono AS telefono,
-        u.UltimoLogin AS ultimoLogin,
-        u.FechaCreacion AS fechaCreacion,
-        u.FotoPerfil AS fotoPerfil,
-        u.ValidadorId AS validadorId,
 
-        -- CLIENTE
-        c.Id AS idCliente,
-        c.Nombre AS nombreCliente,
-        c.ApellidoPaterno AS apellidoPaternoCliente,
-        c.ApellidoMaterno AS apellidoMaternoCliente,
-        COALESCE(c.Logotipo, cp.Logotipo) AS logotipo,
-
-        -- OPERADOR
-        o.Id AS idOperador,
-        o.FechaNacimiento AS fechaNacimiento,
-        o.Identificacion AS identificacion,
-        o.Foto AS fotoOperador,
-        o.ComprobanteDomicilio AS comprobanteDomicilioOperador,
-        o.CertificadoMedico AS certificadoMedicoOperador,
-        o.AntecedentesNoPenales AS antecedentesNoPenalesOperador,
-        o.Estatus AS estatusOperador
-    FROM Usuarios u
-    INNER JOIN Clientes c ON c.Id = u.IdCliente
-    LEFT JOIN Clientes cp ON c.IdPadre = cp.Id
-    LEFT JOIN Operadores o ON o.IdUsuario = u.Id
-    WHERE u.Id = ${user.id}
-),
-LicenciasJSON AS (
-    SELECT
-        o.IdUsuario,
-        JSON_ARRAYAGG(
-            JSON_OBJECT(
-                'IdLicencia', l.Id,
-                'Licencia', l.Licencia,
-                'NumeroLicencia', l.NumeroLicencia,
-                'FechaExpedicion', l.FechaExpedicion,
-                'FechaVencimiento', l.FechaVencimiento,
-                'IdTipoLicencia', l.IdTipoLicencia,
-                'IdCategoriaLicencia', l.IdCategoriaLicencia
-            )
-        ) AS Licencias
-    FROM Operadores o
-    LEFT JOIN Licencias l ON l.IdOperador = o.Id
-    GROUP BY o.IdUsuario
-)
-SELECT 
-    du.*,
-    lj.Licencias
-FROM DatosUsuario du
-LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
-          `);
-
-      if (!operador || operador.length === 0 || !operador[0]) {
+      const operador = await this.fetchOperadorDatosByUserId(user.id);
+      if (!operador?.length || !operador[0]) {
         throw new NotFoundException('No se encontró información del operador.');
       }
 
@@ -597,73 +760,10 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         idOperador: operador[0].idOperador,
       };
 
-      // Si el rol es 3 (operador), buscar turno y viaje activos
-      let idTurno: number | null = null;
-      let idViaje: number | null = null;
-
-      if (Number(user.idRol) === 3 && operador[0].idOperador) {
-        // Buscar turno activo (estatus = 1) para este operador
-        const turnoActivo = await this.turnosRepository.findOne({
-          where: {
-            idOperador: operador[0].idOperador,
-            estatus: 1,
-          },
-          order: {
-            inicio: 'DESC', // Más reciente primero
-          },
-        });
-
-        if (turnoActivo) {
-          idTurno = turnoActivo.id;
-
-          // Buscar viaje activo (estatus = 1) para este turno
-          const viajeActivo = await this.viajesRepository.findOne({
-            where: {
-              idTurno: turnoActivo.id,
-              estatus: 1,
-            },
-            order: {
-              inicio: 'DESC', // Más reciente primero
-            },
-          });
-
-          if (viajeActivo) {
-            idViaje = viajeActivo.id;
-          }
-        }
-      }
-
+      const tokens = await this.generateTokens(payload, Number(user.id));
       return {
-        message: `login exitoso`,
-        id: Number(operador[0].IdUsuario),
-        nombre: operador[0].nombre,
-        apellidoPaterno: operador[0].apellidoPaterno,
-        apellidoMaterno: operador[0].apellidoMaterno,
-        fechaNacimiento: operador[0].fechaNacimiento,
-        identificacion: operador[0].identificacion,
-        comprobanteDomicilioOperador: operador[0].comprobanteDomicilioOperador,
-        certificadoMedicoOperador: operador[0].certificadoMedicoOperador,
-        antecedentesNoPenalesOperador:
-          operador[0].antecedentesNoPenalesOperador,
-        estatusOperador: operador[0].estatusOperador,
-        idCliente: Number(operador[0].idCliente),
-        nombreCliente: operador[0].nombreCliente,
-        apellidoPaternoCliente: operador[0].apellidoPaternoCliente,
-        apellidoMaternoCliente: operador[0].apellidoMaternoCliente,
-        logotipo: operador[0].logotipo,
-        telefono: operador[0].telefono,
-        ultimoLogin: operador[0].ultimoLogin,
-        fechaCreacion: operador[0].fechaCreacion,
-        fotoPerfil: operador[0].fotoOperador,
-        validadorId: operador[0].validadorId,
-        pinExist: pin,
-        userName: user.userName,
-        Licencias: operador[0].Licencias,
-        rol: user.idRol2,
-        token: this.jwtService.sign(payload),
-        permisos: permisos,
-        idTurno: idTurno,
-        idViaje: idViaje,
+        token: tokens.token,
+        refreshToken: tokens.refreshToken,
       };
     } catch (error) {
       if (error instanceof HttpException) {
@@ -693,211 +793,72 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         throw new NotFoundException('No se encontró al usuario.');
       }
 
-      if (
-        !user ||
-        !(await bcrypt.compare(loginAuthDto.password, user.passwordHash))
-      ) {
+      if (user.bloqueadoHasta) {
+        const ahora = new Date();
+        const desfaseMs = -6 * 60 * 60 * 1000;
+        const ahoraDesfasado = new Date(ahora.getTime() + desfaseMs);
+        if (new Date(user.bloqueadoHasta) > ahoraDesfasado) {
+          throw new UnauthorizedException(
+            'Cuenta bloqueada temporalmente por múltiples intentos fallidos. Intenta más tarde.',
+          );
+        }
+      }
+
+      const passwordValid = await bcrypt.compare(
+        loginAuthDto.password,
+        user.passwordHash,
+      );
+      if (!passwordValid) {
+        const maxIntentos = Number(process.env.MAX_LOGIN_ATTEMPTS ?? 10);
+        const lockoutMin = Number(process.env.LOCKOUT_MINUTES ?? 30);
+        const nuevosIntentos = (user.intentosFallidos ?? 0) + 1;
+
+        const ahora = new Date();
+        const desfaseMs = -6 * 60 * 60 * 1000;
+        const ahoraDesfasado = new Date(ahora.getTime() + desfaseMs);
+
+        const updateData: {
+          intentosFallidos: number;
+          bloqueadoHasta?: string;
+        } = { intentosFallidos: nuevosIntentos };
+        if (nuevosIntentos >= maxIntentos) {
+          const bloqueadoHasta = new Date(
+            ahoraDesfasado.getTime() + lockoutMin * 60 * 1000,
+          );
+          updateData.bloqueadoHasta = `${bloqueadoHasta.getFullYear()}-${this.padFecha(bloqueadoHasta.getMonth() + 1)}-${this.padFecha(bloqueadoHasta.getDate())} ${this.padFecha(bloqueadoHasta.getHours())}:${this.padFecha(bloqueadoHasta.getMinutes())}:${this.padFecha(bloqueadoHasta.getSeconds())}`;
+        }
+        await this.usuariosRepository.update(user.id, updateData);
+
         throw new UnauthorizedException('Credenciales invalidas');
       }
 
-      const permisos = await this.permisosRepository.find({
-        select: ['idPermiso'],
-        where: { idUsuario: user.id, estatus: 1 },
+      await this.usuariosRepository.update(user.id, {
+        ultimoLogin: this.formatFechaDesfasada(),
+        intentosFallidos: 0,
+        bloqueadoHasta: null,
       });
 
-      const payload = {
+      const payload: Record<string, unknown> = {
         id: user.id,
         email: user.userName,
         cliente: user.idCliente,
         rol: user.idRol,
       };
 
-      function pad(n: number) {
-        return n < 10 ? '0' + n : n;
-      }
-
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
-
-      await this.usuariosRepository.update(user.id, {
-        ultimoLogin: fechaActual,
-      });
-
-      //login para operadores
       if (Number(user.idRol) === 3) {
-        const pin = user.codigoHash ? 1 : 0;
-        const operador = await this.usuariosRepository.query(`
-          WITH DatosUsuario AS (
-    SELECT
-        u.Id AS IdUsuario,
-        u.UserName AS userName,
-        u.Nombre AS nombre,
-        u.ApellidoPaterno AS apellidoPaterno,
-        u.ApellidoMaterno AS apellidoMaterno,
-        u.Telefono AS telefono,
-        u.UltimoLogin AS ultimoLogin,
-        u.FechaCreacion AS fechaCreacion,
-        u.FotoPerfil AS fotoPerfil,
-        u.ValidadorId AS validadorId,
-
-        -- CLIENTE
-        c.Id AS idCliente,
-        c.Nombre AS nombreCliente,
-        c.ApellidoPaterno AS apellidoPaternoCliente,
-        c.ApellidoMaterno AS apellidoMaternoCliente,
-        COALESCE(c.Logotipo, cp.Logotipo) AS logotipo,
-
-        -- OPERADOR
-        o.Id AS idOperador,
-        o.FechaNacimiento AS fechaNacimiento,
-        o.Identificacion AS identificacion,
-        o.Foto AS fotoOperador,
-        o.ComprobanteDomicilio AS comprobanteDomicilioOperador,
-        o.CertificadoMedico AS certificadoMedicoOperador,
-        o.AntecedentesNoPenales AS antecedentesNoPenalesOperador,
-        o.Estatus AS estatusOperador
-    FROM Usuarios u
-    INNER JOIN Clientes c ON c.Id = u.IdCliente
-    LEFT JOIN Clientes cp ON c.IdPadre = cp.Id
-    LEFT JOIN Operadores o ON o.IdUsuario = u.Id
-    WHERE u.Id = ${user.id}
-),
-LicenciasJSON AS (
-    SELECT
-        o.IdUsuario,
-        JSON_ARRAYAGG(
-            JSON_OBJECT(
-                'IdLicencia', l.Id,
-                'Licencia', l.Licencia,
-                'NumeroLicencia', l.NumeroLicencia,
-                'FechaExpedicion', l.FechaExpedicion,
-                'FechaVencimiento', l.FechaVencimiento,
-                'IdTipoLicencia', l.IdTipoLicencia,
-                'IdCategoriaLicencia', l.IdCategoriaLicencia
-            )
-        ) AS Licencias
-    FROM Operadores o
-    LEFT JOIN Licencias l ON l.IdOperador = o.Id
-    GROUP BY o.IdUsuario
-)
-SELECT 
-    du.*,
-    lj.Licencias
-FROM DatosUsuario du
-LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
-          `);
-        if (!operador || operador.length === 0 || !operador[0]) {
+        const operador = await this.fetchOperadorDatosByUserId(user.id);
+        if (!operador?.length || !operador[0]) {
           throw new NotFoundException(
             'No se encontró información del operador.',
           );
         }
-
-        const payload = {
-          id: user.id,
-          email: user.userName,
-          cliente: user.idCliente,
-          rol: user.idRol,
-          idOperador: operador[0].idOperador,
-        };
-
-        // Si el rol es 3 (operador), buscar turno y viaje activos
-        let idTurno: number | null = null;
-        let idViaje: number | null = null;
-
-        if (Number(user.idRol) === 3 && operador[0].idOperador) {
-          // Buscar turno activo (estatus = 1) para este operador
-          const turnoActivo = await this.turnosRepository.findOne({
-            where: {
-              idOperador: operador[0].idOperador,
-              estatus: 1,
-            },
-            order: {
-              inicio: 'DESC', // Más reciente primero
-            },
-          });
-
-          if (turnoActivo) {
-            idTurno = turnoActivo.id;
-
-            // Buscar viaje activo (estatus = 1) para este turno
-            const viajeActivo = await this.viajesRepository.findOne({
-              where: {
-                idTurno: turnoActivo.id,
-                estatus: 1,
-              },
-              order: {
-                inicio: 'DESC', // Más reciente primero
-              },
-            });
-
-            if (viajeActivo) {
-              idViaje = viajeActivo.id;
-            }
-          }
-        }
-
-        return {
-          message: `login exitoso`,
-          id: Number(operador[0].IdUsuario),
-          nombre: operador[0].nombre,
-          apellidoPaterno: operador[0].apellidoPaterno,
-          apellidoMaterno: operador[0].apellidoMaterno,
-          fechaNacimiento: operador[0].fechaNacimiento,
-          identificacion: operador[0].identificacion,
-          comprobanteDomicilioOperador:
-            operador[0].comprobanteDomicilioOperador,
-          certificadoMedicoOperador: operador[0].certificadoMedicoOperador,
-          antecedentesNoPenalesOperador:
-            operador[0].antecedentesNoPenalesOperador,
-          estatusOperador: operador[0].estatusOperador,
-          idCliente: Number(operador[0].idCliente),
-          nombreCliente: operador[0].nombreCliente,
-          apellidoPaternoCliente: operador[0].apellidoPaternoCliente,
-          apellidoMaternoCliente: operador[0].apellidoMaternoCliente,
-          logotipo: operador[0].logotipo,
-          telefono: operador[0].telefono,
-          ultimoLogin: operador[0].ultimoLogin,
-          fechaCreacion: operador[0].fechaCreacion,
-          fotoPerfil: operador[0].fotoOperador,
-          pinExist: pin,
-          userName: user.userName,
-          Licencias: operador[0].Licencias,
-          rol: user.idRol2,
-          token: this.jwtService.sign(payload),
-          permisos: permisos,
-          idTurno: idTurno,
-          idViaje: idViaje,
-          validadorId: operador[0].validadorId,
-        };
+        payload.idOperador = operador[0].idOperador;
       }
-      // Obtener logotipo del cliente o del padre si es null
-      const logotipo =
-        user.idCliente2?.logotipo ||
-        user.idCliente2?.idPadre2?.logotipo ||
-        null;
 
+      const tokens = await this.generateTokens(payload, Number(user.id));
       return {
-        message: `login exitoso`,
-        id: Number(`${user.id}`),
-        nombre: `${user.nombre}`,
-        apellidoPaterno: `${user.apellidoPaterno}`,
-        apellidoMaterno: `${user.apellidoMaterno}`,
-        idCliente: Number(`${user.idCliente}`),
-        nombreCliente: `${user.idCliente2?.nombre}`,
-        apellidoPaternoCliente: `${user.idCliente2?.apellidoPaterno}`,
-        apellidoMaternoCliente: `${user.idCliente2?.apellidoMaterno}`,
-        logotipo: logotipo ? `${logotipo}` : null,
-        telefono: `${user.telefono}`,
-        ultimoLogin: `${user.ultimoLogin}`,
-        fechaCreacion: `${user.fechaCreacion}`,
-        fotoPerfil: `${user.fotoPerfil}`,
-        userName: `${user.userName}`,
-        rol: user.idRol2,
-        token: this.jwtService.sign(payload),
-        permisos: permisos,
+        token: tokens.token,
+        refreshToken: tokens.refreshToken,
       };
     } catch (error) {
       if (error instanceof HttpException) {
@@ -915,47 +876,60 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
   // ========================================
   async verifyUser(codigoPasajeroAutenticacion: CodigoPasajeroAutenticacion) {
     try {
-      //Buscamos el codigo en la tabla CodigoAutenticacion tiene que ser  Tipo: 0 y Estatus: 1
-      const codigoValido = await this.codigoAutenticacioRepository.findOne({
+      const registro = await this.codigoAutenticacioRepository.findOne({
         where: {
-          codigo: codigoPasajeroAutenticacion.codigo,
           tipo: TipoCodigoAutenticacion.CONFIRMACION_CORREO,
           usado: EstatusEnum.ACTIVO,
         },
+        order: { id: 'DESC' },
       });
 
-      //En caso de no encontrar manda error
-      if (!codigoValido) {
+      if (!registro) {
         throw new BadRequestException('Código inválido o ya usado');
       }
 
-      //Buscamos al usuario por la relacion que tiene la tabla CodigoAutenticacion
-      const user = await this.usuariosRepository.findOne({
-        where: { id: codigoValido.idUsuario },
-      });
-      if (!user) throw new BadRequestException('Usuario no encontrado');
-
-      //Generamos la fecha con un retraso de 6 horas para que se guarde de manera correcta
-      function pad(n: number) {
-        return n < 10 ? '0' + n : n;
-      }
-
       const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
+      const desfaseMs = -6 * 60 * 60 * 1000;
       const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
 
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
-
-      //Verificamos que la fecha no sea mayor a la de expiracion en caso de ser asi
-      //el codigo ha expirado
-      if (fechaDesfasada > codigoValido.fechaExpiracion) {
+      if (fechaDesfasada > registro.fechaExpiracion) {
+        await this.codigoAutenticacioRepository.update(registro.id, {
+          usado: EstatusEnum.INACTIVO,
+          estatus: EstatusEnum.INACTIVO,
+        });
         throw new BadRequestException('El código ha expirado');
       }
 
-      //cambiamos el estatus del email a 1 del usuario correspondiente
+      if (codigoPasajeroAutenticacion.codigo !== registro.codigo) {
+        const maxIntentos = Number(process.env.OTP_MAX_ATTEMPTS ?? 5);
+        const nuevosIntentos = (registro.intentos ?? 0) + 1;
+
+        if (nuevosIntentos >= maxIntentos) {
+          await this.codigoAutenticacioRepository.update(registro.id, {
+            intentos: nuevosIntentos,
+            usado: EstatusEnum.INACTIVO,
+            estatus: EstatusEnum.INACTIVO,
+          });
+          throw new BadRequestException(
+            'Demasiados intentos. Solicita un nuevo código.',
+          );
+        }
+
+        await this.codigoAutenticacioRepository.update(registro.id, {
+          intentos: nuevosIntentos,
+        });
+        throw new BadRequestException('Código inválido');
+      }
+
+      const user = await this.usuariosRepository.findOne({
+        where: { id: registro.idUsuario },
+      });
+      if (!user) throw new BadRequestException('Usuario no encontrado');
+
+      const fechaActual = this.formatFechaDesfasada();
+
       await this.usuariosRepository.update(user.id, { emailConfirmado: 1 });
 
-      //-----Registro en la bitacora----- SUCCESS
       const querylogger = { id: user.id, EmailConfirmado: 1 };
       await this.bitacoraLogger.logToBitacora(
         'Usuarios',
@@ -967,8 +941,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         EstatusEnumBitcora.SUCCESS,
       );
 
-      //en la tabla CodigoAutenticacion actualizamos para dar a entender que ya se uso el codigo
-      await this.codigoAutenticacioRepository.update(codigoValido.id, {
+      await this.codigoAutenticacioRepository.update(registro.id, {
         usado: EstatusEnum.INACTIVO,
         estatus: EstatusEnum.INACTIVO,
         fechaUso: fechaActual,
@@ -1039,24 +1012,20 @@ Muchas gracias por su preferencia.`;
   //Creacion de codigo de autenticacion
   // ========================================
   async generarCodigo(idUsuario: number, tipo: number): Promise<string> {
-    // Generar código de 4 dígitos
-    const codigo = Math.floor(1000 + Math.random() * 9000).toString();
+    const codigo = randomInt(100000, 1000000).toString();
 
-    //Generamos la fecha de Expiracion
     const ahora = new Date();
-    const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-    const expiracionMs = 15 * 60 * 1000; // +15 minutos
+    const desfaseMs = -6 * 60 * 60 * 1000;
+    const expiracionMs = 15 * 60 * 1000;
 
     const expiracion = new Date(ahora.getTime() + expiracionMs + desfaseMs);
 
-    //Buscamos si ya existe un atributo con ese usuario
     const codigoExiste = await this.codigoAutenticacioRepository.findOne({
       where: {
         idUsuario: idUsuario,
       },
     });
 
-    //si existe actualiza los datos
     if (codigoExiste) {
       await this.codigoAutenticacioRepository.update(codigoExiste.id, {
         codigo,
@@ -1065,9 +1034,9 @@ Muchas gracias por su preferencia.`;
         usado: EstatusEnum.ACTIVO,
         estatus: EstatusEnum.ACTIVO,
         fechaUso: null,
+        intentos: 0,
       });
     } else {
-      //si no se crea el atributo
       const codigoCreate = this.codigoAutenticacioRepository.create({
         idUsuario: idUsuario,
         codigo: codigo,
@@ -1075,11 +1044,11 @@ Muchas gracias por su preferencia.`;
         fechaExpiracion: expiracion,
         usado: EstatusEnum.ACTIVO,
         estatus: EstatusEnum.ACTIVO,
+        intentos: 0,
       });
       await this.codigoAutenticacioRepository.save(codigoCreate);
     }
 
-    //regresa el codigo
     return codigo;
   }
 
@@ -1159,6 +1128,102 @@ Muchas gracias por su preferencia.`;
         throw error;
       }
       this.loggerService.error('AuthService', 'Operation failed', error);
+      throw new InternalServerErrorException(
+        'Internal error occurred. Please contact support.',
+      );
+    }
+  }
+
+  async refreshToken(refreshToken: string) {
+    try {
+      let payloadJwt: { jti: string; sub: number };
+      try {
+        payloadJwt = this.jwtService.verify(refreshToken, {
+          secret: process.env.JWT_REFRESH_SECRET,
+        });
+      } catch {
+        throw new UnauthorizedException('Refresh token inválido o expirado');
+      }
+
+      const tokenHash = createHash('sha256').update(refreshToken).digest('hex');
+
+      const session = await this.refreshSessionsRepository.findOne({
+        where: { jti: payloadJwt.jti },
+      });
+
+      if (!session || session.tokenHash !== tokenHash) {
+        throw new UnauthorizedException('Refresh token inválido');
+      }
+      if (session.revokedAt) {
+        await this.refreshSessionsRepository.update(
+          { idUsuario: session.idUsuario, revokedAt: IsNull() },
+          { revokedAt: new Date() },
+        );
+        throw new UnauthorizedException(
+          'Refresh token ya utilizado. Sesiones revocadas por seguridad.',
+        );
+      }
+      if (session.expiresAt < new Date()) {
+        throw new UnauthorizedException('Refresh token expirado');
+      }
+
+      const user = await this.usuariosRepository.findOne({
+        where: { id: session.idUsuario },
+      });
+      if (!user || user.estatus !== 1) {
+        throw new UnauthorizedException('Usuario no válido');
+      }
+
+      const payload: Record<string, unknown> = {
+        id: user.id,
+        email: user.userName,
+        cliente: user.idCliente,
+        rol: user.idRol,
+      };
+
+      if (Number(user.idRol) === 3) {
+        const operador = await this.fetchOperadorDatosByUserId(user.id);
+        if (operador?.[0]?.idOperador) {
+          payload.idOperador = operador[0].idOperador;
+        }
+      }
+
+      const tokens = await this.generateTokens(payload, Number(user.id));
+      const nuevaSesion = await this.refreshSessionsRepository.findOne({
+        where: { idUsuario: Number(user.id) },
+        order: { id: 'DESC' },
+      });
+      await this.refreshSessionsRepository.update(session.id, {
+        revokedAt: new Date(),
+        replacedById: nuevaSesion ? nuevaSesion.id : null,
+      });
+
+      return { token: tokens.token, refreshToken: tokens.refreshToken };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.loggerService.error('AuthService', 'refreshToken failed', error);
+      throw new InternalServerErrorException(
+        'Internal error occurred. Please contact support.',
+      );
+    }
+  }
+
+  async logout(refreshToken: string) {
+    try {
+      const tokenHash = createHash('sha256').update(refreshToken).digest('hex');
+      const session = await this.refreshSessionsRepository.findOne({
+        where: { tokenHash },
+      });
+      if (session && !session.revokedAt) {
+        await this.refreshSessionsRepository.update(session.id, {
+          revokedAt: new Date(),
+        });
+      }
+      return { message: 'Sesión cerrada correctamente' };
+    } catch (error) {
+      this.loggerService.error('AuthService', 'logout failed', error);
       throw new InternalServerErrorException(
         'Internal error occurred. Please contact support.',
       );
