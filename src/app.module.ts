@@ -89,6 +89,11 @@ import { LoggerService } from './common/logger.service';
         NETPAY_BASE_URL: Joi.string().uri().optional(),
         NETPAY_PUBLIC_KEY: Joi.string().optional(),
         NETPAY_PRIVATE_KEY: Joi.string().optional(),
+        CORS_ORIGINS: Joi.string().optional(),
+        ENFORCE_HTTPS: Joi.string().valid('true', 'false').default('false'),
+        SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
+        SWAGGER_USER: Joi.string().optional(),
+        SWAGGER_PASSWORD: Joi.string().optional(),
       }),
     }),
 
