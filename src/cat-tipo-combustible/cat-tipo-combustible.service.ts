@@ -114,11 +114,12 @@ export class CatTipoCombustibleService {
 
   async findAll(page: number, limit: number): Promise<ApiResponseCommon> {
     try {
-      const [data, total] = await this.catTipoCombustibleRepository.findAndCount({
-        order: { nombre: 'ASC' },
-        skip: (page - 1) * limit,
-        take: limit,
-      });
+      const [data, total] =
+        await this.catTipoCombustibleRepository.findAndCount({
+          order: { nombre: 'ASC' },
+          skip: (page - 1) * limit,
+          take: limit,
+        });
 
       // Forzamos ids a number
       const tiposCombustible = data.map((item) => ({
@@ -192,14 +193,20 @@ export class CatTipoCombustibleService {
           where: { nombre: updateCatTipoCombustibleDto.nombre },
         });
         if (existing && existing.id !== id) {
-          throw new BadRequestException('El nombre del tipo de combustible ya existe');
+          throw new BadRequestException(
+            'El nombre del tipo de combustible ya existe',
+          );
         }
       }
 
-      await this.catTipoCombustibleRepository.update(id, updateCatTipoCombustibleDto);
-      const tipoCombustibleResult = await this.catTipoCombustibleRepository.findOne({
-        where: { id: id },
-      });
+      await this.catTipoCombustibleRepository.update(
+        id,
+        updateCatTipoCombustibleDto,
+      );
+      const tipoCombustibleResult =
+        await this.catTipoCombustibleRepository.findOne({
+          where: { id: id },
+        });
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updateCatTipoCombustibleDto };

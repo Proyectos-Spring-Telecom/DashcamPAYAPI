@@ -5,13 +5,9 @@ import { DireccionesController } from './direcciones.controller';
 import { HttpModule } from '@nestjs/axios';
 
 @Module({
-  imports: [
-    ConfigModule,
-    HttpModule,
-  ],
+  imports: [ConfigModule, HttpModule],
   controllers: [DireccionesController],
   providers: [DireccionesService],
   exports: [DireccionesService],
 })
 export class DireccionesModule {}
-

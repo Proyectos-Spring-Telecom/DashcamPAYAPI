@@ -12,7 +12,7 @@ import { MantenimientoKilometraje } from 'src/entities/MantenimientoKilometraje'
 import { Instalaciones } from 'src/entities/Instalaciones';
 import { Clientes } from 'src/entities/Clientes';
 import { Posiciones } from 'src/entities/Posiciones';
-import { Repository, In } from 'typeorm';
+import { Repository } from 'typeorm';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import {
   ApiCrudResponse,
@@ -111,7 +111,12 @@ export class MantenimientoKilometrajeService {
     }
   }
 
-  async findAll(page: number, limit: number, idCliente: number, rol: number): Promise<ApiResponseCommon> {
+  async findAll(
+    page: number,
+    limit: number,
+    idCliente: number,
+    rol: number,
+  ): Promise<ApiResponseCommon> {
     try {
       let data: any[];
       let totalResult: any[];
@@ -252,57 +257,81 @@ WHERE c.Id IN (${placeholders})
         estatus: item.estatus,
         placaVehiculo: item.placaVehiculo || null,
         imagenVehiculo: item.imagenVehiculo || null,
-        instalacion: item.idInstalacion ? { id: Number(item.idInstalacion) } : null,
-        instalacionDispositivo: item.instalacionDispositivoId ? {
-          id: Number(item.instalacionDispositivoId),
-          numeroSerie: item.instalacionDispositivoNumeroSerie,
-          marca: item.instalacionDispositivoMarca,
-          modelo: item.instalacionDispositivoModelo,
-        } : null,
-        instalacionValidador: item.instalacion?.validadores ? {
-          id: Number(item.instalacion.validadores.id),
-          numeroSerie: item.instalacion.validadores.numeroSerie,
-          marca: item.instalacion.validadores.marca,
-          modelo: item.instalacion.validadores.modelo,
-        } : null,
-        instalacionContadores: item.instalacion?.instalacionContadores && item.instalacion.instalacionContadores.length > 0
-          ? item.instalacion.instalacionContadores
-              .filter(ic => ic.contador && ic.estatus === 1)
-              .map(ic => ({
-                id: Number(ic.contador.id),
-                numeroSerie: ic.contador.numeroSerie,
-                marca: ic.contador.marca,
-                modelo: ic.contador.modelo,
-              }))
-          : [],
+        instalacion: item.idInstalacion
+          ? { id: Number(item.idInstalacion) }
+          : null,
+        instalacionDispositivo: item.instalacionDispositivoId
+          ? {
+              id: Number(item.instalacionDispositivoId),
+              numeroSerie: item.instalacionDispositivoNumeroSerie,
+              marca: item.instalacionDispositivoMarca,
+              modelo: item.instalacionDispositivoModelo,
+            }
+          : null,
+        instalacionValidador: item.instalacion?.validadores
+          ? {
+              id: Number(item.instalacion.validadores.id),
+              numeroSerie: item.instalacion.validadores.numeroSerie,
+              marca: item.instalacion.validadores.marca,
+              modelo: item.instalacion.validadores.modelo,
+            }
+          : null,
+        instalacionContadores:
+          item.instalacion?.instalacionContadores &&
+          item.instalacion.instalacionContadores.length > 0
+            ? item.instalacion.instalacionContadores
+                .filter((ic) => ic.contador && ic.estatus === 1)
+                .map((ic) => ({
+                  id: Number(ic.contador.id),
+                  numeroSerie: ic.contador.numeroSerie,
+                  marca: ic.contador.marca,
+                  modelo: ic.contador.modelo,
+                }))
+            : [],
         // Mantener compatibilidad con código antiguo (primer contador)
-        instalacionContador: item.instalacion?.instalacionContadores && item.instalacion.instalacionContadores.length > 0 && item.instalacion.instalacionContadores[0]?.contador ? {
-          id: Number(item.instalacion.instalacionContadores[0].contador.id),
-          numeroSerie: item.instalacion.instalacionContadores[0].contador.numeroSerie,
-          marca: item.instalacion.instalacionContadores[0].contador.marca,
-          modelo: item.instalacion.instalacionContadores[0].contador.modelo,
-        } : null,
-        instalacionVehiculo: item.instalacion?.vehiculos ? {
-          id: Number(item.instalacion.vehiculos.id),
-          marca: item.instalacion.vehiculos.marca,
-          modelo: item.instalacion.vehiculos.modelo,
-        } : null,
-        instalacionCliente: item.instalacion?.idCliente2 ? {
-          id: Number(item.instalacion.idCliente2.id),
-          nombre: item.instalacion.idCliente2.nombre,
-          apellidoPaterno: item.instalacion.idCliente2.apellidoPaterno,
-          apellidoMaterno: item.instalacion.idCliente2.apellidoMaterno,
-          estatus: item.instalacion.idCliente2.estatus,
-        } : null,
-        ...(rol === 1 || rol === 2) && item.idClienteData ? {
-          instalacionCliente: {
-            id: Number(item.idClienteData),
-            nombre: item.nombreClienteData,
-            apellidoPaterno: item.apellidoPaternoCliente,
-            apellidoMaterno: item.apellidoMaternoCliente,
-            estatus: item.estatusCliente,
-          },
-        } : {},
+        instalacionContador:
+          item.instalacion?.instalacionContadores &&
+          item.instalacion.instalacionContadores.length > 0 &&
+          item.instalacion.instalacionContadores[0]?.contador
+            ? {
+                id: Number(
+                  item.instalacion.instalacionContadores[0].contador.id,
+                ),
+                numeroSerie:
+                  item.instalacion.instalacionContadores[0].contador
+                    .numeroSerie,
+                marca: item.instalacion.instalacionContadores[0].contador.marca,
+                modelo:
+                  item.instalacion.instalacionContadores[0].contador.modelo,
+              }
+            : null,
+        instalacionVehiculo: item.instalacion?.vehiculos
+          ? {
+              id: Number(item.instalacion.vehiculos.id),
+              marca: item.instalacion.vehiculos.marca,
+              modelo: item.instalacion.vehiculos.modelo,
+            }
+          : null,
+        instalacionCliente: item.instalacion?.idCliente2
+          ? {
+              id: Number(item.instalacion.idCliente2.id),
+              nombre: item.instalacion.idCliente2.nombre,
+              apellidoPaterno: item.instalacion.idCliente2.apellidoPaterno,
+              apellidoMaterno: item.instalacion.idCliente2.apellidoMaterno,
+              estatus: item.instalacion.idCliente2.estatus,
+            }
+          : null,
+        ...((rol === 1 || rol === 2) && item.idClienteData
+          ? {
+              instalacionCliente: {
+                id: Number(item.idClienteData),
+                nombre: item.nombreClienteData,
+                apellidoPaterno: item.apellidoPaternoCliente,
+                apellidoMaterno: item.apellidoMaternoCliente,
+                estatus: item.estatusCliente,
+              },
+            }
+          : {}),
       }));
 
       const result: ApiResponseCommon = {
@@ -324,14 +353,28 @@ WHERE c.Id IN (${placeholders})
     }
   }
 
-  async findOne(id: number, idCliente: number, rol: number): Promise<ApiResponseCommon> {
+  async findOne(
+    id: number,
+    idCliente: number,
+    rol: number,
+  ): Promise<ApiResponseCommon> {
     try {
-      const mantenimiento = await this.mantenimientoKilometrajeRepository.findOne({
-        where: { id: id },
-        relations: ['instalacion', 'instalacion.validadores', 'instalacion.instalacionContadores', 'instalacion.instalacionContadores.contador', 'instalacion.vehiculos', 'instalacion.idCliente2'],
-      });
+      const mantenimiento =
+        await this.mantenimientoKilometrajeRepository.findOne({
+          where: { id: id },
+          relations: [
+            'instalacion',
+            'instalacion.validadores',
+            'instalacion.instalacionContadores',
+            'instalacion.instalacionContadores.contador',
+            'instalacion.vehiculos',
+            'instalacion.idCliente2',
+          ],
+        });
       if (!mantenimiento) {
-        throw new NotFoundException('Mantenimiento por kilometraje no encontrado');
+        throw new NotFoundException(
+          'Mantenimiento por kilometraje no encontrado',
+        );
       }
 
       const item = mantenimiento;
@@ -340,7 +383,9 @@ WHERE c.Id IN (${placeholders})
         data: [
           {
             id: Number(item.id),
-            idInstalacion: item.idInstalacion ? Number(item.idInstalacion) : null,
+            idInstalacion: item.idInstalacion
+              ? Number(item.idInstalacion)
+              : null,
             kmInicial: item.kmInicial != null ? Number(item.kmInicial) : null,
             kmDeseado: item.kmDeseado != null ? Number(item.kmDeseado) : null,
             periodo: item.periodo,
@@ -349,52 +394,84 @@ WHERE c.Id IN (${placeholders})
             estatus: mantenimiento.estatus,
             placaVehiculo: mantenimiento.instalacion?.vehiculos?.placa || null,
             imagenVehiculo: mantenimiento.instalacion?.vehiculos?.foto || null,
-            instalacion: item.idInstalacion ? { id: Number(item.idInstalacion) } : null,
-        
-            instalacionValidador: mantenimiento.instalacion?.validadores ? {
-              id: Number(mantenimiento.instalacion.validadores.id),
-              numeroSerie: mantenimiento.instalacion.validadores.numeroSerie,
-              marca: mantenimiento.instalacion.validadores.marca,
-              modelo: mantenimiento.instalacion.validadores.modelo,
-            } : null,
-            instalacionContadores: mantenimiento.instalacion?.instalacionContadores && mantenimiento.instalacion.instalacionContadores.length > 0
-              ? mantenimiento.instalacion.instalacionContadores
-                  .filter(ic => ic.contador && ic.estatus === 1)
-                  .map(ic => ({
-                    id: Number(ic.contador.id),
-                    numeroSerie: ic.contador.numeroSerie,
-                    marca: ic.contador.marca,
-                    modelo: ic.contador.modelo,
-                  }))
-              : [],
+            instalacion: item.idInstalacion
+              ? { id: Number(item.idInstalacion) }
+              : null,
+
+            instalacionValidador: mantenimiento.instalacion?.validadores
+              ? {
+                  id: Number(mantenimiento.instalacion.validadores.id),
+                  numeroSerie:
+                    mantenimiento.instalacion.validadores.numeroSerie,
+                  marca: mantenimiento.instalacion.validadores.marca,
+                  modelo: mantenimiento.instalacion.validadores.modelo,
+                }
+              : null,
+            instalacionContadores:
+              mantenimiento.instalacion?.instalacionContadores &&
+              mantenimiento.instalacion.instalacionContadores.length > 0
+                ? mantenimiento.instalacion.instalacionContadores
+                    .filter((ic) => ic.contador && ic.estatus === 1)
+                    .map((ic) => ({
+                      id: Number(ic.contador.id),
+                      numeroSerie: ic.contador.numeroSerie,
+                      marca: ic.contador.marca,
+                      modelo: ic.contador.modelo,
+                    }))
+                : [],
             // Mantener compatibilidad con código antiguo (primer contador)
-            instalacionContador: mantenimiento.instalacion?.instalacionContadores && mantenimiento.instalacion.instalacionContadores.length > 0 && mantenimiento.instalacion.instalacionContadores[0]?.contador ? {
-              id: Number(mantenimiento.instalacion.instalacionContadores[0].contador.id),
-              numeroSerie: mantenimiento.instalacion.instalacionContadores[0].contador.numeroSerie,
-              marca: mantenimiento.instalacion.instalacionContadores[0].contador.marca,
-              modelo: mantenimiento.instalacion.instalacionContadores[0].contador.modelo,
-            } : null,
-            instalacionVehiculo: mantenimiento.instalacion?.vehiculos ? {
-              id: Number(mantenimiento.instalacion.vehiculos.id),
-              marca: mantenimiento.instalacion.vehiculos.marca,
-              modelo: mantenimiento.instalacion.vehiculos.modelo,
-            } : null,
-            instalacionCliente: mantenimiento.instalacion?.idCliente2 ? {
-              id: Number(mantenimiento.instalacion.idCliente2.id),
-              nombre: mantenimiento.instalacion.idCliente2.nombre,
-              apellidoPaterno: mantenimiento.instalacion.idCliente2.apellidoPaterno,
-              apellidoMaterno: mantenimiento.instalacion.idCliente2.apellidoMaterno,
-              estatus: mantenimiento.instalacion.idCliente2.estatus,
-            } : null,
-            ...(rol === 1 || rol === 2) && mantenimiento.instalacion?.idCliente2 ? {
-              instalacionCliente: {
-                id: Number(mantenimiento.instalacion.idCliente2.id),
-                nombre: mantenimiento.instalacion.idCliente2.nombre,
-                apellidoPaterno: mantenimiento.instalacion.idCliente2.apellidoPaterno,
-                apellidoMaterno: mantenimiento.instalacion.idCliente2.apellidoMaterno,
-                estatus: mantenimiento.instalacion.idCliente2.estatus,
-              },
-            } : {},
+            instalacionContador:
+              mantenimiento.instalacion?.instalacionContadores &&
+              mantenimiento.instalacion.instalacionContadores.length > 0 &&
+              mantenimiento.instalacion.instalacionContadores[0]?.contador
+                ? {
+                    id: Number(
+                      mantenimiento.instalacion.instalacionContadores[0]
+                        .contador.id,
+                    ),
+                    numeroSerie:
+                      mantenimiento.instalacion.instalacionContadores[0]
+                        .contador.numeroSerie,
+                    marca:
+                      mantenimiento.instalacion.instalacionContadores[0]
+                        .contador.marca,
+                    modelo:
+                      mantenimiento.instalacion.instalacionContadores[0]
+                        .contador.modelo,
+                  }
+                : null,
+            instalacionVehiculo: mantenimiento.instalacion?.vehiculos
+              ? {
+                  id: Number(mantenimiento.instalacion.vehiculos.id),
+                  marca: mantenimiento.instalacion.vehiculos.marca,
+                  modelo: mantenimiento.instalacion.vehiculos.modelo,
+                }
+              : null,
+            instalacionCliente: mantenimiento.instalacion?.idCliente2
+              ? {
+                  id: Number(mantenimiento.instalacion.idCliente2.id),
+                  nombre: mantenimiento.instalacion.idCliente2.nombre,
+                  apellidoPaterno:
+                    mantenimiento.instalacion.idCliente2.apellidoPaterno,
+                  apellidoMaterno:
+                    mantenimiento.instalacion.idCliente2.apellidoMaterno,
+                  estatus: mantenimiento.instalacion.idCliente2.estatus,
+                }
+              : null,
+            ...((rol === 1 || rol === 2) &&
+            mantenimiento.instalacion?.idCliente2
+              ? {
+                  instalacionCliente: {
+                    id: Number(mantenimiento.instalacion.idCliente2.id),
+                    nombre: mantenimiento.instalacion.idCliente2.nombre,
+                    apellidoPaterno:
+                      mantenimiento.instalacion.idCliente2.apellidoPaterno,
+                    apellidoMaterno:
+                      mantenimiento.instalacion.idCliente2.apellidoMaterno,
+                    estatus: mantenimiento.instalacion.idCliente2.estatus,
+                  },
+                }
+              : {}),
           },
         ],
       };
@@ -415,20 +492,24 @@ WHERE c.Id IN (${placeholders})
     idUser: number,
   ): Promise<ApiCrudResponse> {
     try {
-      const mantenimiento = await this.mantenimientoKilometrajeRepository.findOne({
-        where: { id: id },
-      });
+      const mantenimiento =
+        await this.mantenimientoKilometrajeRepository.findOne({
+          where: { id: id },
+        });
       if (!mantenimiento) {
-        throw new NotFoundException('Mantenimiento por kilometraje no encontrado');
+        throw new NotFoundException(
+          'Mantenimiento por kilometraje no encontrado',
+        );
       }
 
       await this.mantenimientoKilometrajeRepository.update(
         id,
         updateMantenimientoKilometrajeDto,
       );
-      const mantenimientoResult = await this.mantenimientoKilometrajeRepository.findOne({
-        where: { id: id },
-      });
+      const _mantenimientoResult =
+        await this.mantenimientoKilometrajeRepository.findOne({
+          where: { id: id },
+        });
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updateMantenimientoKilometrajeDto };
@@ -476,12 +557,15 @@ WHERE c.Id IN (${placeholders})
 
   async desactivar(id: number, idUser: number): Promise<ApiCrudResponse> {
     try {
-      const mantenimiento = await this.mantenimientoKilometrajeRepository.findOne({
-        where: { id: id },
-      });
+      const mantenimiento =
+        await this.mantenimientoKilometrajeRepository.findOne({
+          where: { id: id },
+        });
 
       if (!mantenimiento) {
-        throw new NotFoundException('Mantenimiento por kilometraje no encontrado');
+        throw new NotFoundException(
+          'Mantenimiento por kilometraje no encontrado',
+        );
       }
 
       await this.mantenimientoKilometrajeRepository.update(id, { estatus: 0 });
@@ -534,16 +618,21 @@ WHERE c.Id IN (${placeholders})
 
   async activar(id: number, idUser: number): Promise<ApiCrudResponse> {
     try {
-      const mantenimiento = await this.mantenimientoKilometrajeRepository.findOne({
-        where: { id: id },
-      });
+      const mantenimiento =
+        await this.mantenimientoKilometrajeRepository.findOne({
+          where: { id: id },
+        });
 
       if (!mantenimiento) {
-        throw new NotFoundException('Mantenimiento por kilometraje no encontrado');
+        throw new NotFoundException(
+          'Mantenimiento por kilometraje no encontrado',
+        );
       }
 
       if (mantenimiento.estatus === 1) {
-        throw new BadRequestException('El mantenimiento por kilometraje ya está activo');
+        throw new BadRequestException(
+          'El mantenimiento por kilometraje ya está activo',
+        );
       }
 
       await this.mantenimientoKilometrajeRepository.update(id, { estatus: 1 });

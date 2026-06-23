@@ -16,7 +16,13 @@ import { CreateZonasDto } from './dto/create-zona.dto';
 import { UpdateZonaDto } from './dto/update-zona.dto';
 import { UpdateZonasEstatusDto } from './dto/update-zona-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+} from '@nestjs/swagger';
 
 @ApiTags('Zonas')
 @ApiBearerAuth('bearer-token')
@@ -26,16 +32,11 @@ export class ZonasController {
   constructor(private readonly zonasService: ZonasService) {}
 
   @Post()
-  create(    @Body() createZonasDto: CreateZonasDto, @Request() req) {
+  create(@Body() createZonasDto: CreateZonasDto, @Request() req) {
     const idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.zonasService.create(
-      +idUser,
-      +cliente,
-      +rol,
-      createZonasDto,
-    );
+    return this.zonasService.create(+idUser, +cliente, +rol, createZonasDto);
   }
 
   @Get('list')
@@ -49,7 +50,8 @@ export class ZonasController {
   @Get('by-idCliente/:idCliente')
   @ApiOperation({
     summary: 'Listar zonas por ID de cliente',
-    description: 'Obtiene todas las zonas activas filtradas por el ID de cliente especificado en la ruta.',
+    description:
+      'Obtiene todas las zonas activas filtradas por el ID de cliente especificado en la ruta.',
   })
   @ApiParam({
     name: 'idCliente',
@@ -73,13 +75,18 @@ export class ZonasController {
     @Param('idCliente', ParseIntPipe) idCliente: number,
     @Request() req,
   ) {
-    return await this.zonasService.findByCliente(+idCliente, +req.user.userId, +req.user.rol);
+    return await this.zonasService.findByCliente(
+      +idCliente,
+      +req.user.userId,
+      +req.user.rol,
+    );
   }
 
   @Get('by-cliente/:idCliente')
   @ApiOperation({
     summary: 'Listar zonas por ID de cliente',
-    description: 'Obtiene todas las zonas activas pertenecientes únicamente al cliente especificado (sin incluir clientes hijos).',
+    description:
+      'Obtiene todas las zonas activas pertenecientes únicamente al cliente especificado (sin incluir clientes hijos).',
   })
   @ApiParam({
     name: 'idCliente',

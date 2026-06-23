@@ -16,7 +16,13 @@ import { CreateRutaDto } from './dto/create-ruta.dto';
 import { UpdateRutaDto } from './dto/update-ruta.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { UpdateRutasEstatusDto } from './dto/update-ruta-estatus.dto';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+} from '@nestjs/swagger';
 
 @ApiTags('Rutas')
 @ApiBearerAuth('bearer-token')
@@ -30,7 +36,12 @@ export class RutasController {
     const cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return await this.rutasService.create(+idUser, +cliente, +rol, createRutaDto);
+    return await this.rutasService.create(
+      +idUser,
+      +cliente,
+      +rol,
+      createRutaDto,
+    );
   }
 
   @Get('list')
@@ -44,7 +55,8 @@ export class RutasController {
   @Get('by-zona/:idZona')
   @ApiOperation({
     summary: 'Listar rutas por ID de zona',
-    description: 'Obtiene todas las rutas activas pertenecientes únicamente a la zona especificada.',
+    description:
+      'Obtiene todas las rutas activas pertenecientes únicamente a la zona especificada.',
   })
   @ApiParam({
     name: 'idZona',
@@ -76,7 +88,8 @@ export class RutasController {
   @Get('by-idCliente/:idCliente')
   @ApiOperation({
     summary: 'Listar rutas por ID de cliente',
-    description: 'Obtiene todas las rutas activas pertenecientes al cliente especificado (a través de sus zonas).',
+    description:
+      'Obtiene todas las rutas activas pertenecientes al cliente especificado (a través de sus zonas).',
   })
   @ApiParam({
     name: 'idCliente',
@@ -114,7 +127,13 @@ export class RutasController {
     const cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return this.rutasService.obtenerRutasPorUsuarioSQL(+idUser, +cliente, +rol, +page, +limit);
+    return this.rutasService.obtenerRutasPorUsuarioSQL(
+      +idUser,
+      +cliente,
+      +rol,
+      +page,
+      +limit,
+    );
   }
 
   @Get(':id')
@@ -157,7 +176,7 @@ export class RutasController {
 
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
     return this.rutasService.remove(id, +idUser, +rol);

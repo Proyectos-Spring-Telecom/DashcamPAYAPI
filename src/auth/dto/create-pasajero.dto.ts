@@ -28,8 +28,12 @@ export class CreateAltaPasajaroDto {
 
   @IsNotEmpty({ message: 'El apellido paterno es obligatorio' })
   @IsString({ message: 'El apellido paterno debe ser una cadena de texto' })
-  @MinLength(1, { message: 'El apellido paterno debe tener al menos 1 carácter' })
-  @MaxLength(100, { message: 'El apellido paterno no puede exceder los 100 caracteres' })
+  @MinLength(1, {
+    message: 'El apellido paterno debe tener al menos 1 carácter',
+  })
+  @MaxLength(100, {
+    message: 'El apellido paterno no puede exceder los 100 caracteres',
+  })
   @ApiProperty({
     description: 'Apellido paterno',
     example: 'Pérez',
@@ -48,7 +52,13 @@ export class CreateAltaPasajaroDto {
   apellidoMaterno?: string;
 
   @IsNotEmpty({ message: 'La fecha de nacimiento es obligatoria' })
-  @IsDateString({}, { message: 'La fecha de nacimiento debe ser una fecha válida en formato ISO 8601' })
+  @IsDateString(
+    {},
+    {
+      message:
+        'La fecha de nacimiento debe ser una fecha válida en formato ISO 8601',
+    },
+  )
   @ApiProperty({
     example: '1995-08-15',
     description: 'Fecha de nacimiento (YYYY-MM-DD)',
@@ -107,10 +117,14 @@ export class CreateAltaPasajaroDto {
   numeroSerieMonedero?: string;
 
   @ValidateIf((o) => !o.numeroSerieMonedero)
-  @IsNotEmpty({ message: 'El idCliente es obligatorio cuando no se proporciona numeroSerieMonedero' })
+  @IsNotEmpty({
+    message:
+      'El idCliente es obligatorio cuando no se proporciona numeroSerieMonedero',
+  })
   @IsNumber({}, { message: 'El idCliente debe ser un número' })
   @ApiProperty({
-    description: 'ID del cliente. Obligatorio si no se proporciona numeroSerieMonedero. Si se proporciona numeroSerieMonedero, se obtendrá automáticamente del monedero.',
+    description:
+      'ID del cliente. Obligatorio si no se proporciona numeroSerieMonedero. Si se proporciona numeroSerieMonedero, se obtendrá automáticamente del monedero.',
     example: 1,
     required: false,
   })

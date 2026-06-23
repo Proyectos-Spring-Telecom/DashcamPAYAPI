@@ -32,9 +32,14 @@ export class TurnosController {
   ): Promise<ApiCrudResponse> {
     const cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     const idOperador = req.user.idOperador;
-    return await this.turnosService.create(+idUser, +cliente, +idOperador, createTurnoDto);
+    return await this.turnosService.create(
+      +idUser,
+      +cliente,
+      +idOperador,
+      createTurnoDto,
+    );
   }
 
   @Get('list')
@@ -49,12 +54,18 @@ export class TurnosController {
   async findAll(
     @Param('page', ParseIntPipe) page: number,
     @Param('limit', ParseIntPipe) limit: number,
-    @Request() req
+    @Request() req,
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return await this.turnosService.findAll(+idUser, +cliente, +rol, page, limit);
+    return await this.turnosService.findAll(
+      +idUser,
+      +cliente,
+      +rol,
+      page,
+      limit,
+    );
   }
 
   @Get(':id')
@@ -71,10 +82,14 @@ export class TurnosController {
     @Body() updateTurnosEstatusDto: UpdateTurnosEstatusDto,
     @Request() req,
   ): Promise<ApiCrudResponse> {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
-    return await this.turnosService.updateEstatus(id, +idUser, updateTurnosEstatusDto);
+    const _rol = req.user.rol;
+    return await this.turnosService.updateEstatus(
+      id,
+      +idUser,
+      updateTurnosEstatusDto,
+    );
   }
 
   @Patch(':id')
@@ -85,9 +100,15 @@ export class TurnosController {
   ): Promise<ApiCrudResponse> {
     const cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     const idOperador = req.user.idOperador;
-    return await this.turnosService.update(id, +idUser, +cliente, +idOperador, updateTurnoDto);
+    return await this.turnosService.update(
+      id,
+      +idUser,
+      +cliente,
+      +idOperador,
+      updateTurnoDto,
+    );
   }
 
   @Delete(':id')
@@ -95,9 +116,9 @@ export class TurnosController {
     @Param('id', ParseIntPipe) id: number,
     @Request() req,
   ): Promise<ApiCrudResponse> {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return await this.turnosService.remove(id, +idUser);
   }
 }

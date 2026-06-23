@@ -10,4 +10,3 @@ export class CatTipoTarifa {
   @Column('varchar', { name: 'Nombre', length: 100 })
   nombre: string;
 }
-

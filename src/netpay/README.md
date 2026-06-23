@@ -2,6 +2,30 @@
 
 Módulo de integración con la pasarela de pagos Netpay para NestJS.
 
+## ⚠️ Seguridad PCI DSS — Tokenización solo en cliente
+
+**IMPORTANTE:** Este módulo NO acepta números de tarjeta (PAN), fechas de expiración ni CVV.
+Todo dato de tarjeta sensible debe tokenizarse en el **cliente** usando:
+
+- **Frontend Web:** NetpayJS (librería de Netpay)
+- **App Móvil:** SDK de Netpay
+
+El backend SOLO maneja tokens sustitutos generados por Netpay.
+Este enfoque reduce el alcance de cumplimiento PCI DSS a SAQ A/A-EP.
+
+### Flujo correcto:
+1. Cliente captura: número, expiración, CVV
+2. Cliente tokeniza con NetpayJS/SDK → obtiene `token`
+3. Cliente envía `token` al backend
+4. Backend procesa pago con el `token`
+
+### Lo que NUNCA llega al backend:
+- ❌ cardNumber (PAN)
+- ❌ cvv / cvv2
+- ❌ expMonth / expYear
+
+Si el cliente intenta enviar estos campos, serán ignorados por seguridad.
+
 ## Configuración
 
 ### Variables de Entorno
@@ -62,10 +86,6 @@ Ver la guía completa en [FRONTEND_INTEGRATION.md](./FRONTEND_INTEGRATION.md)
 - `GET /netpay/public-key` - Obtiene la public key para usar en NetpayJS
 - `POST /netpay/payment/with-token` - Procesa un pago con token generado por NetpayJS
 
-### Opción Alternativa: Tokenización desde Backend
-
-Si necesitas tokenizar desde el backend (puede no estar disponible en todas las versiones de Netpay):
-
 ### Inyectar el Servicio
 
 ```typescript
@@ -76,50 +96,43 @@ constructor(private readonly netpayService: NetpayService) {}
 
 ### Flujos de Pago
 
-#### Opción 1: Pago con Token de Un Solo Uso
+#### Pago con Token (generado en el cliente)
 
 ```typescript
-// 1. Tokenizar tarjeta
-const tokenResponse = await this.netpayService.tokenizeCard({
-  cardNumber: '4111111111111111',
-  cardHolderName: 'Juan Pérez',
-  expirationMonth: '12',
-  expirationYear: '2025',
-  cvv: '123',
-});
-
-// 2. Procesar pago
-const payment = await this.netpayService.processPayment({
-  token: tokenResponse.token,
-  amount: 100.50,
+// El token se obtiene en el frontend con NetpayJS — nunca en el backend
+const payment = await this.netpayService.processPaymentWithToken({
+  token: tokenFromNetpayJS,
+  amount: 100.5,
   currency: 'MXN',
   description: 'Pago de servicio',
-  saveCard: false,
+  deviceFingerPrint: '...',
+  sessionId: '...',
+  billing: { /* ... */ },
+  deviceInformation: { /* ... */ },
 });
 ```
 
-#### Opción 2: Pago con Tarjeta Guardada
+#### Pago con Tarjeta Guardada
 
 ```typescript
-// 1. Crear cliente
+// 1. Crear cliente (token generado previamente en el cliente con NetpayJS)
 const customer = await this.netpayService.createCustomer({
   firstName: 'Juan',
   lastName: 'Pérez',
   email: 'juan@example.com',
-  token: tokenResponse.token, // Token de la tarjeta
+  token: tokenFromNetpayJS,
 });
 
 // 2. Procesar pago con tarjeta guardada
 const payment = await this.netpayService.processPaymentWithSavedCard({
-  customerId: customer.customerId,
-  cardId: 'card_123', // ID de la tarjeta guardada
-  amount: 100.50,
+  referenceId: '1222337263222',
+  amount: 100.5,
   currency: 'MXN',
   description: 'Pago de servicio',
 });
 ```
 
-#### Opción 3: Checkout Custom
+#### Checkout Custom
 
 ```typescript
 // 1. Obtener Reference ID
@@ -132,13 +145,13 @@ const checkIn = await this.netpayService.checkIn(
   'MXN',
 );
 
-// 3. Procesar pago con referenceId
-const payment = await this.netpayService.processPayment({
-  token: tokenResponse.token,
-  amount: 100.50,
+// 3. Procesar pago con referenceId (token desde NetpayJS en el cliente)
+const payment = await this.netpayService.processPaymentWithToken({
+  token: tokenFromNetpayJS,
+  amount: 100.5,
   currency: 'MXN',
   description: 'Pago de servicio',
-  referenceId: reference.referenceId,
+  referenceID: reference.referenceId,
 });
 
 // 4. Check-out
@@ -150,16 +163,13 @@ await this.netpayService.checkOut(reference.referenceId);
 Si el pago requiere autenticación 3DS:
 
 ```typescript
-// 1. Procesar pago (puede requerir 3DS)
-const payment = await this.netpayService.processPayment({
-  token: tokenResponse.token,
-  amount: 100.50,
+// 1. Procesar pago (puede requerir 3DS; token desde NetpayJS)
+const payment = await this.netpayService.processPaymentWithToken({
+  token: tokenFromNetpayJS,
+  amount: 100.5,
   currency: 'MXN',
   description: 'Pago de servicio',
-  deviceInformation: {
-    deviceFingerprint: 'abc123',
-    userAgent: navigator.userAgent,
-  },
+  deviceInformation: { /* ... */ },
 });
 
 // 2. Si requiere 3DS, confirmar después de la autenticación
@@ -198,11 +208,8 @@ await this.netpayService.cancelOrRefund({
 ## Endpoints Disponibles
 
 - `GET /netpay/test-connection` - Verificar conectividad con Netpay
-- `POST /netpay/tokenize` - Tokenizar tarjeta
-- `POST /netpay/reference-id` - Obtener Reference ID
-- `POST /netpay/check-in` - Check-in para checkout
-- `POST /netpay/check-out` - Check-out para checkout
-- `POST /netpay/payment` - Procesar pago con token
+- `GET /netpay/public-key` - Public key para NetpayJS (frontend)
+- `POST /netpay/payment/with-token` - Procesar pago con token (recomendado)
 - `POST /netpay/payment/saved-card` - Procesar pago con tarjeta guardada
 - `POST /netpay/customers` - Crear cliente
 - `GET /netpay/customers/:customerId` - Consultar cliente

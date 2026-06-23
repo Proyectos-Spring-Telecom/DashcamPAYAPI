@@ -59,6 +59,7 @@ import { NetpayModule } from './netpay/netpay.module';
 import { CatMetodoPagoModule } from './cat-metodo-pago/cat-metodo-pago.module';
 import { DireccionesModule } from './direcciones/direcciones.module';
 import Joi from 'joi';
+import { LoggerService } from './common/logger.service';
 
 @Module({
   imports: [
@@ -82,7 +83,9 @@ import Joi from 'joi';
         E_MAIL: Joi.string().optional(),
         E_MAIL_PASSWORD: Joi.string().optional(),
         SMTP_PASSWORD: Joi.string().optional(),
-        NETPAY_ENVIRONMENT: Joi.string().valid('sandbox', 'production').default('sandbox'),
+        NETPAY_ENVIRONMENT: Joi.string()
+          .valid('sandbox', 'production')
+          .default('sandbox'),
         NETPAY_BASE_URL: Joi.string().uri().optional(),
         NETPAY_PUBLIC_KEY: Joi.string().optional(),
         NETPAY_PRIVATE_KEY: Joi.string().optional(),
@@ -223,6 +226,6 @@ import Joi from 'joi';
     DireccionesModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, LoggerService],
 })
 export class AppModule {}

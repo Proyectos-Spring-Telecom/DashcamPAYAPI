@@ -16,7 +16,22 @@ import { Vehiculos } from 'src/entities/Vehiculos';
 import { Posiciones } from 'src/entities/Posiciones';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Viajes, Clientes, Turnos, ConteoPasajeros, Instalaciones, Contadores, InstalacionContadores, Validadores, Variantes, Vehiculos, Posiciones]), BitacoraModule],
+  imports: [
+    TypeOrmModule.forFeature([
+      Viajes,
+      Clientes,
+      Turnos,
+      ConteoPasajeros,
+      Instalaciones,
+      Contadores,
+      InstalacionContadores,
+      Validadores,
+      Variantes,
+      Vehiculos,
+      Posiciones,
+    ]),
+    BitacoraModule,
+  ],
   controllers: [ViajesController],
   providers: [ViajesService],
 })

@@ -4,7 +4,6 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-  Res,
 } from '@nestjs/common';
 import { CreateRolDto } from './dto/create-rol.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
@@ -12,7 +11,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not } from 'typeorm';
 import { Roles } from 'src/entities/Roles';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
-import { ApiCrudResponse, ApiResponseCommon, EstatusEnumBitcora } from 'src/common/ApiResponse';
+import {
+  ApiCrudResponse,
+  ApiResponseCommon,
+  EstatusEnumBitcora,
+} from 'src/common/ApiResponse';
 import { UpdateRolEstatusDto } from './dto/update-rol.dto';
 import { Response } from 'express';
 
@@ -103,7 +106,7 @@ export class RolesService {
           skip: (page - 1) * limit,
           take: limit,
           where: {
-            id: Not(1), 
+            id: Not(1),
           },
         });
         break;
@@ -151,7 +154,7 @@ export class RolesService {
       });
       if (!permiso) throw new NotFoundException('Rol no encontrado');
 
-      return {data:permiso};
+      return { data: permiso };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -196,7 +199,6 @@ export class RolesService {
       };
       return result;
     } catch (error) {
-
       // --- Registro en la bitácora --- ERROR
       const querylogger = { updateRoleDto };
       await this.bitacoraLogger.logToBitacora(
@@ -231,7 +233,7 @@ export class RolesService {
       });
       if (!rol) throw new NotFoundException('Rol no encontrado');
       //Actualiza
-      const rolResult = await this.rolesRepository.update(id, {
+      const _rolResult = await this.rolesRepository.update(id, {
         estatus: updateRolEstatusDto.estatus,
       });
 

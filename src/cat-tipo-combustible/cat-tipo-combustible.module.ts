@@ -6,10 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatTipoCombustible } from 'src/entities/CatTipoCombustible';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([CatTipoCombustible]),
-    BitacoraModule,
-  ],
+  imports: [TypeOrmModule.forFeature([CatTipoCombustible]), BitacoraModule],
   controllers: [CatTipoCombustibleController],
   providers: [CatTipoCombustibleService],
   exports: [CatTipoCombustibleService],

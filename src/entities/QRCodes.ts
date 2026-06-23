@@ -54,4 +54,3 @@ export class QRCodes {
   @JoinColumn([{ name: 'IdPasajero', referencedColumnName: 'id' }])
   idPasajero2: Pasajeros;
 }
-

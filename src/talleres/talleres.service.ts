@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   HttpException,
   Injectable,
   InternalServerErrorException,
@@ -11,7 +10,11 @@ import { UpdateTallereDto } from './dto/update-tallere.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Talleres } from 'src/entities/Talleres';
 import { Repository } from 'typeorm';
-import { ApiCrudResponse, EstatusEnumBitcora, ApiResponseCommon } from 'src/common/ApiResponse';
+import {
+  ApiCrudResponse,
+  EstatusEnumBitcora,
+  ApiResponseCommon,
+} from 'src/common/ApiResponse';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { Clientes } from 'src/entities/Clientes';
 
@@ -88,7 +91,7 @@ export class TalleresService {
 
   async findAll(req: any) {
     try {
-      const { ids, placeholders } = await this.clienteHijos(
+      const { ids, placeholders: _placeholders } = await this.clienteHijos(
         Number(req.user.cliente),
       );
 
@@ -120,7 +123,7 @@ export class TalleresService {
     limit: number,
   ): Promise<ApiResponseCommon> {
     try {
-      const { ids, placeholders } = await this.clienteHijos(
+      const { ids, placeholders: _placeholders } = await this.clienteHijos(
         Number(req.user.cliente),
       );
 
@@ -253,15 +256,15 @@ export class TalleresService {
 
   async remove(id: number, idUser: number) {
     let exist: any; // Declaramos fuera del try para poder usarlo en el catch
-  
+
     try {
       exist = await this.talleresRepository.findOne({ where: { id } });
       if (!exist)
         throw new NotFoundException('No se ha encontrado el taller solicitado');
-  
+
       exist.estatus = 0;
       await this.talleresRepository.update(id, exist);
-  
+
       const result: ApiCrudResponse = {
         status: 'success',
         message: 'El taller ha sido actualizado correctamente.',
@@ -270,7 +273,7 @@ export class TalleresService {
           nombre: `${exist.nombre} ${exist.descripcion || ''}`,
         },
       };
-  
+
       const querylogger = { exist };
       await this.bitacoraLogger.logToBitacora(
         'Talleres',
@@ -281,7 +284,7 @@ export class TalleresService {
         37,
         EstatusEnumBitcora.SUCCESS,
       );
-  
+
       return result;
     } catch (error) {
       const querylogger = { exist };
@@ -295,11 +298,11 @@ export class TalleresService {
         EstatusEnumBitcora.ERROR,
         error?.message,
       );
-  
+
       if (error instanceof HttpException) {
         throw error;
       }
-  
+
       throw new InternalServerErrorException(
         'Ha ocurrido un error durante el proceso de actualización del taller.',
       );
@@ -308,15 +311,15 @@ export class TalleresService {
 
   async activar(id: number, idUser: number) {
     let exist: any; // Declaramos fuera del try para poder usarlo en el catch
-  
+
     try {
       exist = await this.talleresRepository.findOne({ where: { id } });
       if (!exist)
         throw new NotFoundException('No se ha encontrado el taller solicitado');
-  
+
       exist.estatus = 1;
       await this.talleresRepository.update(id, exist);
-  
+
       const result: ApiCrudResponse = {
         status: 'success',
         message: 'El taller ha sido actualizado correctamente.',
@@ -325,7 +328,7 @@ export class TalleresService {
           nombre: `${exist.nombre} ${exist.descripcion || ''}`,
         },
       };
-  
+
       const querylogger = { exist };
       await this.bitacoraLogger.logToBitacora(
         'Talleres',
@@ -336,7 +339,7 @@ export class TalleresService {
         37,
         EstatusEnumBitcora.SUCCESS,
       );
-  
+
       return result;
     } catch (error) {
       const querylogger = { exist };
@@ -350,11 +353,11 @@ export class TalleresService {
         EstatusEnumBitcora.ERROR,
         error?.message,
       );
-  
+
       if (error instanceof HttpException) {
         throw error;
       }
-  
+
       throw new InternalServerErrorException(
         'Ha ocurrido un error durante el proceso de actualización del taller.',
       );

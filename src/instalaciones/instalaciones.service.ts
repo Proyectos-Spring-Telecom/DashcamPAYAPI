@@ -25,7 +25,11 @@ import { Clientes } from 'src/entities/Clientes';
 import { HistoricoInstalaciones } from 'src/entities/historico-instalaciones';
 import { HistoricoinstalacionesService } from 'src/historicoinstalaciones/historicoinstalaciones.service';
 import { InstalacionContadores } from 'src/entities/InstalacionContadores';
-import { EnumModulos, EstadoComponente, EstatusEnum } from 'src/common/estatus.enum';
+import {
+  EnumModulos,
+  EstadoComponente,
+  EstatusEnum,
+} from 'src/common/estatus.enum';
 
 @Injectable()
 export class InstalacionesService {
@@ -46,7 +50,7 @@ export class InstalacionesService {
     private readonly instalacionContadoresRepository: Repository<InstalacionContadores>,
     private readonly bitacoraLogger: BitacoraLoggerService,
     private readonly historicoinstalacionesService: HistoricoinstalacionesService,
-  ) { }
+  ) {}
 
   // ========================================
   // 🔹 CREAR UN INSTALACION
@@ -78,10 +82,11 @@ export class InstalacionesService {
 
       // Verificar Contadores CON relaciones
       for (const idContador of createInstalacioneDto.idContadores) {
-        const contadorEnUso = await this.instalacionContadoresRepository.findOne({
-          where: { idContador: idContador, estatus: 1 },
-          relations: ['contador'],
-        });
+        const contadorEnUso =
+          await this.instalacionContadoresRepository.findOne({
+            where: { idContador: idContador, estatus: 1 },
+            relations: ['contador'],
+          });
         if (contadorEnUso) {
           errores.push(
             ` Contador ${contadorEnUso.contador.numeroSerie} ya está en uso.`,
@@ -158,18 +163,20 @@ export class InstalacionesService {
         createInstalacioneDto.idValidador,
         body,
       );
-      
+
       // Crear registros en InstalacionContadores para cada contador
       for (const idContador of createInstalacioneDto.idContadores) {
         await this.contadoresRepository.update(idContador, body);
-        const instalacionContador = this.instalacionContadoresRepository.create({
-          idInstalacion: instalacionSave.id,
-          idContador: idContador,
-          estatus: 1,
-        });
+        const instalacionContador = this.instalacionContadoresRepository.create(
+          {
+            idInstalacion: instalacionSave.id,
+            idContador: idContador,
+            estatus: 1,
+          },
+        );
         await this.instalacionContadoresRepository.save(instalacionContador);
       }
-      
+
       await this.vehiculosRepository.update(
         createInstalacioneDto.idVehiculo,
         body,
@@ -563,12 +570,22 @@ INNER JOIN Clientes c ON i.IdCliente = c.Id
         ...item,
         id: Number(item.id),
         idValidador: Number(item.idValidador),
-        idContadores: item.idContadores ? item.idContadores.split(',').map(id => Number(id)) : [],
-        numeroSerieContadores: item.numeroSerieContadores ? item.numeroSerieContadores.split(', ') : [],
-        marcaContadores: item.marcaContadores ? item.marcaContadores.split(', ') : [],
-        modeloContadores: item.modeloContadores ? item.modeloContadores.split(', ') : [],
+        idContadores: item.idContadores
+          ? item.idContadores.split(',').map((id) => Number(id))
+          : [],
+        numeroSerieContadores: item.numeroSerieContadores
+          ? item.numeroSerieContadores.split(', ')
+          : [],
+        marcaContadores: item.marcaContadores
+          ? item.marcaContadores.split(', ')
+          : [],
+        modeloContadores: item.modeloContadores
+          ? item.modeloContadores.split(', ')
+          : [],
         // Mantener compatibilidad con código antiguo (concatenados con coma)
-        idContador: item.idContadores ? Number(item.idContadores.split(',')[0]) : null,
+        idContador: item.idContadores
+          ? Number(item.idContadores.split(',')[0])
+          : null,
         numeroSerieContador: item.numeroSerieContadores || null,
         marcaContador: item.marcaContadores || null,
         modeloContador: item.modeloContadores || null,
@@ -851,7 +868,12 @@ ORDER BY i.Id DESC;
     }
   }
 
-  async findByValidador(idValidador: number, idUser: number, cliente: number, rol: number) {
+  async findByValidador(
+    idValidador: number,
+    idUser: number,
+    cliente: number,
+    rol: number,
+  ) {
     try {
       let instalaciones;
       switch (rol) {
@@ -989,10 +1011,13 @@ ORDER BY i.Id DESC;
           // Manejar tanto string como null/undefined
           const idsStr = String(item.idContadores).trim();
           if (idsStr) {
-            idContadoresArray = idsStr.split(',').map(id => {
-              const numId = Number(id.trim());
-              return isNaN(numId) ? null : numId;
-            }).filter(id => id !== null) as number[];
+            idContadoresArray = idsStr
+              .split(',')
+              .map((id) => {
+                const numId = Number(id.trim());
+                return isNaN(numId) ? null : numId;
+              })
+              .filter((id) => id !== null);
           }
         }
 
@@ -1001,16 +1026,31 @@ ORDER BY i.Id DESC;
           id: Number(item.id),
           idValidador: Number(item.idValidador),
           idContadores: idContadoresArray, // Array de IDs de contadores
-          numeroSerieContadores: item.numeroSerieContadores ? item.numeroSerieContadores.split(', ') : [],
-          marcaContadores: item.marcaContadores ? item.marcaContadores.split(', ') : [],
-          modeloContadores: item.modeloContadores ? item.modeloContadores.split(', ') : [],
+          numeroSerieContadores: item.numeroSerieContadores
+            ? item.numeroSerieContadores.split(', ')
+            : [],
+          marcaContadores: item.marcaContadores
+            ? item.marcaContadores.split(', ')
+            : [],
+          modeloContadores: item.modeloContadores
+            ? item.modeloContadores.split(', ')
+            : [],
           // Mantener compatibilidad con código antiguo (primer contador)
-          idContador: idContadoresArray.length > 0 ? idContadoresArray[0] : null,
-          numeroSerieContador: item.numeroSerieContadores ? item.numeroSerieContadores.split(', ')[0] : null,
-          marcaContador: item.marcaContadores ? item.marcaContadores.split(', ')[0] : null,
-          modeloContador: item.modeloContadores ? item.modeloContadores.split(', ')[0] : null,
+          idContador:
+            idContadoresArray.length > 0 ? idContadoresArray[0] : null,
+          numeroSerieContador: item.numeroSerieContadores
+            ? item.numeroSerieContadores.split(', ')[0]
+            : null,
+          marcaContador: item.marcaContadores
+            ? item.marcaContadores.split(', ')[0]
+            : null,
+          modeloContador: item.modeloContadores
+            ? item.modeloContadores.split(', ')[0]
+            : null,
           idVehiculo: Number(item.idVehiculo),
-          cantidadPuertas: item.cantidadPuertas ? Number(item.cantidadPuertas) : null,
+          cantidadPuertas: item.cantidadPuertas
+            ? Number(item.cantidadPuertas)
+            : null,
           idCliente: Number(item.idCliente),
         };
       });
@@ -1244,10 +1284,13 @@ ORDER BY i.Id DESC;
           // Manejar tanto string como null/undefined
           const idsStr = String(item.idContadores).trim();
           if (idsStr) {
-            idContadoresArray = idsStr.split(',').map(id => {
-              const numId = Number(id.trim());
-              return isNaN(numId) ? null : numId;
-            }).filter(id => id !== null) as number[];
+            idContadoresArray = idsStr
+              .split(',')
+              .map((id) => {
+                const numId = Number(id.trim());
+                return isNaN(numId) ? null : numId;
+              })
+              .filter((id) => id !== null);
           }
         }
 
@@ -1256,16 +1299,31 @@ ORDER BY i.Id DESC;
           id: Number(item.id),
           idValidador: Number(item.idValidador),
           idContadores: idContadoresArray, // Array de IDs de contadores
-          numeroSerieContadores: item.numeroSerieContadores ? item.numeroSerieContadores.split(', ') : [],
-          marcaContadores: item.marcaContadores ? item.marcaContadores.split(', ') : [],
-          modeloContadores: item.modeloContadores ? item.modeloContadores.split(', ') : [],
+          numeroSerieContadores: item.numeroSerieContadores
+            ? item.numeroSerieContadores.split(', ')
+            : [],
+          marcaContadores: item.marcaContadores
+            ? item.marcaContadores.split(', ')
+            : [],
+          modeloContadores: item.modeloContadores
+            ? item.modeloContadores.split(', ')
+            : [],
           // Mantener compatibilidad con código antiguo (primer contador)
-          idContador: idContadoresArray.length > 0 ? idContadoresArray[0] : null,
-          numeroSerieContador: item.numeroSerieContadores ? item.numeroSerieContadores.split(', ')[0] : null,
-          marcaContador: item.marcaContadores ? item.marcaContadores.split(', ')[0] : null,
-          modeloContador: item.modeloContadores ? item.modeloContadores.split(', ')[0] : null,
+          idContador:
+            idContadoresArray.length > 0 ? idContadoresArray[0] : null,
+          numeroSerieContador: item.numeroSerieContadores
+            ? item.numeroSerieContadores.split(', ')[0]
+            : null,
+          marcaContador: item.marcaContadores
+            ? item.marcaContadores.split(', ')[0]
+            : null,
+          modeloContador: item.modeloContadores
+            ? item.modeloContadores.split(', ')[0]
+            : null,
           idVehiculo: Number(item.idVehiculo),
-          cantidadPuertas: item.cantidadPuertas ? Number(item.cantidadPuertas) : null,
+          cantidadPuertas: item.cantidadPuertas
+            ? Number(item.cantidadPuertas)
+            : null,
           idCliente: Number(item.idCliente),
         };
       });
@@ -1325,18 +1383,20 @@ ORDER BY i.Id DESC;
         }
 
         // Obtener contadores de la instalación una sola vez para reutilizar
-        const contadoresInstalacion = await this.instalacionContadoresRepository.find({
-          where: { idInstalacion: instalacion.id, estatus: 1 },
-          relations: ['contador'],
-        });
-        
+        const contadoresInstalacion =
+          await this.instalacionContadoresRepository.find({
+            where: { idInstalacion: instalacion.id, estatus: 1 },
+            relations: ['contador'],
+          });
+
         // Verificar Contadores CON relaciones
         for (const ic of contadoresInstalacion) {
           if (ic.idContador === null) continue;
-          const contadorEnUso = await this.instalacionContadoresRepository.findOne({
-            where: { idContador: ic.idContador, estatus: 1 },
-            relations: ['contador', 'instalacion'],
-          });
+          const contadorEnUso =
+            await this.instalacionContadoresRepository.findOne({
+              where: { idContador: ic.idContador, estatus: 1 },
+              relations: ['contador', 'instalacion'],
+            });
           if (contadorEnUso && contadorEnUso.idInstalacion !== instalacion.id) {
             errores.push(
               `Contador "${contadorEnUso.contador.numeroSerie}" ya está en uso`,
@@ -1414,10 +1474,7 @@ ORDER BY i.Id DESC;
 
         // Cambiar estatus de componentes a 2 (Asignado)
         const body = { estadoActual: EstadoComponente.ASIGNADO };
-        await this.validadoresRepository.update(
-          instalacion.idValidador,
-          body,
-        );
+        await this.validadoresRepository.update(instalacion.idValidador, body);
         // Actualizar todos los contadores de la instalación (reutilizar contadoresInstalacion ya obtenidos)
         for (const ic of contadoresInstalacion) {
           if (ic.idContador !== null) {
@@ -1428,14 +1485,12 @@ ORDER BY i.Id DESC;
       } else if (estatus === 0) {
         // Desactivar instalación → activar componentes a 1(Disponible)
         const body = { estadoActual: EstadoComponente.DISPONIBLE };
-        await this.validadoresRepository.update(
-          instalacion.idValidador,
-          body,
-        );
+        await this.validadoresRepository.update(instalacion.idValidador, body);
         // Actualizar todos los contadores de la instalación
-        const contadoresInstalacion = await this.instalacionContadoresRepository.find({
-          where: { idInstalacion: instalacion.id, estatus: 1 },
-        });
+        const contadoresInstalacion =
+          await this.instalacionContadoresRepository.find({
+            where: { idInstalacion: instalacion.id, estatus: 1 },
+          });
         for (const ic of contadoresInstalacion) {
           if (ic.idContador !== null) {
             await this.contadoresRepository.update(ic.idContador, body);
@@ -1459,12 +1514,13 @@ ORDER BY i.Id DESC;
       );
 
       // Obtener contadores para el mensaje
-      const contadoresInstalacion = await this.instalacionContadoresRepository.find({
-        where: { idInstalacion: instalacion.id, estatus: 1 },
-      });
+      const contadoresInstalacion =
+        await this.instalacionContadoresRepository.find({
+          where: { idInstalacion: instalacion.id, estatus: 1 },
+        });
       const idContadores = contadoresInstalacion
-        .filter(ic => ic.idContador !== null)
-        .map(ic => ic.idContador)
+        .filter((ic) => ic.idContador !== null)
+        .map((ic) => ic.idContador)
         .join(', ');
 
       //Api response
@@ -1545,14 +1601,23 @@ ORDER BY i.Id DESC;
       }
 
       //verificamos que exista el contadores a actualizar
-      if (updateInstalacioneDto.idContadores && updateInstalacioneDto.idContadores.length > 0) {
+      if (
+        updateInstalacioneDto.idContadores &&
+        updateInstalacioneDto.idContadores.length > 0
+      ) {
         // Si hay contadores anteriores a actualizar (con su estatus específico)
-        if (updateInstalacioneDto.contadoresAnteriores && updateInstalacioneDto.contadoresAnteriores.length > 0) {
+        if (
+          updateInstalacioneDto.contadoresAnteriores &&
+          updateInstalacioneDto.contadoresAnteriores.length > 0
+        ) {
           // Actualizar estado de cada contador anterior con su estatus específico
           for (const contadorAnterior of updateInstalacioneDto.contadoresAnteriores) {
-            await this.contadoresRepository.update(contadorAnterior.idContador, {
-              estadoActual: contadorAnterior.estatusAnterior,
-            });
+            await this.contadoresRepository.update(
+              contadorAnterior.idContador,
+              {
+                estadoActual: contadorAnterior.estatusAnterior,
+              },
+            );
             // Desactivar relación anterior
             await this.instalacionContadoresRepository.update(
               { idInstalacion: id, idContador: contadorAnterior.idContador },
@@ -1564,9 +1629,10 @@ ORDER BY i.Id DESC;
         // Agregar nuevos contadores
         for (const idContador of updateInstalacioneDto.idContadores) {
           // Verificar si ya existe la relación activa
-          const existeRelacion = await this.instalacionContadoresRepository.findOne({
-            where: { idInstalacion: id, idContador: idContador, estatus: 1 },
-          });
+          const existeRelacion =
+            await this.instalacionContadoresRepository.findOne({
+              where: { idInstalacion: id, idContador: idContador, estatus: 1 },
+            });
 
           if (!existeRelacion) {
             // Actualizar estado del contador nuevo a asignado
@@ -1603,13 +1669,14 @@ ORDER BY i.Id DESC;
       );
 
       // Obtener contadores actuales
-      const contadoresActuales = await this.instalacionContadoresRepository.find({
-        where: { idInstalacion: id, estatus: 1 },
-        relations: ['contador'],
-      });
+      const contadoresActuales =
+        await this.instalacionContadoresRepository.find({
+          where: { idInstalacion: id, estatus: 1 },
+          relations: ['contador'],
+        });
       const idContadores = contadoresActuales
-        .filter(ic => ic.idContador !== null)
-        .map(ic => ic.idContador as number);
+        .filter((ic) => ic.idContador !== null)
+        .map((ic) => ic.idContador as number);
       const primerContador = idContadores[0] || null;
 
       const body = {
@@ -1619,7 +1686,7 @@ ORDER BY i.Id DESC;
         idVehiculo: instalacion.idVehiculo,
         idCliente: instalacion.idCliente,
       };
-      const comentario = `${updateInstalacioneDto.comentariosContador ?? ''} ${updateInstalacioneDto.comentariosValidador ?? ''}`
+      const comentario = `${updateInstalacioneDto.comentariosContador ?? ''} ${updateInstalacioneDto.comentariosValidador ?? ''}`;
 
       //Registro historico
       await this.historicoinstalacionesService.updateHistorico(
@@ -1697,9 +1764,10 @@ ORDER BY i.Id DESC;
       const body = { estadoActual: EstadoComponente.DISPONIBLE };
       await this.validadoresRepository.update(instalacion.idValidador, body);
       // Actualizar todos los contadores de la instalación
-      const contadoresInstalacion = await this.instalacionContadoresRepository.find({
-        where: { idInstalacion: instalacion.id, estatus: 1 },
-      });
+      const contadoresInstalacion =
+        await this.instalacionContadoresRepository.find({
+          where: { idInstalacion: instalacion.id, estatus: 1 },
+        });
       for (const ic of contadoresInstalacion) {
         if (ic.idContador !== null) {
           await this.contadoresRepository.update(ic.idContador, body);
@@ -1721,8 +1789,8 @@ ORDER BY i.Id DESC;
 
       // Usar los contadores ya obtenidos para el mensaje
       const idContadores = contadoresInstalacion
-        .filter(ic => ic.idContador !== null)
-        .map(ic => ic.idContador)
+        .filter((ic) => ic.idContador !== null)
+        .map((ic) => ic.idContador)
         .join(', ');
 
       //Api response

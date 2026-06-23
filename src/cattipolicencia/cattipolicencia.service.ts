@@ -13,8 +13,7 @@ export class CattipolicenciaService {
 
   async findAllList() {
     try {
-      let cattipolicencia;
-      cattipolicencia = await this.catcatipolicenciaRepository.query(
+      const cattipolicencia = await this.catcatipolicenciaRepository.query(
         `
         SELECT 
       Id AS idCatTipoLicencia,

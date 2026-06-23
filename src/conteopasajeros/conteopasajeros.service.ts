@@ -1,16 +1,18 @@
 import {
-  ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { CreateConteoPasajerosDto } from './dto/create-conteopasajero.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConteoPasajeros } from 'src/entities/ConteoPasajeros';
 import { Between, MoreThanOrEqual, Repository } from 'typeorm';
-import { ApiCrudResponse, ApiResponseCommon, EstatusEnumBitcora } from 'src/common/ApiResponse';
+import {
+  ApiCrudResponse,
+  ApiResponseCommon,
+  EstatusEnumBitcora,
+} from 'src/common/ApiResponse';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { Usuarios } from 'src/entities/Usuarios';
 import { Clientes } from 'src/entities/Clientes';
@@ -42,7 +44,7 @@ export class ConteopasajerosService {
     @InjectRepository(Turnos)
     private readonly turnosRepository: Repository<Turnos>,
     private readonly bitacoraLogger: BitacoraLoggerService,
-  ) { }
+  ) {}
 
   // ========================================
   // 🔹 CREAR DATOS DE CONTEOPASAJEROS
@@ -53,37 +55,41 @@ export class ConteopasajerosService {
   ): Promise<ApiCrudResponse> {
     try {
       // Validar que el contador existe
-      const contador = await this.contadoresRepository.findOne({ 
-        where: { numeroSerie: createConteopasajeroDto.numeroSerieContador } 
+      const contador = await this.contadoresRepository.findOne({
+        where: { numeroSerie: createConteopasajeroDto.numeroSerieContador },
       });
 
       if (!contador) {
         throw new NotFoundException(
-          `El contador con número de serie '${createConteopasajeroDto.numeroSerieContador}' no existe.`
+          `El contador con número de serie '${createConteopasajeroDto.numeroSerieContador}' no existe.`,
         );
       }
 
       // Obtener la instalación relacionada con el contador a través de InstalacionContadores
-      const instalacionContador = await this.instalacionContadoresRepository.findOne({
-        where: {
-          idContador: contador.id,
-          estatus: 1,
-        },
-        relations: ['instalacion'],
-      });
-      
+      const instalacionContador =
+        await this.instalacionContadoresRepository.findOne({
+          where: {
+            idContador: contador.id,
+            estatus: 1,
+          },
+          relations: ['instalacion'],
+        });
+
       if (!instalacionContador || !instalacionContador.instalacion) {
         throw new NotFoundException(
-          `No se encontró una instalación activa para el contador con número de serie '${createConteopasajeroDto.numeroSerieContador}'.`
+          `No se encontró una instalación activa para el contador con número de serie '${createConteopasajeroDto.numeroSerieContador}'.`,
         );
       }
-      
+
       const instalacion = instalacionContador.instalacion;
-      
+
       // Verificar que la instalación esté activa y pertenezca al cliente
-      if (instalacion.estatus !== 1 || instalacion.idCliente !== contador.idCliente) {
+      if (
+        instalacion.estatus !== 1 ||
+        instalacion.idCliente !== contador.idCliente
+      ) {
         throw new NotFoundException(
-          `No se encontró una instalación activa para el contador con número de serie '${createConteopasajeroDto.numeroSerieContador}'.`
+          `No se encontró una instalación activa para el contador con número de serie '${createConteopasajeroDto.numeroSerieContador}'.`,
         );
       }
 
@@ -100,7 +106,7 @@ export class ConteopasajerosService {
       });
       if (!turno) {
         throw new NotFoundException(
-          `No se encontró un turno activo para la instalación del contador '${createConteopasajeroDto.numeroSerieContador}'.`
+          `No se encontró un turno activo para la instalación del contador '${createConteopasajeroDto.numeroSerieContador}'.`,
         );
       }
 
@@ -118,7 +124,7 @@ export class ConteopasajerosService {
 
       if (!viaje) {
         throw new NotFoundException(
-          `No se encontró un viaje activo para el turno de la instalación del contador '${createConteopasajeroDto.numeroSerieContador}'.`
+          `No se encontró un viaje activo para el turno de la instalación del contador '${createConteopasajeroDto.numeroSerieContador}'.`,
         );
       }
 
@@ -137,17 +143,21 @@ export class ConteopasajerosService {
         salidas: 0, // Valor por defecto
         estatus: EstatusConteo.ACTIVO, // Establecer como activo
       };
-      
-      const newConteoPasajero = this.conteopasajeroRepository.create(dataToCreate);
-      
+
+      const newConteoPasajero =
+        this.conteopasajeroRepository.create(dataToCreate);
+
       // Guardar el registro
-      const saveResult = await this.conteopasajeroRepository.save(newConteoPasajero);
-      const conteoPasajeroSave = Array.isArray(saveResult) ? saveResult[0] : saveResult;
+      const saveResult =
+        await this.conteopasajeroRepository.save(newConteoPasajero);
+      const conteoPasajeroSave = Array.isArray(saveResult)
+        ? saveResult[0]
+        : saveResult;
 
       // Verificar que el registro realmente se guardó en la base de datos
       if (!conteoPasajeroSave || !conteoPasajeroSave.id) {
         throw new InternalServerErrorException(
-          'Error al guardar el registro de ConteoPasajero. El registro no se creó correctamente.'
+          'Error al guardar el registro de ConteoPasajero. El registro no se creó correctamente.',
         );
       }
 
@@ -157,7 +167,9 @@ export class ConteopasajerosService {
         message: 'El registro de ConteoPasajero se realizó con éxito.',
         data: {
           id: Number(conteoPasajeroSave.id),
-          nombre: `${conteoPasajeroSave.id} ${conteoPasajeroSave.numeroSerieContador}` || '',
+          nombre:
+            `${conteoPasajeroSave.id} ${conteoPasajeroSave.numeroSerieContador}` ||
+            '',
         },
       };
 
@@ -173,7 +185,7 @@ export class ConteopasajerosService {
           23,
           EstatusEnumBitcora.SUCCESS,
         );
-      } catch (bitacoraError) {
+      } catch (_bitacoraError) {
         // Log del error de bitácora pero no afectar la respuesta
       }
 
@@ -191,21 +203,24 @@ export class ConteopasajerosService {
         EstatusEnumBitcora.ERROR,
         error.message,
       );
-      
+
       if (error instanceof HttpException) {
         throw error;
       }
 
       // Detectar errores de foreign key y proporcionar mensaje más claro
-      if (error.message && error.message.includes('foreign key constraint fails')) {
+      if (
+        error.message &&
+        error.message.includes('foreign key constraint fails')
+      ) {
         if (error.message.includes('FK_ConteoPasajeros_Contadores')) {
           throw new NotFoundException(
-            `El contador con número de serie '${createConteopasajeroDto.numeroSerieContador}' no existe.`
+            `El contador con número de serie '${createConteopasajeroDto.numeroSerieContador}' no existe.`,
           );
         }
         if (error.message.includes('IdViaje')) {
           throw new NotFoundException(
-            `No se pudo asociar el viaje al conteo de pasajeros. Verifique que existe un viaje activo para el contador '${createConteopasajeroDto.numeroSerieContador}'.`
+            `No se pudo asociar el viaje al conteo de pasajeros. Verifique que existe un viaje activo para el contador '${createConteopasajeroDto.numeroSerieContador}'.`,
           );
         }
       }
@@ -271,11 +286,7 @@ WHERE c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que qu
 ORDER BY cp.Id DESC
 LIMIT ? OFFSET ?;
     `;
-    return this.conteopasajeroRepository.query(query, [
-      ...ids,
-      limit,
-      offset,
-    ]);
+    return this.conteopasajeroRepository.query(query, [...ids, limit, offset]);
   }
 
   private async consultarTotalConteoPasajerosPaginados(cliente: number) {
@@ -326,11 +337,7 @@ WHERE c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
 ORDER BY cp.Id DESC
 LIMIT ? OFFSET ?;
     `;
-    return this.conteopasajeroRepository.query(query, [
-      cliente,
-      limit,
-      offset,
-    ]);
+    return this.conteopasajeroRepository.query(query, [cliente, limit, offset]);
   }
 
   private async consultarTotalConteoPasajerosPaginadosCl(cliente: number) {
@@ -352,7 +359,7 @@ WHERE c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
     cliente: number,
     rol: number,
     page: number,
-    limit: number
+    limit: number,
   ): Promise<ApiResponseCommon> {
     try {
       let conteoPasajeros;
@@ -406,42 +413,67 @@ INNER JOIN Clientes c
 
         case 2:
           // Consulta de datos paginados Usuario Administrador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginado(cliente, limit, offset);
+          conteoPasajeros = await this.consultarConteoPasajerosPaginado(
+            cliente,
+            limit,
+            offset,
+          );
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginados(cliente);
+          totalResult =
+            await this.consultarTotalConteoPasajerosPaginados(cliente);
           break;
 
         case 3:
           // Consulta de datos paginados Usuario Operador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoCL(cliente, limit, offset);
+          conteoPasajeros = await this.consultarConteoPasajerosPaginadoCL(
+            cliente,
+            limit,
+            offset,
+          );
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginadosCl(cliente);
+          totalResult =
+            await this.consultarTotalConteoPasajerosPaginadosCl(cliente);
           break;
 
         case 8:
           // Consulta de datos paginados Usuario Reportes
-          conteoPasajeros = await this.consultarConteoPasajerosPaginado(cliente, limit, offset);
+          conteoPasajeros = await this.consultarConteoPasajerosPaginado(
+            cliente,
+            limit,
+            offset,
+          );
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginados(cliente);
+          totalResult =
+            await this.consultarTotalConteoPasajerosPaginados(cliente);
           break;
 
         case 10:
           // Consulta de datos paginados Usuario Capturista
-          conteoPasajeros = await this.consultarConteoPasajerosPaginado(cliente, limit, offset);
+          conteoPasajeros = await this.consultarConteoPasajerosPaginado(
+            cliente,
+            limit,
+            offset,
+          );
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginados(cliente);
+          totalResult =
+            await this.consultarTotalConteoPasajerosPaginados(cliente);
           break;
 
         default:
           // Consulta de datos paginados Usuario Operador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoCL(cliente, limit, offset);
+          conteoPasajeros = await this.consultarConteoPasajerosPaginadoCL(
+            cliente,
+            limit,
+            offset,
+          );
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginadosCl(cliente);
+          totalResult =
+            await this.consultarTotalConteoPasajerosPaginadosCl(cliente);
           break;
       }
 
@@ -515,11 +547,7 @@ AND c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quie
 ORDER BY cp.FechaHora DESC
 LIMIT ? OFFSET ?;
     `;
-    return this.conteopasajeroRepository.query(query, [
-      ...ids,
-      limit,
-      offset,
-    ]);
+    return this.conteopasajeroRepository.query(query, [...ids, limit, offset]);
   }
 
   private async consultarTotalConteoPasajerosPaginadosRango(
@@ -582,17 +610,14 @@ AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
 ORDER BY cp.FechaHora DESC
 LIMIT ? OFFSET ?;
     `;
-    return this.conteopasajeroRepository.query(query, [
-      cliente,
-      limit,
-      offset,
-    ]);
+    return this.conteopasajeroRepository.query(query, [cliente, limit, offset]);
   }
 
   private async consultarTotalConteoPasajerosPaginadosRangoCl(
     fechaInicio: string,
     fechaFin: string,
-    cliente: number) {
+    cliente: number,
+  ) {
     const query = `  
     SELECT COUNT(*) AS total
 FROM ConteoPasajeros cp
@@ -658,7 +683,11 @@ AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
   }
 
   // MÉTODOS CON PAGINACIÓN
-  async findByDatePaginated(fecha: string, page: number, limit: number): Promise<ApiResponseCommon> {
+  async findByDatePaginated(
+    fecha: string,
+    page: number,
+    limit: number,
+  ): Promise<ApiResponseCommon> {
     try {
       const startDate = new Date(`${fecha}T00:00:00`);
       const endDate = new Date(`${fecha}T23:59:59`);
@@ -707,8 +736,8 @@ AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
       let conteoPasajeros;
       const offset = (page - 1) * limit;
       let totalResult;
-      const startDate = new Date(`${fechaInicio} 00:00:00`);
-      const endDate = new Date(`${fechaFin} 23:59:59`);
+      const _startDate = new Date(`${fechaInicio} 00:00:00`);
+      const _endDate = new Date(`${fechaFin} 23:59:59`);
       switch (rol) {
         case 1:
           conteoPasajeros = await this.conteopasajeroRepository.query(
@@ -765,42 +794,94 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
 
         case 2:
           // Consulta de datos paginados Usuario Administrador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(fechaInicio, fechaFin, cliente, limit, offset);
+          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(
+            fechaInicio,
+            fechaFin,
+            cliente,
+            limit,
+            offset,
+          );
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginadosRango(fechaInicio, fechaFin, cliente);
+          totalResult = await this.consultarTotalConteoPasajerosPaginadosRango(
+            fechaInicio,
+            fechaFin,
+            cliente,
+          );
           break;
 
         case 3:
           // Consulta de datos paginados Usuario Operador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRangoCL(fechaInicio, fechaFin, cliente, limit, offset);
+          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRangoCL(
+            fechaInicio,
+            fechaFin,
+            cliente,
+            limit,
+            offset,
+          );
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginadosRangoCl(fechaInicio, fechaFin, cliente);
+          totalResult =
+            await this.consultarTotalConteoPasajerosPaginadosRangoCl(
+              fechaInicio,
+              fechaFin,
+              cliente,
+            );
           break;
 
         case 8:
           // Consulta de datos paginados Usuario Reportes
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(fechaInicio, fechaFin, cliente, limit, offset);
+          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(
+            fechaInicio,
+            fechaFin,
+            cliente,
+            limit,
+            offset,
+          );
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginadosRango(fechaInicio, fechaFin, cliente);
+          totalResult = await this.consultarTotalConteoPasajerosPaginadosRango(
+            fechaInicio,
+            fechaFin,
+            cliente,
+          );
           break;
 
         case 10:
           // Consulta de datos paginados Usuario Capturista
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(fechaInicio, fechaFin, cliente, limit, offset);
+          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(
+            fechaInicio,
+            fechaFin,
+            cliente,
+            limit,
+            offset,
+          );
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginadosRango(fechaInicio, fechaFin, cliente);
+          totalResult = await this.consultarTotalConteoPasajerosPaginadosRango(
+            fechaInicio,
+            fechaFin,
+            cliente,
+          );
           break;
 
         default:
           // Consulta de datos paginados Usuario Operador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRangoCL(fechaInicio, fechaFin, cliente, limit, offset);
+          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRangoCL(
+            fechaInicio,
+            fechaFin,
+            cliente,
+            limit,
+            offset,
+          );
 
           // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginadosRangoCl(fechaInicio, fechaFin, cliente);
+          totalResult =
+            await this.consultarTotalConteoPasajerosPaginadosRangoCl(
+              fechaInicio,
+              fechaFin,
+              cliente,
+            );
           break;
       }
 
@@ -811,7 +892,6 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
         id: Number(item.id),
         idCliente: Number(item.idCliente),
       }));
-
 
       const result: ApiResponseCommon = {
         data: data,
@@ -832,7 +912,6 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
       });
     }
   }
-
 
   // ⏰ 3. OBTENER DATOS DE UNA HORA ESPECÍFICA
   async findByDateTimePaginated(
@@ -874,7 +953,10 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
   }
 
   // 📊 4. OBTENER DATOS DE HOY
-  async findTodayPaginated(page: number, limit: number): Promise<ApiResponseCommon> {
+  async findTodayPaginated(
+    page: number,
+    limit: number,
+  ): Promise<ApiResponseCommon> {
     try {
       const today = new Date();
       const startOfDay = new Date(today.setHours(0, 0, 0, 0));
@@ -909,18 +991,21 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
   }
 
   // 📅 5. OBTENER DATOS DE LA ÚLTIMA SEMANA
-  async findLastWeekPaginated(page: number, limit: number): Promise<ApiResponseCommon> {
+  async findLastWeekPaginated(
+    page: number,
+    limit: number,
+  ): Promise<ApiResponseCommon> {
     try {
       const today = new Date();
       const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
 
       const [data, total] = await this.conteopasajeroRepository.findAndCount({
         where: {
-          fechaHora: MoreThanOrEqual(lastWeek)
+          fechaHora: MoreThanOrEqual(lastWeek),
         },
         skip: (page - 1) * limit,
         take: limit,
-        order: { fechaHora: 'DESC' }
+        order: { fechaHora: 'DESC' },
       });
 
       const conteoPasajeros = data.map((item) => ({
@@ -982,7 +1067,7 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
       };
     } catch (error) {
       throw new InternalServerErrorException({
-          message: 'Error al obtener conteo pasajeros por Contador y fecha',
+        message: 'Error al obtener conteo pasajeros por Contador y fecha',
         error: error.message,
       });
     }
@@ -1034,7 +1119,10 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
   // ========================================
   // 🔹 ACTUALIZAR CONTEOPASAJERO
   // ========================================
-  async update(updateConteoPasajerosDto: UpdateConteoPasajerosDto, idUser: number) {
+  async update(
+    updateConteoPasajerosDto: UpdateConteoPasajerosDto,
+    idUser: number,
+  ) {
     try {
       // Buscar el conteo activo por numeroSerieContador (el más reciente)
       const conteoPasajero = await this.conteopasajeroRepository.findOne({
@@ -1049,7 +1137,7 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
 
       if (!conteoPasajero) {
         throw new NotFoundException(
-          `No se encontró un conteo activo para el contador con número de serie '${updateConteoPasajerosDto.numeroSerieContador}'.`
+          `No se encontró un conteo activo para el contador con número de serie '${updateConteoPasajerosDto.numeroSerieContador}'.`,
         );
       }
 
@@ -1058,27 +1146,34 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
       let nuevasSalidas = conteoPasajero.salidas || 0;
 
       // Verificar si subidas o bajadas tienen valores válidos (diferentes de null, undefined y 0)
-      const tieneSubidas = updateConteoPasajerosDto.subidas !== null && 
-                          updateConteoPasajerosDto.subidas !== undefined && 
-                          updateConteoPasajerosDto.subidas !== 0;
-      
-      const tieneBajadas = updateConteoPasajerosDto.bajadas !== null && 
-                          updateConteoPasajerosDto.bajadas !== undefined && 
-                          updateConteoPasajerosDto.bajadas !== 0;
+      const tieneSubidas =
+        updateConteoPasajerosDto.subidas !== null &&
+        updateConteoPasajerosDto.subidas !== undefined &&
+        updateConteoPasajerosDto.subidas !== 0;
+
+      const tieneBajadas =
+        updateConteoPasajerosDto.bajadas !== null &&
+        updateConteoPasajerosDto.bajadas !== undefined &&
+        updateConteoPasajerosDto.bajadas !== 0;
 
       // Lógica de actualización
       if (tieneSubidas && updateConteoPasajerosDto.subidas !== undefined) {
         // Si viene subidas con valor, sumarlo
         nuevasEntradas += updateConteoPasajerosDto.subidas;
       }
-      
+
       if (tieneBajadas && updateConteoPasajerosDto.bajadas !== undefined) {
         // Si viene bajadas con valor, sumarlo
         nuevasSalidas += updateConteoPasajerosDto.bajadas;
       }
 
       // Si subidas y bajadas NO tienen valores válidos, usar el flag esSubida
-      if (!tieneSubidas && !tieneBajadas && updateConteoPasajerosDto.esSubida !== null && updateConteoPasajerosDto.esSubida !== undefined) {
+      if (
+        !tieneSubidas &&
+        !tieneBajadas &&
+        updateConteoPasajerosDto.esSubida !== null &&
+        updateConteoPasajerosDto.esSubida !== undefined
+      ) {
         // Si viene el flag esSubida, usar ese flujo
         if (updateConteoPasajerosDto.esSubida === true) {
           nuevasEntradas += 1;
@@ -1095,12 +1190,13 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
       conteoPasajero.salidas = nuevasSalidas;
       conteoPasajero.diferencia = nuevaDiferencia;
 
-      const conteoActualizado = await this.conteopasajeroRepository.save(conteoPasajero);
+      const conteoActualizado =
+        await this.conteopasajeroRepository.save(conteoPasajero);
 
       // Verificar que se actualizó correctamente
       if (!conteoActualizado || !conteoActualizado.id) {
         throw new InternalServerErrorException(
-          'No se pudo actualizar el registro de ConteoPasajero.'
+          'No se pudo actualizar el registro de ConteoPasajero.',
         );
       }
 
@@ -1110,7 +1206,7 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
       });
 
       if (contador) {
-        const usuario = await this.usuariosRepository.findOne({
+        const _usuario = await this.usuariosRepository.findOne({
           where: { idCliente: contador.idCliente, idRol: 2 },
         });
 
@@ -1160,7 +1256,7 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
   ): Promise<ApiResponseCommon> {
     try {
       let resultados;
-      
+
       switch (rol) {
         case 1:
           // Rol 1 (SuperAdministrador) puede ver todo
@@ -1190,7 +1286,7 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
           if (ids.length === 0) {
             return { data: [] };
           }
-          
+
           resultados = await this.conteopasajeroRepository.query(
             `
             SELECT 

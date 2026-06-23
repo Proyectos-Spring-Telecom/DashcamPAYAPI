@@ -31,7 +31,7 @@ export class VehiculosService {
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
-  ) { }
+  ) {}
   async create(createVehiculoDto: CreateVehiculoDto, idUser: number) {
     try {
       const vehiculoExist = await this.vehiculoRepository.findOne({
@@ -111,7 +111,7 @@ export class VehiculosService {
   }
 
   //Obtener los contadores por cliente /*/*Nulos
-  async findAllListClientes(id: number, cliente: number) {
+  async findAllListClientes(id: number, _cliente: number) {
     try {
       const vehiculos = await this.vehiculoRepository.find({
         where: {
@@ -147,8 +147,8 @@ export class VehiculosService {
   // ========================================
   async findByCliente(
     idCliente: number,
-    idUser: number,
-    rol: number,
+    _idUser: number,
+    _rol: number,
   ): Promise<ApiResponseCommon> {
     try {
       // Consulta directa de vehículos por cliente (solo el cliente especificado)
@@ -203,13 +203,21 @@ ORDER BY v.Id DESC
         ...item,
         id: Number(item.id),
         ano: Number(item.ano),
-        pasajerosSentados: item.pasajerosSentados ? Number(item.pasajerosSentados) : null,
-        pasajerosParados: item.pasajerosParados ? Number(item.pasajerosParados) : null,
-        cantidadPuertas: item.cantidadPuertas ? Number(item.cantidadPuertas) : null,
+        pasajerosSentados: item.pasajerosSentados
+          ? Number(item.pasajerosSentados)
+          : null,
+        pasajerosParados: item.pasajerosParados
+          ? Number(item.pasajerosParados)
+          : null,
+        cantidadPuertas: item.cantidadPuertas
+          ? Number(item.cantidadPuertas)
+          : null,
         idCliente: Number(item.idCliente),
         km: item.km ? Number(item.km) : null,
         idCombustible: item.idCombustible ? Number(item.idCombustible) : null,
-        capacidadLitros: item.capacidadLitros ? Number(item.capacidadLitros) : null,
+        capacidadLitros: item.capacidadLitros
+          ? Number(item.capacidadLitros)
+          : null,
       }));
 
       const result: ApiResponseCommon = {
@@ -612,7 +620,9 @@ ORDER BY v.Id DESC;
         id: Number(item.id),
         idCliente: Number(item.idCliente),
         idCombustible: item.idCombustible ? Number(item.idCombustible) : null,
-        cantidadPuertas: item.cantidadPuertas ? Number(item.cantidadPuertas) : null,
+        cantidadPuertas: item.cantidadPuertas
+          ? Number(item.cantidadPuertas)
+          : null,
       }));
 
       return { data: data };
@@ -709,7 +719,7 @@ ORDER BY v.Id DESC;
         where: { id: id },
       });
       if (!vehiculo) throw new NotFoundException('Vehiculo no encontrado');
-      const vehiculoData = await this.vehiculoRepository.update(
+      const _vehiculoData = await this.vehiculoRepository.update(
         id,
         updateVehiculoDto,
       );
@@ -740,7 +750,7 @@ ORDER BY v.Id DESC;
       return result;
     } catch (error) {
       //-----Registro en la bitacora----- ERROR
-      console.log(error)
+      console.log(error);
       const querylogger = { updateVehiculoDto };
       await this.bitacoraLogger.logToBitacora(
         'Vehiculos',

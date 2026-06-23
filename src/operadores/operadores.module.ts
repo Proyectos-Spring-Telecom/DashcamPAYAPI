@@ -10,7 +10,11 @@ import { Licencias } from 'src/entities/Licencias';
 import { Usuarios } from 'src/entities/Usuarios';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Operadores, Clientes, Licencias, Usuarios]), BitacoraModule, LicenciasModule],
+  imports: [
+    TypeOrmModule.forFeature([Operadores, Clientes, Licencias, Usuarios]),
+    BitacoraModule,
+    LicenciasModule,
+  ],
   controllers: [OperadoresController],
   providers: [OperadoresService],
 })

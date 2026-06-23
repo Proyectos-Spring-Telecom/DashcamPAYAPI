@@ -36,7 +36,8 @@ export class CatReferenciaServicioController {
   @Post()
   @ApiOperation({
     summary: 'Crear una nueva referencia de servicio',
-    description: 'Crea un nuevo registro de referencia de servicio en el catálogo.',
+    description:
+      'Crea un nuevo registro de referencia de servicio en el catálogo.',
   })
   @ApiBody({
     type: CreateCatReferenciaServicioDto,
@@ -68,7 +69,8 @@ export class CatReferenciaServicioController {
   @Get('list')
   @ApiOperation({
     summary: 'Obtener listado de referencias de servicio',
-    description: 'Obtiene un listado completo de todas las referencias de servicio activas sin paginación.',
+    description:
+      'Obtiene un listado completo de todas las referencias de servicio activas sin paginación.',
   })
   @ApiResponse({
     status: 200,
@@ -101,7 +103,8 @@ export class CatReferenciaServicioController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Listado paginado de referencias de servicio obtenido exitosamente',
+    description:
+      'Listado paginado de referencias de servicio obtenido exitosamente',
   })
   @ApiResponse({
     status: 401,
@@ -117,7 +120,8 @@ export class CatReferenciaServicioController {
   @Get(':id')
   @ApiOperation({
     summary: 'Obtener una referencia de servicio por ID',
-    description: 'Obtiene los detalles de una referencia de servicio específica por su ID.',
+    description:
+      'Obtiene los detalles de una referencia de servicio específica por su ID.',
   })
   @ApiParam({
     name: 'id',
@@ -188,7 +192,8 @@ export class CatReferenciaServicioController {
   @Delete(':id')
   @ApiOperation({
     summary: 'Eliminar una referencia de servicio',
-    description: 'Elimina permanentemente una referencia de servicio del catálogo.',
+    description:
+      'Elimina permanentemente una referencia de servicio del catálogo.',
   })
   @ApiParam({
     name: 'id',

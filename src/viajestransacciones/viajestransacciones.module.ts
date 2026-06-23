@@ -7,8 +7,11 @@ import { ViajesTransacciones } from 'src/entities/ViajesTransacciones';
 import { Clientes } from 'src/entities/Clientes';
 
 @Module({
-  imports: [BitacoraModule, TypeOrmModule.forFeature([ViajesTransacciones, Clientes])],
+  imports: [
+    BitacoraModule,
+    TypeOrmModule.forFeature([ViajesTransacciones, Clientes]),
+  ],
   controllers: [ViajestransaccionesController],
   providers: [ViajestransaccionesService],
 })
-export class ViajestransaccionesModule { }
+export class ViajestransaccionesModule {}

@@ -45,7 +45,7 @@ export class Contadores {
   @Column('tinyint', { name: 'Estatus', default: () => "'1'" })
   estatus: number;
 
-  @Column('tinyint',{ name: 'EstadoActual', unsigned: true })
+  @Column('tinyint', { name: 'EstadoActual', unsigned: true })
   estadoActual: number;
 
   @Column('bigint', { name: 'IdCliente' })
@@ -64,7 +64,9 @@ export class Contadores {
   )
   conteoPasajeros: ConteoPasajeros[];
 
-  @OneToMany(() => InstalacionContadores, (instalacionContadores) => instalacionContadores.contador)
+  @OneToMany(
+    () => InstalacionContadores,
+    (instalacionContadores) => instalacionContadores.contador,
+  )
   instalacionContadores: InstalacionContadores[];
 }
-

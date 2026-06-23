@@ -3,9 +3,7 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
-  Delete,
   Request,
   UseGuards,
   ParseIntPipe,
@@ -37,15 +35,11 @@ export class ViajesconteosController {
   // ========================================
 
   @Get('list')
-  findAllList(@Request() req,) {
+  findAllList(@Request() req) {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     const idUser = req.user.userId;
-    return this.viajesconteosService.findAllList(
-      +idUser,
-      +cliente,
-      +rol,
-    );
+    return this.viajesconteosService.findAllList(+idUser, +cliente, +rol);
   }
 
   @Get('viajes/:id')
@@ -66,8 +60,8 @@ export class ViajesconteosController {
       +idUser,
       +cliente,
       +rol,
-      page, 
-      limit
+      page,
+      limit,
     );
   }
 }

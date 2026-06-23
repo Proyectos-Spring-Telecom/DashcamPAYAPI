@@ -16,7 +16,11 @@ import {
   ApiResponseCommon,
   EstatusEnumBitcora,
 } from 'src/common/ApiResponse';
-import { EnumModulos, EstatusEnum, EstatusConteo } from 'src/common/estatus.enum';
+import {
+  EnumModulos,
+  EstatusEnum,
+  EstatusConteo,
+} from 'src/common/estatus.enum';
 import { Clientes } from 'src/entities/Clientes';
 import { Turnos } from 'src/entities/Turnos';
 import { ConteoPasajeros } from 'src/entities/ConteoPasajeros';
@@ -55,7 +59,7 @@ export class ViajesService {
     private readonly vehiculosRepository: Repository<Vehiculos>,
     @InjectRepository(Posiciones)
     private readonly posicionesRepository: Repository<Posiciones>,
-  ) { }
+  ) {}
   // ========================================
   // 🔹 CREAR UN VIAJE
   // ========================================
@@ -68,7 +72,9 @@ export class ViajesService {
     try {
       //validamos que el usuario sea rol operador
       if (!idOperador) {
-        throw new UnauthorizedException(`Usuario no autorizado para la generación de viajes.`)
+        throw new UnauthorizedException(
+          `Usuario no autorizado para la generación de viajes.`,
+        );
       }
 
       // Validar que el operador no tenga un viaje activo
@@ -80,11 +86,13 @@ export class ViajesService {
       });
 
       // Verificar si hay viajes activos sin fecha de fin (aún en curso)
-      const viajesActivosSinFin = viajesActivos.filter(viaje => viaje.fin === null);
+      const viajesActivosSinFin = viajesActivos.filter(
+        (viaje) => viaje.fin === null,
+      );
 
       if (viajesActivosSinFin.length > 0) {
         throw new BadRequestException(
-          `El operador ya tiene un viaje activo. No se puede abrir otro viaje hasta que se finalice el viaje actual (ID: ${viajesActivosSinFin[0].id}).`
+          `El operador ya tiene un viaje activo. No se puede abrir otro viaje hasta que se finalice el viaje actual (ID: ${viajesActivosSinFin[0].id}).`,
         );
       }
 
@@ -95,11 +103,15 @@ export class ViajesService {
         });
 
         if (!turno) {
-          throw new NotFoundException(`El turno con ID ${createViajeDto.idTurno} no existe.`);
+          throw new NotFoundException(
+            `El turno con ID ${createViajeDto.idTurno} no existe.`,
+          );
         }
 
         if (turno.estatus !== 1) {
-          throw new BadRequestException(`No se puede crear un viaje porque el turno con ID ${createViajeDto.idTurno} no está activo (estatus: ${turno.estatus}).`);
+          throw new BadRequestException(
+            `No se puede crear un viaje porque el turno con ID ${createViajeDto.idTurno} no está activo (estatus: ${turno.estatus}).`,
+          );
         }
       }
 
@@ -110,7 +122,7 @@ export class ViajesService {
       const ahora = new Date();
       const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
       const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
       createViajeDto.inicio = fechaDesfasada;
       createViajeDto.estatus = EstatusEnum.ACTIVO;
@@ -130,20 +142,25 @@ export class ViajesService {
 
         if (turno && turno.idInstalacion2) {
           const instalacion = turno.idInstalacion2;
-          
+
           // Obtener los contadores relacionados con la instalación
-          const instalacionContadores = await this.instalacionContadoresRepository.find({
-            where: {
-              idInstalacion: instalacion.id,
-              estatus: 1,
-            },
-            relations: ['contador'],
-          });
+          const instalacionContadores =
+            await this.instalacionContadoresRepository.find({
+              where: {
+                idInstalacion: instalacion.id,
+                estatus: 1,
+              },
+              relations: ['contador'],
+            });
           // Crear conteoPasajeros para cada contador de la instalación
           for (const ic of instalacionContadores) {
             const contador = ic.contador;
             // idCliente puede venir como string desde la entidad; comparar como número
-            if (contador && Number(contador.idCliente) === Number(cliente) && contador.estatus === 1) {
+            if (
+              contador &&
+              Number(contador.idCliente) === Number(cliente) &&
+              contador.estatus === 1
+            ) {
               const dataToCreate: any = {
                 numeroSerieContador: contador.numeroSerie,
                 idViaje: viajeSave.id,
@@ -152,8 +169,9 @@ export class ViajesService {
                 salidas: 0,
                 estatus: EstatusConteo.ACTIVO,
               };
-              
-              const newConteoPasajero = this.conteoPasajerosRepository.create(dataToCreate);
+
+              const newConteoPasajero =
+                this.conteoPasajerosRepository.create(dataToCreate);
               await this.conteoPasajerosRepository.save(newConteoPasajero);
             }
           }
@@ -161,7 +179,10 @@ export class ViajesService {
       } catch (conteoError) {
         // Si falla la creación del conteoPasajeros, no fallar la creación del viaje
         // Solo registrar el error en la bitácora
-        console.error('[VIAJES] Error al crear conteoPasajeros automáticamente:', conteoError);
+        console.error(
+          '[VIAJES] Error al crear conteoPasajeros automáticamente:',
+          conteoError,
+        );
         await this.bitacoraLogger.logToBitacora(
           'Viajes',
           `Se creó el viaje con ID: ${viajeSave.id} pero no se pudo crear el conteoPasajeros automáticamente.`,
@@ -233,7 +254,9 @@ export class ViajesService {
     try {
       //validamos que el usuario sea rol operador
       if (!idOperador) {
-        throw new UnauthorizedException(`Usuario no autorizado para la generación de viajes.`)
+        throw new UnauthorizedException(
+          `Usuario no autorizado para la generación de viajes.`,
+        );
       }
       //Generamos el desfase de horarios
       function pad(n: number) {
@@ -242,16 +265,17 @@ export class ViajesService {
       const ahora = new Date();
       const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
       const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
       // Buscamos el viaje
       const viaje = await this.viajesRepository.findOne({ where: { id } });
       if (!viaje) {
         throw new NotFoundException(`Viaje con ID ${id} no encontrado`);
       }
 
-
       if (cliente != viaje.idCliente || idOperador != viaje.idOperador) {
-        throw new BadRequestException(`Los datos del viaje con ID: ${id} no coinciden con los del usuario.`)
+        throw new BadRequestException(
+          `Los datos del viaje con ID: ${id} no coinciden con los del usuario.`,
+        );
       }
 
       updateViajeDto.estatus = EstatusEnum.INACTIVO;
@@ -263,14 +287,14 @@ export class ViajesService {
       // Cerrar todos los conteos de pasajeros activos relacionados con este viaje
       try {
         const conteosCerrados = await this.conteoPasajerosRepository.update(
-        {
-          idViaje: id,
-          estatus: EstatusConteo.ACTIVO,
-        },
-        {
-          estatus: EstatusConteo.INACTIVO,
-        },
-      );
+          {
+            idViaje: id,
+            estatus: EstatusConteo.ACTIVO,
+          },
+          {
+            estatus: EstatusConteo.INACTIVO,
+          },
+        );
 
         // Registrar en bitácora si se cerraron conteos
         if (conteosCerrados.affected && conteosCerrados.affected > 0) {
@@ -286,7 +310,10 @@ export class ViajesService {
         }
       } catch (conteoError) {
         // Si falla el cierre de conteos, registrar error pero no fallar el cierre del viaje
-        console.error('[VIAJES] Error al cerrar conteos de pasajeros:', conteoError);
+        console.error(
+          '[VIAJES] Error al cerrar conteos de pasajeros:',
+          conteoError,
+        );
         await this.bitacoraLogger.logToBitacora(
           'Viajes',
           `Se cerró el viaje con ID: ${id} pero hubo un error al cerrar los conteos de pasajeros.`,
@@ -684,18 +711,30 @@ ORDER BY v.Id DESC;
           break;
       }
 
-      const data = viajes.map((item) => ({
+      const _data = viajes.map((item) => ({
         ...item,
         id: Number(item.id),
         idCliente: Number(item.idCliente),
         idTurno: Number(item.idTurno),
         idInstalacion: Number(item.idInstalacion),
         idValidador: Number(item.idValidador),
-        idContadores: item.idContadores ? item.idContadores.split(',').map(id => Number(id)) : [],
-        numeroSerieContadores: item.numeroSerieContadores ? item.numeroSerieContadores.split(', ') : [],
+        idContadores: item.idContadores
+          ? item.idContadores.split(',').map((id) => Number(id))
+          : [],
+        numeroSerieContadores: item.numeroSerieContadores
+          ? item.numeroSerieContadores.split(', ')
+          : [],
         // Mantener compatibilidad (primer contador)
-        idContador: item.idContador ? Number(item.idContador) : (item.idContadores ? Number(item.idContadores.split(',')[0]) : null),
-        numeroSerieContador: item.numeroSerieContador || (item.numeroSerieContadores ? item.numeroSerieContadores.split(', ')[0] : null),
+        idContador: item.idContador
+          ? Number(item.idContador)
+          : item.idContadores
+            ? Number(item.idContadores.split(',')[0])
+            : null,
+        numeroSerieContador:
+          item.numeroSerieContador ||
+          (item.numeroSerieContadores
+            ? item.numeroSerieContadores.split(', ')[0]
+            : null),
         idVehiculo: Number(item.idVehiculo),
         idOperador: Number(item.idOperador),
         idUsuario: Number(item.idUsuario),
@@ -706,8 +745,7 @@ ORDER BY v.Id DESC;
             : null,
         idRuta: Number(item.idRuta),
         idZona: Number(item.idZona),
-        idZonaFin:
-          item.idZonaFin !== null ? Number(item.idZonaFin) : null,
+        idZonaFin: item.idZonaFin !== null ? Number(item.idZonaFin) : null,
       }));
 
       //APi response
@@ -848,8 +886,6 @@ LEFT JOIN Zonas regFin ON r.IdZonaFin = regFin.Id
 `;
     return await this.viajesRepository.query(query, [...ids]);
   }
-
-
 
   private async consultarViajesPaginadoCL(
     cliente: number,
@@ -1114,8 +1150,8 @@ LIMIT ? OFFSET ?;
           );
           break;
         case 2: // Administrador
-        case 8:  // Reportes
-        case 10:  // Capturista
+        case 8: // Reportes
+        case 10: // Capturista
           // Consulta de datos paginados Usuario Administrador
           viajes = await this.consultarViajesPaginado(cliente, limit, offset);
 
@@ -1131,18 +1167,30 @@ LIMIT ? OFFSET ?;
           break;
       }
 
-      const data = viajes.map((item) => ({
+      const _data = viajes.map((item) => ({
         ...item,
         id: Number(item.id),
         idCliente: Number(item.idCliente),
         idTurno: Number(item.idTurno),
         idInstalacion: Number(item.idInstalacion),
         idValidador: Number(item.idValidador),
-        idContadores: item.idContadores ? item.idContadores.split(',').map(id => Number(id)) : [],
-        numeroSerieContadores: item.numeroSerieContadores ? item.numeroSerieContadores.split(', ') : [],
+        idContadores: item.idContadores
+          ? item.idContadores.split(',').map((id) => Number(id))
+          : [],
+        numeroSerieContadores: item.numeroSerieContadores
+          ? item.numeroSerieContadores.split(', ')
+          : [],
         // Mantener compatibilidad (primer contador)
-        idContador: item.idContador ? Number(item.idContador) : (item.idContadores ? Number(item.idContadores.split(',')[0]) : null),
-        numeroSerieContador: item.numeroSerieContador || (item.numeroSerieContadores ? item.numeroSerieContadores.split(', ')[0] : null),
+        idContador: item.idContador
+          ? Number(item.idContador)
+          : item.idContadores
+            ? Number(item.idContadores.split(',')[0])
+            : null,
+        numeroSerieContador:
+          item.numeroSerieContador ||
+          (item.numeroSerieContadores
+            ? item.numeroSerieContadores.split(', ')[0]
+            : null),
         idVehiculo: Number(item.idVehiculo),
         idOperador: Number(item.idOperador),
         idUsuario: Number(item.idUsuario),
@@ -1153,8 +1201,7 @@ LIMIT ? OFFSET ?;
             : null,
         idRuta: Number(item.idRuta),
         idZona: Number(item.idZona),
-        idZonaFin:
-          item.idZonaFin !== null ? Number(item.idZonaFin) : null,
+        idZonaFin: item.idZonaFin !== null ? Number(item.idZonaFin) : null,
       }));
 
       const total = Number(totalResult[0]?.total || 0);
@@ -1288,10 +1335,9 @@ ORDER BY v.Id DESC
     return this.viajesRepository.query(query, [cliente, id]);
   }
 
-  async findOne(id: number, cliente: number, rol: number) {
+  async findOne(id: number, _cliente: number, _rol: number) {
     try {
-      let viajes;
-      viajes = await this.viajesRepository.query(
+      const viajes = await this.viajesRepository.query(
         `
 SELECT
   -- Viaje
@@ -1394,7 +1440,7 @@ ORDER BY v.Id DESC
 
       const viaje = viajes[0];
 
-      const data = {
+      const _data = {
         ...viaje,
         id: Number(viaje.id),
         idCliente: Number(viaje.idCliente),
@@ -1412,8 +1458,7 @@ ORDER BY v.Id DESC
             : null,
         idRuta: Number(viaje.idRuta),
         idZona: Number(viaje.idZona),
-        idZonaFin:
-          viaje.idZonaFin !== null ? Number(viaje.idZonaFin) : null,
+        idZonaFin: viaje.idZonaFin !== null ? Number(viaje.idZonaFin) : null,
       };
 
       //APi response

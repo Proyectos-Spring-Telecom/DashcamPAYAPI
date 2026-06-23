@@ -1,19 +1,14 @@
-import {
-  Column,
-  Entity,
-  OneToMany,
-  PrimaryColumn,
-} from "typeorm";
-import { CatCaracteristicasEvaluacionMttoMecanico } from "./CatCaracteristicasEvaluacionMttoMecanico";
-import { applySchema } from "src/common/apply-schema.decorator";
+import { Column, Entity, OneToMany, PrimaryColumn } from 'typeorm';
+import { CatCaracteristicasEvaluacionMttoMecanico } from './CatCaracteristicasEvaluacionMttoMecanico';
+import { applySchema } from 'src/common/apply-schema.decorator';
 
 @applySchema
-@Entity("CatCategoriaMantenimientoMecanico")
+@Entity('CatCategoriaMantenimientoMecanico')
 export class CatCategoriaMantenimientoMecanico {
-  @PrimaryColumn({ type: "int", name: "Id" })
+  @PrimaryColumn({ type: 'int', name: 'Id' })
   id: number;
 
-  @Column("varchar", { name: "Nombre", nullable: true, length: 200 })
+  @Column('varchar', { name: 'Nombre', nullable: true, length: 200 })
   nombre: string | null;
 
   @OneToMany(
@@ -22,4 +17,3 @@ export class CatCategoriaMantenimientoMecanico {
   )
   caracteristicasEvaluacion: CatCaracteristicasEvaluacionMttoMecanico[];
 }
-

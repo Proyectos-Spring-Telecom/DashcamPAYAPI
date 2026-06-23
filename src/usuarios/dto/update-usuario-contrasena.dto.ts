@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsDateString, IsNotEmpty, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { IsNotEmpty, IsString, Matches, MinLength } from 'class-validator';
 
 export class UpdateUsuarioContrasena {
   @IsString()
@@ -35,5 +35,4 @@ export class UpdateUsuarioContrasena {
     example: 'P@ssword123',
   })
   passwordNuevaConfirmacion: string;
-
 }

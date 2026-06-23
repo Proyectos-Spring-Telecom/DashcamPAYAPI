@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsNotEmpty } from "class-validator";
+import { IsIn, IsInt, IsNotEmpty } from 'class-validator';
 
 export class UpdateVariantesEstatusDto {
   @IsNotEmpty({ message: 'Confirmar estatus en valor de 0 ó 1' })
@@ -6,4 +6,3 @@ export class UpdateVariantesEstatusDto {
   @IsIn([0, 1], { message: 'Solo puede ser 0 ó 1' })
   estatus: number = 1;
 }
-

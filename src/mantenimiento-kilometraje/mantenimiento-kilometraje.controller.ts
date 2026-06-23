@@ -35,7 +35,8 @@ export class MantenimientoKilometrajeController {
   @Post()
   @ApiOperation({
     summary: 'Crear un nuevo registro de mantenimiento por kilometraje',
-    description: 'Crea un nuevo registro de mantenimiento programado por kilometraje con la información del kilometraje inicial, deseado, periodo y año.',
+    description:
+      'Crea un nuevo registro de mantenimiento programado por kilometraje con la información del kilometraje inicial, deseado, periodo y año.',
   })
   @ApiBody({
     type: CreateMantenimientoKilometrajeDto,
@@ -54,7 +55,8 @@ export class MantenimientoKilometrajeController {
     description: 'No autorizado',
   })
   async create(
-    @Body() createMantenimientoKilometrajeDto: CreateMantenimientoKilometrajeDto,
+    @Body()
+    createMantenimientoKilometrajeDto: CreateMantenimientoKilometrajeDto,
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
@@ -67,7 +69,8 @@ export class MantenimientoKilometrajeController {
   @Get(':page/:limit')
   @ApiOperation({
     summary: 'Obtener mantenimientos por kilometraje paginados',
-    description: 'Obtiene un listado paginado de registros de mantenimiento por kilometraje con su relación de instalación.',
+    description:
+      'Obtiene un listado paginado de registros de mantenimiento por kilometraje con su relación de instalación.',
   })
   @ApiParam({
     name: 'page',
@@ -83,7 +86,8 @@ export class MantenimientoKilometrajeController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Listado paginado de mantenimientos por kilometraje obtenido exitosamente',
+    description:
+      'Listado paginado de mantenimientos por kilometraje obtenido exitosamente',
   })
   @ApiResponse({
     status: 401,
@@ -96,13 +100,19 @@ export class MantenimientoKilometrajeController {
   ): Promise<ApiResponseCommon> {
     const idCliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.mantenimientoKilometrajeService.findAll(page, limit, Number(idCliente), Number(rol));
+    return this.mantenimientoKilometrajeService.findAll(
+      page,
+      limit,
+      Number(idCliente),
+      Number(rol),
+    );
   }
 
   @Get(':id')
   @ApiOperation({
     summary: 'Obtener un mantenimiento por kilometraje por ID',
-    description: 'Obtiene los detalles completos de un registro de mantenimiento por kilometraje específico por su ID, incluyendo su relación de instalación.',
+    description:
+      'Obtiene los detalles completos de un registro de mantenimiento por kilometraje específico por su ID, incluyendo su relación de instalación.',
   })
   @ApiParam({
     name: 'id',
@@ -122,16 +132,24 @@ export class MantenimientoKilometrajeController {
     status: 401,
     description: 'No autorizado',
   })
-  findOne(@Param('id', ParseIntPipe) id: number, @Request() req): Promise<ApiResponseCommon> {
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ): Promise<ApiResponseCommon> {
     const idCliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.mantenimientoKilometrajeService.findOne(id, Number(idCliente), Number(rol));
+    return this.mantenimientoKilometrajeService.findOne(
+      id,
+      Number(idCliente),
+      Number(rol),
+    );
   }
 
   @Patch(':id')
   @ApiOperation({
     summary: 'Actualizar un mantenimiento por kilometraje',
-    description: 'Actualiza los datos de un registro de mantenimiento por kilometraje existente. Solo se actualizan los campos proporcionados.',
+    description:
+      'Actualiza los datos de un registro de mantenimiento por kilometraje existente. Solo se actualizan los campos proporcionados.',
   })
   @ApiParam({
     name: 'id',
@@ -161,7 +179,8 @@ export class MantenimientoKilometrajeController {
   })
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateMantenimientoKilometrajeDto: UpdateMantenimientoKilometrajeDto,
+    @Body()
+    updateMantenimientoKilometrajeDto: UpdateMantenimientoKilometrajeDto,
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
@@ -175,7 +194,8 @@ export class MantenimientoKilometrajeController {
   @Patch(':id/desactivar')
   @ApiOperation({
     summary: 'Desactivar un mantenimiento por kilometraje',
-    description: 'Desactiva un registro de mantenimiento por kilometraje cambiando su estatus a 0.',
+    description:
+      'Desactiva un registro de mantenimiento por kilometraje cambiando su estatus a 0.',
   })
   @ApiParam({
     name: 'id',
@@ -206,7 +226,8 @@ export class MantenimientoKilometrajeController {
   @Patch(':id/activar')
   @ApiOperation({
     summary: 'Activar un mantenimiento por kilometraje',
-    description: 'Activa un registro de mantenimiento por kilometraje cambiando su estatus a 1 si estaba previamente en 0.',
+    description:
+      'Activa un registro de mantenimiento por kilometraje cambiando su estatus a 1 si estaba previamente en 0.',
   })
   @ApiParam({
     name: 'id',

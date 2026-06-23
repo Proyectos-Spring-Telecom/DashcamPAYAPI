@@ -3,7 +3,6 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
   Delete,
   UseGuards,
@@ -19,7 +18,13 @@ import { LicenciasService } from './licencias.service';
 import { CreateLicenciaDto } from './dto/create-licencia.dto';
 import { UpdateLicenciaDto } from './dto/update-licencia.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
-import { ApiBearerAuth, ApiTags, ApiConsumes, ApiOperation, ApiBody } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiConsumes,
+  ApiOperation,
+  ApiBody,
+} from '@nestjs/swagger';
 
 @ApiTags('Licencias')
 @ApiBearerAuth('bearer-token')
@@ -34,12 +39,14 @@ export class LicenciasController {
       storage: multer.memoryStorage(),
       limits: { fileSize: 10 * 1024 * 1024 }, // máximo 10 MB
       fileFilter: (req, file, cb) => {
-        const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf'];
+        const allowedTypes = [
+          'image/png',
+          'image/jpeg',
+          'image/jpg',
+          'application/pdf',
+        ];
         if (file && !allowedTypes.includes(file.mimetype)) {
-          return cb(
-            new Error('Solo se permiten PNG, JPG, JPEG o PDF'),
-            false,
-          );
+          return cb(new Error('Solo se permiten PNG, JPG, JPEG o PDF'), false);
         }
         cb(null, true);
       },
@@ -48,7 +55,8 @@ export class LicenciasController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Crear una nueva licencia',
-    description: 'Crea un nuevo registro de licencia con toda la información. El campo licencia debe ser un archivo (imagen o PDF).',
+    description:
+      'Crea un nuevo registro de licencia con toda la información. El campo licencia debe ser un archivo (imagen o PDF).',
   })
   @ApiBody({
     type: CreateLicenciaDto,
@@ -60,14 +68,18 @@ export class LicenciasController {
     @Request() req,
   ) {
     const idUser = req.user.userId;
-    const cliente = req.user.cliente;
-    const rol = req.user.rol;
-    return this.licenciasService.create(idUser, createLicenciaDto, licenciaFile);
+    const _cliente = req.user.cliente;
+    const _rol = req.user.rol;
+    return this.licenciasService.create(
+      idUser,
+      createLicenciaDto,
+      licenciaFile,
+    );
   }
 
   @Get('list')
   findAllList(@Request() req) {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.licenciasService.findAllList(+cliente, +rol);
@@ -79,21 +91,18 @@ export class LicenciasController {
     @Param('page', ParseIntPipe) page: number,
     @Param('limit', ParseIntPipe) limit: number,
   ) {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.licenciasService.findAll(+cliente, +rol, page, limit);
   }
 
   @Get(':id')
-  findOne(
-    @Param('id') id: string,
-    @Request() req,
-  ) {
-    const idUser = req.user.userId;
+  findOne(@Param('id') id: string, @Request() req) {
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.licenciasService.findOne(+id, +cliente, +rol );
+    return this.licenciasService.findOne(+id, +cliente, +rol);
   }
 
   @Put(':id')
@@ -103,19 +112,16 @@ export class LicenciasController {
     @Request() req,
   ) {
     const idUser = req.user.userId;
-    const cliente = req.user.cliente;
-    const rol = req.user.rol;
+    const _cliente = req.user.cliente;
+    const _rol = req.user.rol;
     return this.licenciasService.update(+id, +idUser, updateLicenciaDto);
   }
 
   @Delete(':id')
-  remove(
-    @Param('id') id: string,
-    @Request() req,
-  ) {
+  remove(@Param('id') id: string, @Request() req) {
     const idUser = req.user.userId;
-    const cliente = req.user.cliente;
-    const rol = req.user.rol;
+    const _cliente = req.user.cliente;
+    const _rol = req.user.rol;
     return this.licenciasService.remove(+id, +idUser);
   }
 }

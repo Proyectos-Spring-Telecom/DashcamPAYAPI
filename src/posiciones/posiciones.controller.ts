@@ -20,7 +20,7 @@ import { UpdatePosicionesDto } from './dto/update-posicione.dto';
 @ApiBearerAuth('bearer-token')
 @Controller('posiciones')
 export class PosicionesController {
-  constructor(private readonly posicionesService: PosicionesService) { }
+  constructor(private readonly posicionesService: PosicionesService) {}
 
   @Post()
   create(@Body() createPosicionesDto: CreatePosicionesDto) {
@@ -35,18 +35,13 @@ export class PosicionesController {
     return this.posicionesService.update(id, updatePosicionesDto);
   }
 
-
   @UseGuards(JwtAuthGuard)
   @Get('list')
-  async findAllList(@Request() req,): Promise<ApiResponseCommon> {
+  async findAllList(@Request() req): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     const idUser = req.user.userId;
-    return await this.posicionesService.findAllList(
-      +idUser,
-      +cliente,
-      +rol,
-    );
+    return await this.posicionesService.findAllList(+idUser, +cliente, +rol);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -64,7 +59,8 @@ export class PosicionesController {
       +cliente,
       +rol,
       page,
-      limit);
+      limit,
+    );
   }
 
   @UseGuards(JwtAuthGuard)
@@ -72,6 +68,4 @@ export class PosicionesController {
   findOne(@Param('id') id: string) {
     return this.posicionesService.findOne(+id);
   }
-
-
 }

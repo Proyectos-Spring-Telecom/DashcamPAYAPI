@@ -24,15 +24,19 @@ import { UpdateConteoPasajerosDto } from './dto/update-conteopasajero.dto';
 export class ConteopasajerosController {
   constructor(
     private readonly conteopasajerosService: ConteopasajerosService,
-  ) { }
+  ) {}
 
   @UseGuards(JwtAuthGuard)
   @Post()
   async create(
-    @Body() createConteopasajeroDto: CreateConteoPasajerosDto, @Req()
-    req:any
+    @Body() createConteopasajeroDto: CreateConteoPasajerosDto,
+    @Req()
+    req: any,
   ): Promise<ApiCrudResponse> {
-    return this.conteopasajerosService.create(createConteopasajeroDto, req.user.userId);
+    return this.conteopasajerosService.create(
+      createConteopasajeroDto,
+      req.user.userId,
+    );
   }
 
   @UseGuards(JwtAuthGuard)
@@ -41,7 +45,10 @@ export class ConteopasajerosController {
     @Body() updateConteoPasajerosDto: UpdateConteoPasajerosDto,
     @Req() req: any,
   ): Promise<ApiCrudResponse> {
-    return this.conteopasajerosService.update(updateConteoPasajerosDto, req.user.userId);
+    return this.conteopasajerosService.update(
+      updateConteoPasajerosDto,
+      req.user.userId,
+    );
   }
 
   // RUTAS ESPECÍFICAS PRIMERO (orden correcto)
@@ -209,7 +216,7 @@ export class ConteopasajerosController {
       +cliente,
       +rol,
       page,
-      limit
+      limit,
     );
   }
 

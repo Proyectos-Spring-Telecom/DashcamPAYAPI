@@ -1,8 +1,4 @@
-import {
-  Column,
-  Entity,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('Licencias', { schema: `${process.env.DB_DATABASE}` })
 export class Licencias {
@@ -29,5 +25,4 @@ export class Licencias {
 
   @Column('bigint', { name: 'IdOperador' })
   idOperador: number;
-
 }

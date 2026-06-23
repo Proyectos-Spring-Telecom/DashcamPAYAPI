@@ -36,7 +36,8 @@ export class CatTipoCombustibleController {
   @Post()
   @ApiOperation({
     summary: 'Crear un nuevo tipo de combustible',
-    description: 'Crea un nuevo registro de tipo de combustible en el catálogo.',
+    description:
+      'Crea un nuevo registro de tipo de combustible en el catálogo.',
   })
   @ApiBody({
     type: CreateCatTipoCombustibleDto,
@@ -68,7 +69,8 @@ export class CatTipoCombustibleController {
   @Get('list')
   @ApiOperation({
     summary: 'Obtener listado de tipos de combustible',
-    description: 'Obtiene un listado completo de todos los tipos de combustible sin paginación.',
+    description:
+      'Obtiene un listado completo de todos los tipos de combustible sin paginación.',
   })
   @ApiResponse({
     status: 200,
@@ -101,7 +103,8 @@ export class CatTipoCombustibleController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Listado paginado de tipos de combustible obtenido exitosamente',
+    description:
+      'Listado paginado de tipos de combustible obtenido exitosamente',
   })
   @ApiResponse({
     status: 401,
@@ -117,7 +120,8 @@ export class CatTipoCombustibleController {
   @Get(':id')
   @ApiOperation({
     summary: 'Obtener un tipo de combustible por ID',
-    description: 'Obtiene los detalles de un tipo de combustible específico por su ID.',
+    description:
+      'Obtiene los detalles de un tipo de combustible específico por su ID.',
   })
   @ApiParam({
     name: 'id',

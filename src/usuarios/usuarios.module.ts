@@ -16,7 +16,13 @@ import { Validadores } from 'src/entities/Validadores';
 import { S3Module } from 'src/s3/s3.module';
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Usuarios, UsuariosPermisos, Clientes, Validadores, UsuariosZonas]),
+    TypeOrmModule.forFeature([
+      Usuarios,
+      UsuariosPermisos,
+      Clientes,
+      Validadores,
+      UsuariosZonas,
+    ]),
     BitacoraModule,
     ClientesModule,
     PermisosModule,
@@ -27,4 +33,4 @@ import { S3Module } from 'src/s3/s3.module';
   controllers: [UsuariosController],
   providers: [UsuariosService],
 })
-export class UsuariosModule { }
+export class UsuariosModule {}

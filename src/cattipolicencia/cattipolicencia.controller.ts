@@ -8,11 +8,12 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 @UseGuards(JwtAuthGuard)
 @Controller('cattipolicencia')
 export class CattipolicenciaController {
-  constructor(private readonly cattipolicenciaService: CattipolicenciaService) {}
+  constructor(
+    private readonly cattipolicenciaService: CattipolicenciaService,
+  ) {}
 
   @Get('list')
   findAllList() {
     return this.cattipolicenciaService.findAllList();
   }
-
 }

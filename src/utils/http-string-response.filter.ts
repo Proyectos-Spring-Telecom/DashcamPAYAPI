@@ -20,11 +20,11 @@ export class HttpStringResponseFilter implements ExceptionFilter {
       typeof res === 'string'
         ? res
         : typeof res === 'object' && 'message' in res
-        ? (res as any).message
-        : 'Error desconocido';
+          ? (res as any).message
+          : 'Error desconocido';
 
-    response.status(status).send(
-      Array.isArray(message) ? message.join(', ') : message,
-    );
+    response
+      .status(status)
+      .send(Array.isArray(message) ? message.join(', ') : message);
   }
 }

@@ -14,7 +14,19 @@ import { HistoricoInstalaciones } from 'src/entities/historico-instalaciones';
 import { HistoricoinstalacionesModule } from 'src/historicoinstalaciones/historicoinstalaciones.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Instalaciones,UsuariosInstalaciones,Validadores,Contadores,Vehiculos,Clientes,InstalacionContadores]), BitacoraModule,HistoricoinstalacionesModule],
+  imports: [
+    TypeOrmModule.forFeature([
+      Instalaciones,
+      UsuariosInstalaciones,
+      Validadores,
+      Contadores,
+      Vehiculos,
+      Clientes,
+      InstalacionContadores,
+    ]),
+    BitacoraModule,
+    HistoricoinstalacionesModule,
+  ],
   controllers: [InstalacionesController],
   providers: [InstalacionesService],
 })

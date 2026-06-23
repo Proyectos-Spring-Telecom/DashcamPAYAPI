@@ -7,8 +7,8 @@ function interpolar(p1: Punto, p2: Punto, distancia: number): Punto[] {
   const pasos = Math.floor(total / distancia);
 
   for (let i = 1; i <= pasos; i++) {
-    const lat = p1.lat + (p2.lat - p1.lat) * (i * distancia / total);
-    const lng = p1.lng + (p2.lng - p1.lng) * (i * distancia / total);
+    const lat = p1.lat + (p2.lat - p1.lat) * ((i * distancia) / total);
+    const lng = p1.lng + (p2.lng - p1.lng) * ((i * distancia) / total);
     puntos.push({ lat, lng });
   }
 
@@ -17,7 +17,7 @@ function interpolar(p1: Punto, p2: Punto, distancia: number): Punto[] {
 
 export async function generarRecorridoDetallado(
   recorrido: Punto[],
-  distanciaInterpolacion = 100
+  distanciaInterpolacion = 100,
 ): Promise<ResultadoRecorrido> {
   if (!recorrido || recorrido.length < 2) {
     throw new Error('El recorrido debe tener al menos dos puntos.');

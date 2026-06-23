@@ -4,12 +4,14 @@ import {
   IsString,
   IsDateString,
   IsNumber,
-  IsIn,
   IsEnum,
   IsOptional,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { EnumCategoriaLicencia, EnumTipoLicencia } from 'src/common/estatus.enum';
+import {
+  EnumCategoriaLicencia,
+  EnumTipoLicencia,
+} from 'src/common/estatus.enum';
 
 // Helper function para transformar valores de FormData a números
 const toNumber = ({ value }: { value: any }): number | undefined => {

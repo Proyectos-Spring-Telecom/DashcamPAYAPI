@@ -14,7 +14,13 @@ import { NetpayModule } from 'src/netpay/netpay.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Pasajeros, Clientes, Usuarios, UsuariosPermisos, Monederos]),
+    TypeOrmModule.forFeature([
+      Pasajeros,
+      Clientes,
+      Usuarios,
+      UsuariosPermisos,
+      Monederos,
+    ]),
     BitacoraModule,
     S3Module,
     NetpayModule,

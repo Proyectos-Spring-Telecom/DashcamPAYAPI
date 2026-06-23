@@ -27,4 +27,3 @@ export class CreateUsuariosZonasDto {
   @IsNumber({}, { each: true })
   idsZonas: number[];
 }
-

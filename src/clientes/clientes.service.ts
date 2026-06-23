@@ -31,7 +31,7 @@ export class ClientesService {
     private readonly clienteRepository: Repository<Clientes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
     private readonly catpasajeroService: CatpasajeroService,
-  ) { }
+  ) {}
 
   // ========================================
   // 🔹 CREAR UN CLIENTE
@@ -141,12 +141,12 @@ export class ClientesService {
       [cliente],
     );
 
-    let rows = result?.[0] ?? [];
+    const rows = result?.[0] ?? [];
 
     // Construir ids y quitar el cliente padre
     const ids = rows
       .map((row: any) => Number(row.Id))
-      .filter(id => !isNaN(id) && id !== cliente); // 👈 QUITAR EL CLIENTE PADRE
+      .filter((id) => !isNaN(id) && id !== cliente); // 👈 QUITAR EL CLIENTE PADRE
 
     if (ids.length === 0) {
       return { ids: [], placeholders: '' };
@@ -207,7 +207,7 @@ LEFT JOIN Clientes cp ON c.IdPadre = cp.Id
 ORDER BY c.Id ASC
   LIMIT ? OFFSET ?;
             `,
-            [ limit, offset],
+            [limit, offset],
           );
 
           // Query para total (sin paginación)
@@ -216,7 +216,7 @@ ORDER BY c.Id ASC
   SELECT COUNT(*) AS total
 FROM Clientes
 
-  `, 
+  `,
           );
           break;
 
@@ -332,7 +332,9 @@ ORDER BY c.Id ASC;
         default:
           // Usuarios normales - solo sus zonas asignadas
           if (!cliente) {
-            throw new Error('Cliente es requerido para usuarios no administradores');
+            throw new Error(
+              'Cliente es requerido para usuarios no administradores',
+            );
           }
           const { ids, placeholders } = await this.clienteHijos(cliente);
           clientes = await this.clienteRepository.query(
@@ -381,14 +383,12 @@ ORDER BY c.Id ASC;
   async getAllListClientesId(
     idUser: number,
     cliente: number,
-    rol: number,
+    _rol: number,
   ): Promise<ApiResponseCommon> {
     try {
-      let clientes;
-      // Usuarios normales - solo sus Zonas asignadas
-          const { ids, placeholders } = await this.clienteHijos(cliente);
-          clientes = await this.clienteRepository.query(
-            `
+      const { ids, placeholders } = await this.clienteHijos(cliente);
+      const clientes = await this.clienteRepository.query(
+        `
 SELECT
   Id AS id,
   Nombre AS nombre,
@@ -400,8 +400,8 @@ WHERE Id IN (${placeholders})  -- 🔹 aquí colocas el ID del cliente que quier
 ORDER BY Id ASC
 
             `,
-            [...ids],
-          );
+        [...ids],
+      );
 
       // 🔥 Forzamos ids a number y agregamos nombreCompleto
       const data = clientes.map((item) => ({
@@ -637,10 +637,9 @@ ORDER BY Id ASC
   async removeCliente(
     id: number,
     idUser: number,
-    cliente: number,
+    _cliente: number,
   ): Promise<ApiCrudResponse> {
     try {
-
       //Buscamos al cliente y verificamos
       const clienteEliminar = await this.clienteRepository.findOne({
         where: { id: id },

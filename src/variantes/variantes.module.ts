@@ -10,7 +10,16 @@ import { Clientes } from 'src/entities/Clientes';
 import { CatTipoVariante } from 'src/entities/CatTipoVariante';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Rutas,Variantes,UsuariosZonas,Clientes,CatTipoVariante]), BitacoraModule],
+  imports: [
+    TypeOrmModule.forFeature([
+      Rutas,
+      Variantes,
+      UsuariosZonas,
+      Clientes,
+      CatTipoVariante,
+    ]),
+    BitacoraModule,
+  ],
   controllers: [VariantesController],
   providers: [VariantesService],
 })

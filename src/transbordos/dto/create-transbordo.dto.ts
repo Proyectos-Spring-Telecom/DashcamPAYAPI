@@ -8,10 +8,8 @@ import {
   IsArray,
   ValidateNested,
   ArrayMinSize,
-  ArrayMaxSize,
   MaxLength,
   Min,
-  Max,
   IsPositive,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -76,17 +74,19 @@ export class CreateTransbordoDto {
   idTipoDescuento?: number;
 
   @ApiProperty({
-    description: 'Detalles de los transbordos (costos por cada número de transbordo)',
+    description:
+      'Detalles de los transbordos (costos por cada número de transbordo)',
     type: [CreateDetalleTransbordoDto],
     example: [
-      { costo: 5.50, nroTransbordo: 1 },
-      { costo: 3.00, nroTransbordo: 2 },
+      { costo: 5.5, nroTransbordo: 1 },
+      { costo: 3.0, nroTransbordo: 2 },
     ],
   })
   @IsArray({ message: 'Los detalles deben ser un array' })
-  @ArrayMinSize(1, { message: 'Debe proporcionar al menos un detalle de transbordo' })
+  @ArrayMinSize(1, {
+    message: 'Debe proporcionar al menos un detalle de transbordo',
+  })
   @ValidateNested({ each: true })
   @Type(() => CreateDetalleTransbordoDto)
   detalles: CreateDetalleTransbordoDto[];
 }
-

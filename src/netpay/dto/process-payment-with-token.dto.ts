@@ -4,7 +4,6 @@ import {
   IsString,
   IsNumber,
   IsOptional,
-  IsBoolean,
   IsObject,
   Min,
 } from 'class-validator';
@@ -28,7 +27,7 @@ export class ProcessPaymentWithTokenDto {
 
   @ApiProperty({
     description: 'Monto del pago',
-    example: 100.50,
+    example: 100.5,
     minimum: 0.01,
   })
   @IsNumber()
@@ -62,7 +61,8 @@ export class ProcessPaymentWithTokenDto {
   deviceFingerPrint?: string;
 
   @ApiPropertyOptional({
-    description: 'Device Information (obtenido de NetPay.form.deviceInformation())',
+    description:
+      'Device Information (obtenido de NetPay.form.deviceInformation())',
     example: {
       deviceChannel: 'Browser',
       httpBrowserColorDepth: 24,
@@ -87,7 +87,8 @@ export class ProcessPaymentWithTokenDto {
   sessionId?: string;
 
   @ApiPropertyOptional({
-    description: 'Guardar tarjeta para futuros pagos (string: "true" o "false")',
+    description:
+      'Guardar tarjeta para futuros pagos (string: "true" o "false")',
     example: 'false',
     default: 'false',
   })

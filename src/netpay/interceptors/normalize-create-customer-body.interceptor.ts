@@ -25,10 +25,7 @@ export class NormalizeCreateCustomerBodyInterceptor implements NestInterceptor {
       }
 
       if (!trimStr(b.lastName)) {
-        const joined = [
-          trimStr(b.apellidoPaterno),
-          trimStr(b.apellidoMaterno),
-        ]
+        const joined = [trimStr(b.apellidoPaterno), trimStr(b.apellidoMaterno)]
           .filter(Boolean)
           .join(' ')
           .trim();

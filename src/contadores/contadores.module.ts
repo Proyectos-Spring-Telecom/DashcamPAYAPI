@@ -9,9 +9,16 @@ import { InstalacionContadores } from 'src/entities/InstalacionContadores';
 import { Clientes } from 'src/entities/Clientes';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Contadores,Instalaciones,InstalacionContadores,Clientes]), BitacoraModule],
+  imports: [
+    TypeOrmModule.forFeature([
+      Contadores,
+      Instalaciones,
+      InstalacionContadores,
+      Clientes,
+    ]),
+    BitacoraModule,
+  ],
   controllers: [ContadoresController],
   providers: [ContadoresService],
 })
 export class ContadoresModule {}
-

@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   HttpException,
   Injectable,
   InternalServerErrorException,
@@ -30,7 +29,7 @@ export class ZonasService {
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
-  ) { }
+  ) {}
 
   //Crear Zona
   async create(
@@ -405,7 +404,7 @@ ORDER BY r.Id DESC
   }
 
   //Obtener listado por idCliente recibido por ruta (solo del cliente, sin hijos)
-  async findByCliente(idCliente: number, idUser: number, rol: number) {
+  async findByCliente(idCliente: number, _idUser: number, _rol: number) {
     try {
       // Consulta directa sin incluir clientes hijos
       const zonas = await this.zonasRepository.query(
@@ -616,7 +615,6 @@ ORDER BY r.Id DESC
     return this.zonasRepository.query(query, [...ids, id]);
   }
 
-
   async findOne(idUser: number, id: number, cliente: number, rol: number) {
     try {
       let zonas;
@@ -660,20 +658,20 @@ ORDER BY r.Id DESC;
 
         case 2:
           // Usuario administrador - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasOne(cliente, id)
+          zonas = await this.consultarZonasOne(cliente, id);
           break;
         case 3:
           // Usuario operador - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasOne(cliente, id)
+          zonas = await this.consultarZonasOne(cliente, id);
           break;
         case 8:
           // Usuario Reportes - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasOne(cliente, id)
+          zonas = await this.consultarZonasOne(cliente, id);
           break;
 
         case 10:
           // Usuario Capturistas - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasOne(cliente, id)
+          zonas = await this.consultarZonasOne(cliente, id);
           break;
 
         default:

@@ -4,7 +4,6 @@ import {
   Post,
   Body,
   Param,
-  Query,
   UseGuards,
   ParseIntPipe,
   Request,
@@ -14,7 +13,13 @@ import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { CreateTransaccioneDebitoDto } from './dto/create-transaccione-debito.dto';
 import { CreateTransaccioneRecargaDto } from './dto/create-transaccione-recarga.dto';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+} from '@nestjs/swagger';
 import { GetTransaccioneDto } from './dto/get-transacciones.dto';
 import { GetHistoricoRecargasDto } from './dto/get-historico-recargas.dto';
 
@@ -22,7 +27,7 @@ import { GetHistoricoRecargasDto } from './dto/get-historico-recargas.dto';
 @Controller('transacciones')
 @ApiBearerAuth('bearer-token')
 export class TransaccionesController {
-  constructor(private readonly transaccionesService: TransaccionesService) { }
+  constructor(private readonly transaccionesService: TransaccionesService) {}
 
   // ========================================
   // 🔹 POST ROUTES - Rutas específicas primero
@@ -46,7 +51,8 @@ export class TransaccionesController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary: 'Crea una transacción de recarga',
-    description: 'Crea una recarga de monedero. Si el método de pago es Tarjeta (3 o 4), primero procesa el pago con Netpay antes de hacer la recarga.',
+    description:
+      'Crea una recarga de monedero. Si el método de pago es Tarjeta (3 o 4), primero procesa el pago con Netpay antes de hacer la recarga.',
   })
   @ApiResponse({ status: 201, description: 'Recarga creada exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos o pago rechazado' })
@@ -68,10 +74,11 @@ export class TransaccionesController {
       },
       transferencia: {
         summary: 'Recarga con Transferencia (idMetodoPago: 2)',
-        description: 'Recarga con transferencia bancaria, no requiere datos de Netpay',
+        description:
+          'Recarga con transferencia bancaria, no requiere datos de Netpay',
         value: {
           idTipoTransaccion: 1,
-          monto: 200.00,
+          monto: 200.0,
           latitudInicial: 19.432608,
           longitudInicial: -99.133209,
           numeroSerieMonedero: 'MON-0001',
@@ -81,7 +88,8 @@ export class TransaccionesController {
       },
       tarjetaCredito: {
         summary: 'Recarga con Tarjeta de Crédito (idMetodoPago: 3)',
-        description: 'Recarga con tarjeta de crédito. Primero procesa el pago en Netpay, luego hace la recarga.',
+        description:
+          'Recarga con tarjeta de crédito. Primero procesa el pago en Netpay, luego hace la recarga.',
         value: {
           idTipoTransaccion: 1,
           monto: 150.75,
@@ -109,10 +117,11 @@ export class TransaccionesController {
       },
       tarjetaDebito: {
         summary: 'Recarga con Tarjeta de Débito (idMetodoPago: 4)',
-        description: 'Recarga con tarjeta de débito. Primero procesa el pago en Netpay, luego hace la recarga.',
+        description:
+          'Recarga con tarjeta de débito. Primero procesa el pago en Netpay, luego hace la recarga.',
         value: {
           idTipoTransaccion: 1,
-          monto: 300.50,
+          monto: 300.5,
           latitudInicial: 19.432608,
           longitudInicial: -99.133209,
           numeroSerieMonedero: 'MON-0001',
@@ -148,7 +157,6 @@ export class TransaccionesController {
     );
   }
 
-
   @Post('paginado')
   @UseGuards(JwtAuthGuard)
   async paginadoTransaccion(
@@ -168,7 +176,7 @@ export class TransaccionesController {
       getTransaccioneDto.page,
       getTransaccioneDto.limit,
       getTransaccioneDto.fechaInicio,
-      getTransaccioneDto.fechaFin
+      getTransaccioneDto.fechaFin,
     );
   }
 
@@ -183,7 +191,10 @@ export class TransaccionesController {
       '- Operador (rol 3): Solo sus transacciones\n' +
       '- Pasajero (rol 9): Solo las transacciones de sus monederos',
   })
-  @ApiResponse({ status: 200, description: 'Listado de transacciones débito QR obtenido exitosamente' })
+  @ApiResponse({
+    status: 200,
+    description: 'Listado de transacciones débito QR obtenido exitosamente',
+  })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   async paginadoDebitoQR(
     @Body() getTransaccioneDto: GetTransaccioneDto,
@@ -202,7 +213,7 @@ export class TransaccionesController {
       getTransaccioneDto.page,
       getTransaccioneDto.limit,
       getTransaccioneDto.fechaInicio,
-      getTransaccioneDto.fechaFin
+      getTransaccioneDto.fechaFin,
     );
   }
 
@@ -217,7 +228,10 @@ export class TransaccionesController {
       '- Cajero (rol 3): Solo sus recargas\n' +
       '- Pasajero (rol 9): Solo las recargas de sus monederos',
   })
-  @ApiResponse({ status: 200, description: 'Listado de recargas obtenido exitosamente' })
+  @ApiResponse({
+    status: 200,
+    description: 'Listado de recargas obtenido exitosamente',
+  })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   async getRecargas(
     @Body() getHistoricoRecargasDto: GetHistoricoRecargasDto,
@@ -246,7 +260,10 @@ export class TransaccionesController {
   async findAllListTransacciones(@Request() req): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
-    return await this.transaccionesService.findAllListTransacciones(cliente, rol);
+    return await this.transaccionesService.findAllListTransacciones(
+      cliente,
+      rol,
+    );
   }
 
   @Get('RECARGA/:id')
@@ -261,7 +278,7 @@ export class TransaccionesController {
     return this.transaccionesService.findOneTransaccionDebito(id);
   }
 
-/*   @Get(':page/:limit')
+  /*   @Get(':page/:limit')
   @UseGuards(JwtAuthGuard)
   async findAllTransacciones(
     @Param('page', ParseIntPipe) page: number,

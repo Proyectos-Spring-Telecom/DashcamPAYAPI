@@ -16,7 +16,13 @@ import { CreateVarianteDto } from './dto/create-variante.dto';
 import { UpdateVarianteDto } from './dto/update-variante.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { UpdateVariantesEstatusDto } from './dto/update-variante-estatus.dto';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 
 @ApiTags('Variantes')
 @ApiBearerAuth('bearer-token')
@@ -30,7 +36,12 @@ export class VariantesController {
     const cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return this.variantesService.create(+idUser, +cliente, +rol, createVarianteDto);
+    return this.variantesService.create(
+      +idUser,
+      +cliente,
+      +rol,
+      createVarianteDto,
+    );
   }
 
   @Get('tipos-variante')
@@ -65,7 +76,8 @@ export class VariantesController {
   @Get('by-ruta/:idRuta')
   @ApiOperation({
     summary: 'Listar variantes por ID de ruta',
-    description: 'Obtiene todos los variantes activos pertenecientes únicamente a la ruta especificada.',
+    description:
+      'Obtiene todos los variantes activos pertenecientes únicamente a la ruta especificada.',
   })
   @ApiParam({
     name: 'idRuta',
@@ -123,7 +135,13 @@ export class VariantesController {
     const cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return this.variantesService.updateEstatus(+id, +idUser, +cliente, +rol, updateVariantesEstatusDto);
+    return this.variantesService.updateEstatus(
+      +id,
+      +idUser,
+      +cliente,
+      +rol,
+      updateVariantesEstatusDto,
+    );
   }
 
   @Put(':id')
@@ -135,7 +153,13 @@ export class VariantesController {
     const cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return this.variantesService.update(+id, +idUser, +cliente, +rol, updateVarianteDto);
+    return this.variantesService.update(
+      +id,
+      +idUser,
+      +cliente,
+      +rol,
+      updateVarianteDto,
+    );
   }
 
   @Delete('eliminado/total/:id')
@@ -153,5 +177,4 @@ export class VariantesController {
     const rol = req.user.rol;
     return this.variantesService.remove(+id, +idUser, +cliente, +rol);
   }
-
 }

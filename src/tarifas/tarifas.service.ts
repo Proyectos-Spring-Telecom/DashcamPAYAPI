@@ -34,7 +34,7 @@ export class TarifasService {
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
-  ) { }
+  ) {}
 
   // ========================================
   // 🔹 CREAR UN TARIFA
@@ -46,8 +46,7 @@ export class TarifasService {
     createTarifaDto: CreateTarifaDto,
   ): Promise<ApiCrudResponse> {
     try {
-      let variante;
-      variante = await this.variantesRepository.findOne({
+      const variante = await this.variantesRepository.findOne({
         where: { id: createTarifaDto.idVariante },
       });
       if (!variante)
@@ -78,14 +77,16 @@ export class TarifasService {
       }
 
       // Registro en la bitácora SUCCESS
-      const querylogger: any = { 
-        createTarifaDto, 
-        varianteRegreso: varianteRegreso ? { id: varianteRegreso.id, nombre: varianteRegreso.nombre } : null 
+      const querylogger: any = {
+        createTarifaDto,
+        varianteRegreso: varianteRegreso
+          ? { id: varianteRegreso.id, nombre: varianteRegreso.nombre }
+          : null,
       };
       const mensajeBitacora = tarifaRegresoSave
         ? `Se creó una tarifa con ID: ${tarifaSave.id} y su tarifa de regreso con ID: ${tarifaRegresoSave.id}.`
         : `Se creó una tarifa con ID: ${tarifaSave.id}.`;
-      
+
       await this.bitacoraLogger.logToBitacora(
         'Tarifas',
         mensajeBitacora,
@@ -384,14 +385,16 @@ ORDER BY t.Id DESC;
         TarifaBase: Number(item.TarifaBase),
         DistanciaBaseKm: Number(item.DistanciaBaseKm),
         CostoAdicional: Number(item.CostoAdicional),
-        CostoPorEstacion: item.CostoPorEstacion ? Number(item.CostoPorEstacion) : null,
-        CantidadEstacionesBase: item.CantidadEstacionesBase ? Number(item.CantidadEstacionesBase) : null,
+        CostoPorEstacion: item.CostoPorEstacion
+          ? Number(item.CostoPorEstacion)
+          : null,
+        CantidadEstacionesBase: item.CantidadEstacionesBase
+          ? Number(item.CantidadEstacionesBase)
+          : null,
         distanciaKm: Number(item.distanciaKm),
         idVariante: Number(item.idVariante),
         idRuta: Number(item.idRuta),
-        idZonaInicio: item.idZonaInicio
-          ? Number(item.idZonaInicio)
-          : null,
+        idZonaInicio: item.idZonaInicio ? Number(item.idZonaInicio) : null,
         idZonaFin: item.idZonaFin ? Number(item.idZonaFin) : null,
         idCliente: Number(item.idCliente),
       }));
@@ -479,11 +482,7 @@ ORDER BY t.Id DESC
 
   LIMIT ? OFFSET ?;
     `;
-    return this.usuarioszonasRepository.query(query, [
-      ...ids,
-      limit,
-      offset,
-    ]);
+    return this.usuarioszonasRepository.query(query, [...ids, limit, offset]);
   }
 
   private async consultarTotalTarifasPaginados(cliente: number) {
@@ -720,14 +719,16 @@ WHERE ur.IdUsuario = ?
         TarifaBase: Number(item.TarifaBase),
         DistanciaBaseKm: Number(item.DistanciaBaseKm),
         CostoAdicional: Number(item.CostoAdicional),
-        CostoPorEstacion: item.CostoPorEstacion ? Number(item.CostoPorEstacion) : null,
-        CantidadEstacionesBase: item.CantidadEstacionesBase ? Number(item.CantidadEstacionesBase) : null,
+        CostoPorEstacion: item.CostoPorEstacion
+          ? Number(item.CostoPorEstacion)
+          : null,
+        CantidadEstacionesBase: item.CantidadEstacionesBase
+          ? Number(item.CantidadEstacionesBase)
+          : null,
         distanciaKm: Number(item.distanciaKm),
         idVariante: Number(item.idVariante),
         idRuta: Number(item.idRuta),
-        idZonaInicio: item.idZonaInicio
-          ? Number(item.idZonaInicio)
-          : null,
+        idZonaInicio: item.idZonaInicio ? Number(item.idZonaInicio) : null,
         idZonaFin: item.idZonaFin ? Number(item.idZonaFin) : null,
         idCliente: Number(item.idCliente),
       }));
@@ -981,14 +982,16 @@ ORDER BY t.Id DESC
         TarifaBase: Number(item.TarifaBase),
         DistanciaBaseKm: Number(item.DistanciaBaseKm),
         CostoAdicional: Number(item.CostoAdicional),
-        CostoPorEstacion: item.CostoPorEstacion ? Number(item.CostoPorEstacion) : null,
-        CantidadEstacionesBase: item.CantidadEstacionesBase ? Number(item.CantidadEstacionesBase) : null,
+        CostoPorEstacion: item.CostoPorEstacion
+          ? Number(item.CostoPorEstacion)
+          : null,
+        CantidadEstacionesBase: item.CantidadEstacionesBase
+          ? Number(item.CantidadEstacionesBase)
+          : null,
         distanciaKm: Number(item.distanciaKm),
         idVariante: Number(item.idVariante),
         idRuta: Number(item.idRuta),
-        idZonaInicio: item.idZonaInicio
-          ? Number(item.idZonaInicio)
-          : null,
+        idZonaInicio: item.idZonaInicio ? Number(item.idZonaInicio) : null,
         idZonaFin: item.idZonaFin ? Number(item.idZonaFin) : null,
         idCliente: Number(item.idCliente),
       }));
@@ -1014,7 +1017,10 @@ ORDER BY t.Id DESC
   // ========================================
   // 🔹 OBTENER TARIFA POR ID VARIANTE
   // ========================================
-  async findByVariante(idVariante: number, idUser: number): Promise<ApiResponseCommon> {
+  async findByVariante(
+    idVariante: number,
+    idUser: number,
+  ): Promise<ApiResponseCommon> {
     try {
       // Validar que la variante existe
       const variante = await this.variantesRepository.findOne({
@@ -1022,7 +1028,9 @@ ORDER BY t.Id DESC
       });
 
       if (!variante) {
-        throw new NotFoundException(`La variante con ID ${idVariante} no fue encontrada.`);
+        throw new NotFoundException(
+          `La variante con ID ${idVariante} no fue encontrada.`,
+        );
       }
 
       // Buscar la tarifa por idVariante
@@ -1032,18 +1040,30 @@ ORDER BY t.Id DESC
       });
 
       if (!tarifa) {
-        throw new NotFoundException(`No se encontró una tarifa activa para la variante con ID ${idVariante}.`);
+        throw new NotFoundException(
+          `No se encontró una tarifa activa para la variante con ID ${idVariante}.`,
+        );
       }
 
       // Formatear la respuesta
       const data = {
         id: Number(tarifa.id),
         tarifaBase: Number(tarifa.tarifaBase),
-        distanciaBaseKm: tarifa.distanciaBaseKm ? Number(tarifa.distanciaBaseKm) : null,
-        incrementoCadaMetros: tarifa.incrementoCadaMetros ? Number(tarifa.incrementoCadaMetros) : null,
-        costoAdicional: tarifa.costoAdicional ? Number(tarifa.costoAdicional) : null,
-        costoPorEstacion: tarifa.costoPorEstacion ? Number(tarifa.costoPorEstacion) : null,
-        cantidadEstacionesBase: tarifa.cantidadEstacionesBase ? Number(tarifa.cantidadEstacionesBase) : null,
+        distanciaBaseKm: tarifa.distanciaBaseKm
+          ? Number(tarifa.distanciaBaseKm)
+          : null,
+        incrementoCadaMetros: tarifa.incrementoCadaMetros
+          ? Number(tarifa.incrementoCadaMetros)
+          : null,
+        costoAdicional: tarifa.costoAdicional
+          ? Number(tarifa.costoAdicional)
+          : null,
+        costoPorEstacion: tarifa.costoPorEstacion
+          ? Number(tarifa.costoPorEstacion)
+          : null,
+        cantidadEstacionesBase: tarifa.cantidadEstacionesBase
+          ? Number(tarifa.cantidadEstacionesBase)
+          : null,
         tipoTarifa: Number(tarifa.tipoTarifa),
         fechaCreacion: tarifa.fechaCreacion,
         fechaActualizacion: tarifa.fechaActualizacion,

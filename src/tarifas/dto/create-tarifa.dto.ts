@@ -62,12 +62,15 @@ export class CreateTarifaDto {
     required: false,
   })
   @IsOptional()
-  @IsInt({ message: 'La cantidad de estaciones base debe ser un número entero' })
+  @IsInt({
+    message: 'La cantidad de estaciones base debe ser un número entero',
+  })
   @Min(0, { message: 'La cantidad de estaciones base no puede ser negativa' })
   cantidadEstacionesBase?: number;
 
   @ApiProperty({
-    description: 'ID del tipo de tarifa. Debe ser un ID válido del catálogo de tipos de tarifa (obtener desde /cat-tipo-tarifa)',
+    description:
+      'ID del tipo de tarifa. Debe ser un ID válido del catálogo de tipos de tarifa (obtener desde /cat-tipo-tarifa)',
     required: true,
   })
   @IsNotEmpty({ message: 'El tipo de tarifa es obligatorio' })

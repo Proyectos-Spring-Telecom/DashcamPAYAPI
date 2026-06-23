@@ -61,12 +61,6 @@ export class Validadores {
   @OneToMany(() => Instalaciones, (instalaciones) => instalaciones.validadores)
   instalaciones: Instalaciones[];
 
-  @OneToMany(
-    () => Posiciones,
-    (posiciones) => posiciones.numeroSerieValidador2,
-  )
+  @OneToMany(() => Posiciones, (posiciones) => posiciones.numeroSerieValidador2)
   posiciones: Posiciones[];
-
-
 }
-

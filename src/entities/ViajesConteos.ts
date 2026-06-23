@@ -1,6 +1,6 @@
 import { Entity, PrimaryColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { Viajes } from './Viajes';
-import { applySchema } from "src/common/apply-schema.decorator";
+import { applySchema } from 'src/common/apply-schema.decorator';
 
 @applySchema
 // Definir el índice para el campo "idConteo" según la tabla de la base de datos
@@ -21,6 +21,4 @@ export class ViajesConteos {
   })
   @JoinColumn([{ name: 'IdViaje', referencedColumnName: 'id' }])
   viaje: Viajes;
-
-
 }

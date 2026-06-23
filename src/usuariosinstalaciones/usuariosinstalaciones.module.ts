@@ -8,7 +8,10 @@ import { Usuarios } from 'src/entities/Usuarios';
 import { BitacoraModule } from 'src/bitacora/bitacora.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UsuariosInstalaciones,Instalaciones,Usuarios]), BitacoraModule],
+  imports: [
+    TypeOrmModule.forFeature([UsuariosInstalaciones, Instalaciones, Usuarios]),
+    BitacoraModule,
+  ],
   controllers: [UsuariosinstalacionesController],
   providers: [UsuariosinstalacionesService],
 })

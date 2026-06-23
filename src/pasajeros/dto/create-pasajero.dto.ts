@@ -45,8 +45,12 @@ export class CreatePasajeroDto {
   })
   @IsNotEmpty({ message: 'El apellido paterno es obligatorio' })
   @IsString({ message: 'El apellido paterno debe ser una cadena de texto' })
-  @MinLength(1, { message: 'El apellido paterno debe tener al menos 1 carácter' })
-  @MaxLength(100, { message: 'El apellido paterno no puede exceder los 100 caracteres' })
+  @MinLength(1, {
+    message: 'El apellido paterno debe tener al menos 1 carácter',
+  })
+  @MaxLength(100, {
+    message: 'El apellido paterno no puede exceder los 100 caracteres',
+  })
   apellidoPaterno: string;
 
   @ApiProperty({
@@ -60,7 +64,13 @@ export class CreatePasajeroDto {
   apellidoMaterno?: string;
 
   @IsNotEmpty({ message: 'La fecha de nacimiento es obligatoria' })
-  @IsDateString({}, { message: 'La fecha de nacimiento debe ser una fecha válida en formato ISO 8601' })
+  @IsDateString(
+    {},
+    {
+      message:
+        'La fecha de nacimiento debe ser una fecha válida en formato ISO 8601',
+    },
+  )
   @ApiProperty({
     example: '1995-08-15',
     description: 'Fecha de nacimiento (YYYY-MM-DD)',
@@ -137,7 +147,8 @@ export class CreatePasajeroDto {
 
   @ApiProperty({
     example: 'MON-0001',
-    description: 'Número de serie único del monedero (opcional). Si no se proporciona, se generará automáticamente un número de serie aleatorio único.',
+    description:
+      'Número de serie único del monedero (opcional). Si no se proporciona, se generará automáticamente un número de serie aleatorio único.',
     required: false,
   })
   @IsString()

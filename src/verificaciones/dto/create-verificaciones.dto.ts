@@ -1,10 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsOptional,
-  IsInt,
-  IsDateString,
-  IsObject,
-} from 'class-validator';
+import { IsOptional, IsInt, IsDateString, IsObject } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 // Helper function para transformar valores de FormData a números
@@ -46,7 +41,10 @@ export class CreateVerificacionesDto {
     description: 'Fecha de la verificación actual',
     required: false,
   })
-  @IsDateString({}, { message: 'La fecha de verificación actual debe ser una fecha válida.' })
+  @IsDateString(
+    {},
+    { message: 'La fecha de verificación actual debe ser una fecha válida.' },
+  )
   @IsOptional()
   verificacionActual?: string;
 
@@ -55,7 +53,10 @@ export class CreateVerificacionesDto {
     description: 'Fecha de la próxima verificación',
     required: false,
   })
-  @IsDateString({}, { message: 'La fecha de próxima verificación debe ser una fecha válida.' })
+  @IsDateString(
+    {},
+    { message: 'La fecha de próxima verificación debe ser una fecha válida.' },
+  )
   @IsOptional()
   proximaVerificacion?: string;
 
@@ -79,7 +80,6 @@ export class CreateVerificacionesDto {
   @IsOptional()
   idOperador?: number;
 
- 
   @Transform(toNumber)
   @IsInt({ message: 'El estatus debe ser un número entero.' })
   @IsOptional()
@@ -100,7 +100,9 @@ export class CreateVerificacionesDto {
     required: false,
   })
   @Transform(toNumber)
-  @IsInt({ message: 'El ID de tipo de verificación debe ser un número entero.' })
+  @IsInt({
+    message: 'El ID de tipo de verificación debe ser un número entero.',
+  })
   @IsOptional()
   idTipoVerificacion?: number;
 
@@ -114,4 +116,3 @@ export class CreateVerificacionesDto {
   @IsOptional()
   evaluacion?: object;
 }
-

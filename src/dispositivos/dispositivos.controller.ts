@@ -42,7 +42,7 @@ export class ValidadoresController {
 
   @Get('list')
   findAllListValidadores(@Request() req): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.validadoresService.findAllList(+cliente, +rol);
@@ -53,10 +53,13 @@ export class ValidadoresController {
     @Param('idCliente', ParseIntPipe) idCliente: number,
     @Request() req,
   ): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
-    const rol = req.user.rol;
-    return await this.validadoresService.findAllListValidadoresClientes(idCliente, +cliente);
+    const _rol = req.user.rol;
+    return await this.validadoresService.findAllListValidadoresClientes(
+      idCliente,
+      +cliente,
+    );
   }
 
   @Get('clientes/:id')
@@ -64,10 +67,13 @@ export class ValidadoresController {
     @Param('id', ParseIntPipe) id: number,
     @Request() req,
   ): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
-    const rol = req.user.rol;
-    return await this.validadoresService.findAllListValidadoresClientes(+id, +cliente);
+    const _rol = req.user.rol;
+    return await this.validadoresService.findAllListValidadoresClientes(
+      +id,
+      +cliente,
+    );
   }
 
   @Get(':page/:limit')
@@ -76,7 +82,7 @@ export class ValidadoresController {
     @Param('limit', ParseIntPipe) limit: number,
     @Request() req,
   ): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.validadoresService.findAll(+cliente, +rol, page, limit);
@@ -84,13 +90,13 @@ export class ValidadoresController {
 
   @Get(':id')
   findOneDispositivo(@Param('id') id: string, @Request() req) {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.validadoresService.findOneValidador(+id, +cliente, +rol);
   }
 
-    @Patch('actualizar/estado/:id')
+  @Patch('actualizar/estado/:id')
   updateDispositivoEstado(
     @Param('id') id: string,
     @Request() req,

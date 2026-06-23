@@ -9,7 +9,6 @@ import {
   Max,
   IsInt,
   IsIn,
-  IsDecimal,
   IsPositive,
 } from 'class-validator';
 

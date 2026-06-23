@@ -36,7 +36,8 @@ export class CatTipoVerificacionesController {
   @Post()
   @ApiOperation({
     summary: 'Crear un nuevo tipo de verificación',
-    description: 'Crea un nuevo registro de tipo de verificación en el catálogo.',
+    description:
+      'Crea un nuevo registro de tipo de verificación en el catálogo.',
   })
   @ApiBody({
     type: CreateCatTipoVerificacionesDto,
@@ -68,7 +69,8 @@ export class CatTipoVerificacionesController {
   @Get('list')
   @ApiOperation({
     summary: 'Obtener listado de tipos de verificación',
-    description: 'Obtiene un listado completo de todos los tipos de verificación sin paginación.',
+    description:
+      'Obtiene un listado completo de todos los tipos de verificación sin paginación.',
   })
   @ApiResponse({
     status: 200,
@@ -101,7 +103,8 @@ export class CatTipoVerificacionesController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Listado paginado de tipos de verificación obtenido exitosamente',
+    description:
+      'Listado paginado de tipos de verificación obtenido exitosamente',
   })
   @ApiResponse({
     status: 401,
@@ -117,7 +120,8 @@ export class CatTipoVerificacionesController {
   @Get(':id')
   @ApiOperation({
     summary: 'Obtener un tipo de verificación por ID',
-    description: 'Obtiene los detalles de un tipo de verificación específico por su ID.',
+    description:
+      'Obtiene los detalles de un tipo de verificación específico por su ID.',
   })
   @ApiParam({
     name: 'id',
@@ -188,7 +192,8 @@ export class CatTipoVerificacionesController {
   @Delete(':id')
   @ApiOperation({
     summary: 'Eliminar un tipo de verificación',
-    description: 'Elimina permanentemente un tipo de verificación del catálogo.',
+    description:
+      'Elimina permanentemente un tipo de verificación del catálogo.',
   })
   @ApiParam({
     name: 'id',

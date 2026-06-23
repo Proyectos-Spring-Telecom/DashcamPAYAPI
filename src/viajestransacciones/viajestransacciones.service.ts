@@ -24,7 +24,7 @@ export class ViajestransaccionesService {
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
-  ) { }
+  ) {}
 
   async create(
     idUser: number,
@@ -46,7 +46,7 @@ export class ViajestransaccionesService {
         'CREATE',
         querylogger,
         idUser,
-        EnumModulos.VIAJESTRANSACCIONES, 
+        EnumModulos.VIAJESTRANSACCIONES,
         EstatusEnumBitcora.SUCCESS,
       );
 
@@ -387,15 +387,17 @@ ORDER BY v.Id DESC;
         case 2: // Administrador
         case 8: // Reportes
         case 10: // Capturista
-          viajestransacciones = await this.consultarViajesTransacciones(cliente)
+          viajestransacciones =
+            await this.consultarViajesTransacciones(cliente);
           break;
 
         default:
         case 3: // Operador
-          viajestransacciones = await this.consultarViajesTransaccionesCL(cliente)
+          viajestransacciones =
+            await this.consultarViajesTransaccionesCL(cliente);
           break;
       }
-      const data = viajestransacciones.map((item) => ({
+      const _data = viajestransacciones.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
         idCliente: Number(item.idCliente),
@@ -668,11 +670,12 @@ WHERE c.Id = ?
     cliente: number,
     rol: number,
     page: number,
-    limit: number) {
+    limit: number,
+  ) {
     try {
       const offset = (page - 1) * limit;
       let totalResult;
-      let viajestransacciones
+      let viajestransacciones;
 
       switch (rol) {
         case 1:
@@ -790,21 +793,25 @@ LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
         case 2: // Administrador
         case 8: // Reportes
         case 10: // Capturista
-          viajestransacciones = await this.consultarTotalViajesTransaccionesPaginados(cliente);
+          viajestransacciones =
+            await this.consultarTotalViajesTransaccionesPaginados(cliente);
 
-          totalResult = await this.consultarTotalViajesTransaccionesPaginados(cliente);
+          totalResult =
+            await this.consultarTotalViajesTransaccionesPaginados(cliente);
           break;
 
         case 3: // Operador
         default:
-          viajestransacciones = await this.consultarTotalViajesTransaccionesPaginadosCl(cliente);
+          viajestransacciones =
+            await this.consultarTotalViajesTransaccionesPaginadosCl(cliente);
 
-          totalResult = await this.consultarTotalViajesTransaccionesPaginadosCl(cliente);
+          totalResult =
+            await this.consultarTotalViajesTransaccionesPaginadosCl(cliente);
           break;
       }
 
       const total = Number(totalResult[0]?.total || 0);
-      const data = viajestransacciones.map((item) => ({
+      const _data = viajestransacciones.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
         idCliente: Number(item.idCliente),
@@ -837,8 +844,9 @@ LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
 
   async findOneViajes(id: number) {
     try {
-      const viajestransacciones = await this.viajestransaccionesRepository.query(
-        `
+      const viajestransacciones =
+        await this.viajestransaccionesRepository.query(
+          `
 SELECT
     v.Id AS idViaje,
     v.Inicio AS inicioViaje,
@@ -924,9 +932,9 @@ GROUP BY
 
 ORDER BY v.Id DESC
               `,
-        [id],
-      );
-      const data = viajestransacciones.map((item) => ({
+          [id],
+        );
+      const _data = viajestransacciones.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
         idCliente: Number(item.idCliente),
@@ -954,8 +962,9 @@ ORDER BY v.Id DESC
 
   async findOneTransacciones(id: number) {
     try {
-      const viajestransacciones = await this.viajestransaccionesRepository.query(
-        `
+      const viajestransacciones =
+        await this.viajestransaccionesRepository.query(
+          `
 SELECT 
   vt.IdViaje AS idViaje,
   v.Inicio AS inicioViaje,
@@ -981,8 +990,8 @@ INNER JOIN Transacciones t ON t.Id = vt.IdTransaccion
 WHERE t.Id = ?
 ORDER BY v.Id DESC;
               `,
-        [id],
-      );
+          [id],
+        );
       const data = viajestransacciones.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),

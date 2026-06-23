@@ -56,8 +56,12 @@ export class CreateUsuarioDto {
 
   @IsNotEmpty({ message: 'El apellido paterno es obligatorio' })
   @IsString({ message: 'El apellido paterno debe ser una cadena de texto' })
-  @MinLength(1, { message: 'El apellido paterno debe tener al menos 1 carácter' })
-  @MaxLength(100, { message: 'El apellido paterno no puede exceder los 100 caracteres' })
+  @MinLength(1, {
+    message: 'El apellido paterno debe tener al menos 1 carácter',
+  })
+  @MaxLength(100, {
+    message: 'El apellido paterno no puede exceder los 100 caracteres',
+  })
   @ApiProperty({
     description: 'Apellido paterno',
     example: 'Pérez',

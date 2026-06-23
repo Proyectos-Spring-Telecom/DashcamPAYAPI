@@ -10,7 +10,12 @@ import { Posiciones } from 'src/entities/Posiciones';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([MantenimientoKilometraje, Instalaciones, Clientes, Posiciones]),
+    TypeOrmModule.forFeature([
+      MantenimientoKilometraje,
+      Instalaciones,
+      Clientes,
+      Posiciones,
+    ]),
     BitacoraModule,
   ],
   controllers: [MantenimientoKilometrajeController],

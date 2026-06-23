@@ -1,9 +1,4 @@
-import {
-  Column,
-  Entity,
-  Index,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { applySchema } from 'src/common/apply-schema.decorator';
 
 @applySchema
@@ -68,12 +63,15 @@ export class HistoricoTransaccionesRecarga {
   @Column('varchar', { name: 'TokenCardNetPay', nullable: true, length: 150 })
   tokenCardNetPay: string | null;
 
-  @Column('varchar', { name: 'TransactionTokenIdNetPay', nullable: true, length: 150 })
+  @Column('varchar', {
+    name: 'TransactionTokenIdNetPay',
+    nullable: true,
+    length: 150,
+  })
   transactionTokenIdNetPay: string | null;
 
   @Column('varchar', { name: 'ReferenceIdNetPay', nullable: true, length: 150 })
   referenceIdNetPay: string | null;
 
   // -------- RELACIONES --------
-
 }

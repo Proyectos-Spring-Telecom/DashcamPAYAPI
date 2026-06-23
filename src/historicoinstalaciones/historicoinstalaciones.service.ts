@@ -45,7 +45,7 @@ export class HistoricoinstalacionesService {
 
       const createHistorico =
         await this.historicoInstalacionesRepository.create(historico);
-      const historicoSave =
+      const _historicoSave =
         await this.historicoInstalacionesRepository.save(createHistorico);
 
       // Registro en la bitácora SUCCESS
@@ -107,8 +107,7 @@ export class HistoricoinstalacionesService {
           },
         });
 
-      const mismoValidador =
-        historicoActivo?.idValidador === idValidadorUp;
+      const mismoValidador = historicoActivo?.idValidador === idValidadorUp;
       const mismoContador = historicoActivo?.idContador === idContadorUp;
 
       // 🚫 Si no hay cambios reales, no hacer nada
@@ -125,7 +124,7 @@ export class HistoricoinstalacionesService {
       const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
       const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
 
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
       // ✅ Si existe un registro activo con datos distintos, cerrarlo
       if (historicoActivo) {

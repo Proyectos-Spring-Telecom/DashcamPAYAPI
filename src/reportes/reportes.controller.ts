@@ -5,7 +5,13 @@ import { RecaudacionPorOperadorDto } from './dto/recaudacion-por-operador.dto';
 import { RecaudacionPorVehiculoDto } from './dto/recaudacion-por-vehiculo.dto';
 import { RecaudacionPorDispositivoDto } from './dto/recaudacion-por-dispositivo.dto';
 import { TransaccionesDebitoDto } from './dto/transacciones-debito.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiBody,
+} from '@nestjs/swagger';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 
@@ -19,7 +25,8 @@ export class ReportesController {
   @Post('recaudacion-diaria-ruta')
   @ApiOperation({
     summary: 'Reporte de recaudación diaria por ruta',
-    description: 'Genera un reporte de recaudación diaria agrupado por ruta, incluyendo viajes, validaciones, ingresos, ticket promedio, % electrónico y evasión.',
+    description:
+      'Genera un reporte de recaudación diaria agrupado por ruta, incluyendo viajes, validaciones, ingresos, ticket promedio, % electrónico y evasión.',
   })
   @ApiBody({
     type: RecaudacionDiariaRutaDto,
@@ -51,7 +58,8 @@ export class ReportesController {
   @Post('recaudacion-por-operador')
   @ApiOperation({
     summary: 'Reporte de recaudación por operador',
-    description: 'Genera un reporte de recaudación agrupado por operador, incluyendo turnos, viajes, validaciones, ingresos, ticket promedio, evasión % y último turno.',
+    description:
+      'Genera un reporte de recaudación agrupado por operador, incluyendo turnos, viajes, validaciones, ingresos, ticket promedio, evasión % y último turno.',
   })
   @ApiBody({
     type: RecaudacionPorOperadorDto,
@@ -83,7 +91,8 @@ export class ReportesController {
   @Post('recaudacion-por-vehiculo')
   @ApiOperation({
     summary: 'Reporte de recaudación por vehículo',
-    description: 'Genera un reporte de recaudación agrupado por vehículo, incluyendo turnos, viajes, validaciones, ingresos, ticket promedio y horas en servicio.',
+    description:
+      'Genera un reporte de recaudación agrupado por vehículo, incluyendo turnos, viajes, validaciones, ingresos, ticket promedio y horas en servicio.',
   })
   @ApiBody({
     type: RecaudacionPorVehiculoDto,
@@ -115,7 +124,8 @@ export class ReportesController {
   @Post('recaudacion-por-dispositivo')
   @ApiOperation({
     summary: 'Reporte de recaudación por dispositivo/instalación',
-    description: 'Genera un reporte de recaudación agrupado por dispositivo e instalación, incluyendo validaciones, ingresos, última posición y estado.',
+    description:
+      'Genera un reporte de recaudación agrupado por dispositivo e instalación, incluyendo validaciones, ingresos, última posición y estado.',
   })
   @ApiBody({
     type: RecaudacionPorDispositivoDto,
@@ -147,7 +157,8 @@ export class ReportesController {
   @Post('transacciones-debito')
   @ApiOperation({
     summary: 'Reporte de transacciones débito detallado',
-    description: 'Genera un reporte detallado de transacciones débito con filtros por fecha, cliente, zona, ruta y variante. Incluye información del monedero, validador, ubicación, ruta, viaje y turno.',
+    description:
+      'Genera un reporte detallado de transacciones débito con filtros por fecha, cliente, zona, ruta y variante. Incluye información del monedero, validador, ubicación, ruta, viaje y turno.',
   })
   @ApiBody({
     type: TransaccionesDebitoDto,

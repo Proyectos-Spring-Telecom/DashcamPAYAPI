@@ -21,7 +21,13 @@ import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdateMonederoCatPasajeroDto } from './dto/update-monedero-catpasajero.dto';
 import { UpdateMonederoExtravioDto } from './dto/update-monedero-extravio.dto';
 import { GenerarQRDto } from './dto/generar-qr.dto';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiQuery,
+} from '@nestjs/swagger';
 
 @ApiTags('Monederos')
 @ApiBearerAuth('bearer-token')
@@ -35,9 +41,15 @@ export class MonederosController {
   // ========================================
 
   @Post('reporte/extravio')
-  reportarExtravio(@Body() updateMonederoExtravioDto: UpdateMonederoExtravioDto, @Request() req) {
+  reportarExtravio(
+    @Body() updateMonederoExtravioDto: UpdateMonederoExtravioDto,
+    @Request() req,
+  ) {
     const idUser = req.user.userId;
-    return this.monederosService.reportarExtravio(+idUser, updateMonederoExtravioDto);
+    return this.monederosService.reportarExtravio(
+      +idUser,
+      updateMonederoExtravioDto,
+    );
   }
 
   @Post()
@@ -53,7 +65,8 @@ export class MonederosController {
   @Post('qr/saldo')
   @ApiOperation({
     summary: 'Generar QR con saldo del monedero',
-    description: 'Genera un código QR que contiene el saldo del monedero y el número de pasajes especificado',
+    description:
+      'Genera un código QR que contiene el saldo del monedero y el número de pasajes especificado',
   })
   @ApiResponse({
     status: 201,
@@ -65,7 +78,10 @@ export class MonederosController {
   })
   generarQRConSaldo(@Body() generarQRDto: GenerarQRDto, @Request() req) {
     const idUsuario = req.user.userId;
-    return this.monederosService.generarQRConSaldo(idUsuario, generarQRDto.numeroPasajes);
+    return this.monederosService.generarQRConSaldo(
+      idUsuario,
+      generarQRDto.numeroPasajes,
+    );
   }
 
   @Get('list')
@@ -85,15 +101,16 @@ export class MonederosController {
   @Get('numero/serie/:numeroSerie')
   findOneMonederoBySerie(
     @Param('numeroSerie') numeroSerie: string,
-    @Request() req,
+    @Request() _req,
   ) {
     return this.monederosService.findOneMonederoBySerie(numeroSerie);
   }
 
   @Get('paginados/activos')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Obtener monederos activos paginados',
-    description: 'Obtiene una lista paginada de monederos con estatus activo (estatus = 1). El resultado se filtra según el rol del usuario.'
+    description:
+      'Obtiene una lista paginada de monederos con estatus activo (estatus = 1). El resultado se filtra según el rol del usuario.',
   })
   @ApiQuery({
     name: 'page',
@@ -157,7 +174,7 @@ export class MonederosController {
   }
 
   @Get(':id')
-  findOneMonedero(@Param('id', ParseIntPipe) id: number, @Request() req) {
+  findOneMonedero(@Param('id', ParseIntPipe) id: number, @Request() _req) {
     return this.monederosService.findOneMonedero(id);
   }
 

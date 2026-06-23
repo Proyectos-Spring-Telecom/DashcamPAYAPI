@@ -124,7 +124,7 @@ export class ContadoresService {
   }
 
   //Obtener los contadores por cliente -- incluye disponibles y el que está en uso
-  async findAllListClientes(id: number, cliente: number) {
+  async findAllListClientes(id: number, _cliente: number) {
     try {
       // Consulta SQL para obtener contadores DISPONIBLES y ASIGNADOS
       // Para los asignados a instalaciones, se agrega "-Asignado" al numeroSerie
@@ -476,7 +476,9 @@ ORDER BY b.Id DESC;
       }
 
       if (contadores.length == 0) {
-        throw new NotFoundException(`No se encontró un Contador con ID: ${id}.`);
+        throw new NotFoundException(
+          `No se encontró un Contador con ID: ${id}.`,
+        );
       }
 
       const data = contadores.map((item) => ({
@@ -497,13 +499,19 @@ ORDER BY b.Id DESC;
   }
 
   //Actualizar equipo
-  async update(id: number, idUser: number, updateContadorDto: UpdateContadoresDto) {
+  async update(
+    id: number,
+    idUser: number,
+    updateContadorDto: UpdateContadoresDto,
+  ) {
     try {
       const contador = await this.contadoresRepository.findOne({
         where: { id: id },
       });
       if (!contador)
-        throw new NotFoundException(`No se encontró un Contador con ID: ${id}.`);
+        throw new NotFoundException(
+          `No se encontró un Contador con ID: ${id}.`,
+        );
       await this.contadoresRepository.update(id, updateContadorDto);
 
       //-----Registro en la bitacora----- SUCCESS
@@ -565,7 +573,9 @@ ORDER BY b.Id DESC;
         where: { id: id },
       });
       if (!contador)
-        throw new NotFoundException(`No se encontró un Contador con ID: ${id}.`);
+        throw new NotFoundException(
+          `No se encontró un Contador con ID: ${id}.`,
+        );
 
       //Obtenemos el estatus
       const estatus = updateContadorEstatusDto.estatus;
@@ -573,9 +583,10 @@ ORDER BY b.Id DESC;
       //logica si estatus es 0
       if (estatus === 0) {
         //buscamos que no este asignado a una instalacion
-        const contadorInstalacion = await this.instalacionContadoresRepository.findOne({
-          where: { idContador: contador.id, estatus: 1 },
-        });
+        const contadorInstalacion =
+          await this.instalacionContadoresRepository.findOne({
+            where: { idContador: contador.id, estatus: 1 },
+          });
         if (contadorInstalacion)
           throw new BadRequestException(
             'No es posible completar la operación: Contador se encuentra asignado a una instalación.',
@@ -651,12 +662,15 @@ ORDER BY b.Id DESC;
         where: { id: id },
       });
       if (!contador)
-        throw new NotFoundException(`No se encontró un Contador con ID: ${id}.`);
+        throw new NotFoundException(
+          `No se encontró un Contador con ID: ${id}.`,
+        );
 
       //buscamos que no este asignado a una instalacion
-      const contadorInstalacion = await this.instalacionContadoresRepository.findOne({
-        where: { idContador: contador.id, estatus: 1 },
-      });
+      const contadorInstalacion =
+        await this.instalacionContadoresRepository.findOne({
+          where: { idContador: contador.id, estatus: 1 },
+        });
       if (contadorInstalacion)
         throw new BadRequestException(
           'No es posible completar la operación: Contador se encuentra asignado a una instalación.',
@@ -674,7 +688,9 @@ ORDER BY b.Id DESC;
       //obtenemos el valor de estado
       const estadoActual = updateContadorEstadoDto.estadoActual;
       //se cambia estado del componente
-      await this.contadoresRepository.update(id, { estadoActual: estadoActual });
+      await this.contadoresRepository.update(id, {
+        estadoActual: estadoActual,
+      });
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updateContadorEstadoDto };
@@ -729,12 +745,15 @@ ORDER BY b.Id DESC;
         where: { id: id },
       });
       if (!contador)
-        throw new NotFoundException(`No se encontró un Contador con ID: ${id}.`);
+        throw new NotFoundException(
+          `No se encontró un Contador con ID: ${id}.`,
+        );
 
       //buscamos que no este asignado a una instalacion
-      const contadorInstalacion = await this.instalacionContadoresRepository.findOne({
-        where: { idContador: contador.id, estatus: 1 },
-      });
+      const contadorInstalacion =
+        await this.instalacionContadoresRepository.findOne({
+          where: { idContador: contador.id, estatus: 1 },
+        });
       if (contadorInstalacion)
         throw new BadRequestException(
           'No es posible completar la operación: Contador se encuentra asignado a una instalación.',
@@ -790,4 +809,3 @@ ORDER BY b.Id DESC;
     }
   }
 }
-

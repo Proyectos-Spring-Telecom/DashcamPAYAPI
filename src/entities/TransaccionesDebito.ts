@@ -10,9 +10,15 @@ import { Viajes } from './Viajes';
 import { applySchema } from 'src/common/apply-schema.decorator';
 
 @applySchema
-@Index('FK_TransaccionesDebito_CatTiposTransacciones_idx', ['idTipoTransaccion'], )
-@Index('FK_TransaccionesDebito_NumeroSerieMonedero_idx', ['numeroSerieMonedero'], )
-@Index('FK_TransaccionesDebito_NumeroSerieValidador_idx', ['numeroSerieValidador'],)
+@Index('FK_TransaccionesDebito_CatTiposTransacciones_idx', [
+  'idTipoTransaccion',
+])
+@Index('FK_TransaccionesDebito_NumeroSerieMonedero_idx', [
+  'numeroSerieMonedero',
+])
+@Index('FK_TransaccionesDebito_NumeroSerieValidador_idx', [
+  'numeroSerieValidador',
+])
 @Index('FK_TransaccionesDebito_Viajes', ['idViaje'], {})
 @Entity('TransaccionesDebito')
 export class TransaccionesDebito {
@@ -28,22 +34,47 @@ export class TransaccionesDebito {
   @Column('tinyint', { name: 'ControlTransaccion', unsigned: true })
   controlTransaccion: number;
 
-  @Column('decimal', { name: 'LatitudInicial', precision: 10, scale: 7, nullable: true })
+  @Column('decimal', {
+    name: 'LatitudInicial',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
   latitudInicial: number | null;
 
-  @Column('decimal', { name: 'LongitudInicial', precision: 10, scale: 7, nullable: true })
+  @Column('decimal', {
+    name: 'LongitudInicial',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
   longitudInicial: number | null;
 
   @Column('datetime', { name: 'FechaHoraInicio', nullable: true })
   fechaHoraInicio: Date | null;
 
-  @Column('decimal', { name: 'DistanciaInicialKm', precision: 10, scale: 2, nullable: true })
+  @Column('decimal', {
+    name: 'DistanciaInicialKm',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   distanciaInicialKm: number | null;
 
-  @Column('decimal', { name: 'LatitudFinal', precision: 10, scale: 7, nullable: true })
+  @Column('decimal', {
+    name: 'LatitudFinal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
   latitudFinal: number | null;
 
-  @Column('decimal', { name: 'LongitudFinal', precision: 10, scale: 7, nullable: true })
+  @Column('decimal', {
+    name: 'LongitudFinal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
   longitudFinal: number | null;
 
   @Column('datetime', { name: 'FechaHoraFinal' })
@@ -70,13 +101,28 @@ export class TransaccionesDebito {
   @Column('tinyint', { name: 'EsQR', nullable: true, default: 0 })
   esQR: number | null;
 
-  @Column('decimal', { name: 'CobroMaximo', precision: 10, scale: 2, nullable: true })
+  @Column('decimal', {
+    name: 'CobroMaximo',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   cobroMaximo: number | null;
 
-  @Column('decimal', { name: 'DistanciaRecorrida', precision: 10, scale: 2, nullable: true })
+  @Column('decimal', {
+    name: 'DistanciaRecorrida',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   distanciaRecorrida: number | null;
 
-  @Column('decimal', { name: 'DescuentoTransbordo', precision: 10, scale: 2, nullable: true })
+  @Column('decimal', {
+    name: 'DescuentoTransbordo',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   descuentoTransbordo: number | null;
 
   @Column('bigint', { name: 'TipoDescuentoTransbordo', nullable: true })
@@ -91,5 +137,4 @@ export class TransaccionesDebito {
   })
   @JoinColumn([{ name: 'IdViaje', referencedColumnName: 'id' }])
   idViaje2: Viajes | null;
-
 }

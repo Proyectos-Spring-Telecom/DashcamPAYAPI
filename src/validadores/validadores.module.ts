@@ -9,9 +9,13 @@ import { Instalaciones } from 'src/entities/Instalaciones';
 import { Clientes } from 'src/entities/Clientes';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Validadores, Instalaciones,Clientes]), BitacoraModule,ClientesModule],
+  imports: [
+    TypeOrmModule.forFeature([Validadores, Instalaciones, Clientes]),
+    BitacoraModule,
+    ClientesModule,
+  ],
   controllers: [ValidadoresController],
   providers: [ValidadoresService],
-  exports: [ValidadoresService]
+  exports: [ValidadoresService],
 })
 export class ValidadoresModule {}

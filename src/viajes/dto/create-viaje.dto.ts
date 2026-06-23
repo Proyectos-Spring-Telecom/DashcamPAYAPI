@@ -8,7 +8,6 @@ import {
 } from 'class-validator';
 
 export class CreateViajeDto {
-
   @IsOptional()
   @IsDateString({}, { message: 'El inicio debe ser una fecha en formato ISO' })
   inicio?: Date;

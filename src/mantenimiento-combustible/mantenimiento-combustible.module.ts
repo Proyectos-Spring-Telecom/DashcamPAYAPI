@@ -9,7 +9,11 @@ import { Clientes } from 'src/entities/Clientes';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([MantenimientoCombustible, Instalaciones, Clientes]),
+    TypeOrmModule.forFeature([
+      MantenimientoCombustible,
+      Instalaciones,
+      Clientes,
+    ]),
     BitacoraModule,
   ],
   controllers: [MantenimientoCombustibleController],

@@ -7,9 +7,12 @@ import { CatTiposPasajeros } from 'src/entities/CatTiposPasajeros';
 import { Clientes } from 'src/entities/Clientes';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([CatTiposPasajeros,Clientes]), BitacoraModule],
+  imports: [
+    TypeOrmModule.forFeature([CatTiposPasajeros, Clientes]),
+    BitacoraModule,
+  ],
   controllers: [CatpasajeroController],
   providers: [CatpasajeroService],
-  exports: [CatpasajeroService]
+  exports: [CatpasajeroService],
 })
 export class CatpasajeroModule {}

@@ -12,7 +12,7 @@ import {
 import { Contadores } from './Contadores';
 import { Viajes } from './Viajes';
 import { ViajesConteos } from './ViajesConteos';
-import { applySchema } from "src/common/apply-schema.decorator";
+import { applySchema } from 'src/common/apply-schema.decorator';
 
 @applySchema
 @Index(
@@ -71,10 +71,10 @@ export class ConteoPasajeros {
 
   @ManyToMany(() => Viajes, (viajes) => viajes.conteoPasajeros)
   @JoinTable({
-    name: "ViajesConteos",
-    joinColumns: [{ name: "IdConteo", referencedColumnName: "id" }],
-    inverseJoinColumns: [{ name: "IdViaje", referencedColumnName: "id" }],
-    schema: "DashCamDev",
+    name: 'ViajesConteos',
+    joinColumns: [{ name: 'IdConteo', referencedColumnName: 'id' }],
+    inverseJoinColumns: [{ name: 'IdViaje', referencedColumnName: 'id' }],
+    schema: 'DashCamDev',
   })
   viajes: Viajes[];
 }

@@ -28,10 +28,31 @@ import { DireccionesTarjeta } from 'src/entities/DireccionesTarjeta';
 import { DatosTarjeta } from 'src/entities/DatosTarjeta';
 import { QRCodes } from 'src/entities/QRCodes';
 
-
 @Module({
   imports: [
-    TypeOrmModule.forFeature([TransaccionesRecarga, TransaccionesDebito, HistoricoTransaccionesDebito, HistoricoTransaccionesRecarga, Validadores, Clientes, Monederos, CatTiposPasajeros, TransbordosPermitidos, DetalleTransbordos, Viajes, Tarifas, Variantes, Turnos, Instalaciones, CatTiposTransacciones, Usuarios, Pasajeros, DireccionesTarjeta, DatosTarjeta, QRCodes]),
+    TypeOrmModule.forFeature([
+      TransaccionesRecarga,
+      TransaccionesDebito,
+      HistoricoTransaccionesDebito,
+      HistoricoTransaccionesRecarga,
+      Validadores,
+      Clientes,
+      Monederos,
+      CatTiposPasajeros,
+      TransbordosPermitidos,
+      DetalleTransbordos,
+      Viajes,
+      Tarifas,
+      Variantes,
+      Turnos,
+      Instalaciones,
+      CatTiposTransacciones,
+      Usuarios,
+      Pasajeros,
+      DireccionesTarjeta,
+      DatosTarjeta,
+      QRCodes,
+    ]),
     MonederosModule,
     BitacoraModule,
     PasajerosModule,
@@ -41,4 +62,4 @@ import { QRCodes } from 'src/entities/QRCodes';
   providers: [TransaccionesService],
   exports: [TransaccionesService],
 })
-export class TransaccionesModule { }
+export class TransaccionesModule {}

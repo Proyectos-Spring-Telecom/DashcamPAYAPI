@@ -1,14 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsString,
-  IsNumber,
-  IsDateString,
-  IsOptional,
-  IsInt,
-  Min,
-  IsNotEmpty,
-  IsIn,
-} from 'class-validator';
+import { IsString } from 'class-validator';
 
 export class UpdateMonederoExtravioDto {
   @ApiProperty({
@@ -24,6 +15,4 @@ export class UpdateMonederoExtravioDto {
   })
   @IsString()
   numeroSerie: string;
-
-
 }

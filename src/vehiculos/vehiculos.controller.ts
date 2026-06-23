@@ -17,7 +17,13 @@ import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdateVehiculoEstatusDto } from './dto/update-vehiculos-estatus.dto';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+} from '@nestjs/swagger';
 
 @ApiTags('Vehiculos')
 @ApiBearerAuth('bearer-token')
@@ -33,7 +39,7 @@ export class VehiculosController {
   }
 
   @Get('list')
-  async findAllList(@Request() req,): Promise<ApiResponseCommon> {
+  async findAllList(@Request() req): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return await this.vehiculosService.findAllList(+cliente, +rol);
@@ -42,7 +48,8 @@ export class VehiculosController {
   @Get('by-cliente/:idCliente')
   @ApiOperation({
     summary: 'Listar vehículos por ID de cliente',
-    description: 'Obtiene todos los vehículos activos pertenecientes únicamente al cliente especificado.',
+    description:
+      'Obtiene todos los vehículos activos pertenecientes únicamente al cliente especificado.',
   })
   @ApiParam({
     name: 'idCliente',
@@ -74,10 +81,10 @@ export class VehiculosController {
   @Get('clientes/:id')
   async findAllValidadoresClientes(
     @Param('id', ParseIntPipe) id: number,
-    @Request() req
+    @Request() req,
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return await this.vehiculosService.findAllListClientes(id, +cliente);
   }
 
@@ -93,7 +100,7 @@ export class VehiculosController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string, @Request() req,) {
+  findOne(@Param('id') id: string, @Request() req) {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.vehiculosService.findOne(+id, +cliente, +rol);

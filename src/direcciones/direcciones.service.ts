@@ -7,7 +7,8 @@ import { throwError } from 'rxjs';
 
 @Injectable()
 export class DireccionesService {
-  private readonly apiUrl: string = 'https://tecsautilities.mx/api-sepomex/api-sepomex/codigos-postales/';
+  private readonly apiUrl: string =
+    'https://tecsautilities.mx/api-sepomex/api-sepomex/codigos-postales/';
 
   constructor(
     private readonly configService: ConfigService,
@@ -24,8 +25,8 @@ export class DireccionesService {
 
       const response = await firstValueFrom(
         this.httpService.get<any>(url).pipe(
-          map(response => response.data),
-          catchError(error => {
+          map((response) => response.data),
+          catchError((error) => {
             console.error('[DIRECCIONES] Error completo:', {
               status: error.response?.status,
               statusText: error.response?.statusText,
@@ -41,8 +42,17 @@ export class DireccionesService {
               error.message ||
               'Error desconocido al consultar direcciones';
 
-            console.error('[DIRECCIONES] Error en la solicitud HTTP:', errorMessage);
-            return throwError(() => new HttpException(errorMessage, error.response?.status || HttpStatus.BAD_REQUEST));
+            console.error(
+              '[DIRECCIONES] Error en la solicitud HTTP:',
+              errorMessage,
+            );
+            return throwError(
+              () =>
+                new HttpException(
+                  errorMessage,
+                  error.response?.status || HttpStatus.BAD_REQUEST,
+                ),
+            );
           }),
         ),
       );
@@ -60,4 +70,3 @@ export class DireccionesService {
     }
   }
 }
-

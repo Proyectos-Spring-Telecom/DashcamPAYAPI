@@ -18,4 +18,3 @@ export class CatTipoDescuentoTransbordo {
   )
   transbordosPermitidos: TransbordosPermitidos[];
 }
-

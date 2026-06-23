@@ -13,11 +13,17 @@ import { MonitoreoService } from 'src/monitoreo/monitoreo.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Posiciones, Validadores, Usuarios, Clientes, UsuariosZonas]),
+    TypeOrmModule.forFeature([
+      Posiciones,
+      Validadores,
+      Usuarios,
+      Clientes,
+      UsuariosZonas,
+    ]),
     BitacoraModule,
     forwardRef(() => MonitoreoModule), // Importar con forwardRef para evitar dependencia circular
   ],
   controllers: [PosicionesController],
   providers: [PosicionesService],
 })
-export class PosicionesModule { }
+export class PosicionesModule {}

@@ -11,7 +11,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { UsuariosZonas } from 'src/entities/UsuariosZonas';
 import { Repository } from 'typeorm';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
-import { ApiCrudResponse, ApiResponseCommon, EstatusEnumBitcora } from 'src/common/ApiResponse';
+import {
+  ApiCrudResponse,
+  ApiResponseCommon,
+  EstatusEnumBitcora,
+} from 'src/common/ApiResponse';
 import { UpdateUsuariosZonasEstatusDto } from './dto/update-usuarioszona-estatus.dto';
 import { Zonas } from 'src/entities/Zonas';
 import { Usuarios } from 'src/entities/Usuarios';
@@ -28,10 +32,7 @@ export class UsuarioszonasService {
     private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
 
-  async create(
-    idUser: number,
-    createUsuariosZonasDto: CreateUsuariosZonasDto,
-  ) {
+  async create(idUser: number, createUsuariosZonasDto: CreateUsuariosZonasDto) {
     try {
       const usuario = await this.usuariosRepository.findOne({
         where: {
@@ -49,7 +50,7 @@ export class UsuarioszonasService {
       switch (idUser) {
         case 1:
           break;
-          // Usuario administrador - obtiene todas las instalaciones
+        // Usuario administrador - obtiene todas las instalaciones
         default:
           // Usuarios normales - solo sus instalaciones asignadas
           for (const i of createUsuariosZonasDto.idsZonas) {
@@ -71,15 +72,15 @@ export class UsuarioszonasService {
 
       //Creamos y guardamos el permiso para usuarios en zona del usuario
       if (createUsuariosZonasDto.idsZonas.length > 0) {
-        const usuarioszonasPermisos =
-          createUsuariosZonasDto.idsZonas.map((idsZonas) =>
+        const usuarioszonasPermisos = createUsuariosZonasDto.idsZonas.map(
+          (idsZonas) =>
             this.usuarioszonasRepository.create({
               idUsuario: createUsuariosZonasDto.idUsuario,
               idZona: idsZonas,
             }),
-          );
+        );
 
-        const usuarioszonaSave = await this.usuarioszonasRepository.save(
+        const _usuarioszonaSave = await this.usuarioszonasRepository.save(
           usuarioszonasPermisos,
         );
       }
@@ -254,7 +255,7 @@ export class UsuarioszonasService {
   ): Promise<ApiCrudResponse> {
     try {
       // Extraer zonas del DTO
-      const { idsZonas, ...usuarioZonaUpdate } = updateUsuarioszonaDto;
+      const { idsZonas, ..._usuarioZonaUpdate } = updateUsuarioszonaDto;
 
       // ----- ACTUALIZACIÓN DE ZONAS -----
       if (idsZonas && Array.isArray(idsZonas)) {
@@ -338,8 +339,7 @@ export class UsuarioszonasService {
         data: {
           id: id,
           nombre:
-            `IdUsuario ${id} Zonas ${updateUsuarioszonaDto.idsZonas}` ||
-            '',
+            `IdUsuario ${id} Zonas ${updateUsuarioszonaDto.idsZonas}` || '',
         },
       };
 
@@ -495,4 +495,3 @@ export class UsuarioszonasService {
     }
   }
 }
-

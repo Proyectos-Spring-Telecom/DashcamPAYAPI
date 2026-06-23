@@ -37,8 +37,8 @@ export class ContadoresController {
   }
 
   @Get('list')
-  async findAllList(@Request() req,): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+  async findAllList(@Request() req): Promise<ApiResponseCommon> {
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.contadoresService.findAllList(+cliente, +rol);
@@ -49,9 +49,9 @@ export class ContadoresController {
     @Param('id', ParseIntPipe) id: number,
     @Request() req,
   ): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return await this.contadoresService.findAllListClientes(id, +cliente);
   }
 
@@ -61,15 +61,15 @@ export class ContadoresController {
     @Param('limit', ParseIntPipe) limit: number,
     @Request() req,
   ): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.contadoresService.findAll(+cliente, +rol, page, limit);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string, @Request() req,) {
-    const idUser = req.user.userId;
+  findOne(@Param('id') id: string, @Request() req) {
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.contadoresService.findOne(+id, +cliente, +rol);
@@ -85,7 +85,7 @@ export class ContadoresController {
     return this.contadoresService.update(+id, +idUser, updateContadorDto);
   }
 
-    @Patch('actualizar/estado/:id')
+  @Patch('actualizar/estado/:id')
   updateEstado(
     @Param('id') id: string,
     @Body() updateContadorEstadoDto: UpdateContadoresEstadoDto,
@@ -119,4 +119,3 @@ export class ContadoresController {
     return this.contadoresService.remove(+id, +idUser);
   }
 }
-

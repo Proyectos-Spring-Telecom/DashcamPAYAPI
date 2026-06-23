@@ -31,7 +31,8 @@ export class RecaudacionPorVehiculoDto {
 
   @ApiProperty({
     example: 1,
-    description: 'ID del vehículo para filtrar. Si no se proporciona, se mostrarán todos los vehículos del cliente',
+    description:
+      'ID del vehículo para filtrar. Si no se proporciona, se mostrarán todos los vehículos del cliente',
     required: false,
   })
   @IsOptional()
@@ -40,11 +41,11 @@ export class RecaudacionPorVehiculoDto {
 
   @ApiProperty({
     example: 1,
-    description: 'ID de la ruta para filtrar. Si no se proporciona, se mostrarán todas las rutas',
+    description:
+      'ID de la ruta para filtrar. Si no se proporciona, se mostrarán todas las rutas',
     required: false,
   })
   @IsOptional()
   @IsInt()
   idRuta?: number;
 }
-

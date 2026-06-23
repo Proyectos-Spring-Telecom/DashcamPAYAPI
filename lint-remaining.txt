@@ -1,0 +1,99 @@
+﻿
+D:\Spring\DashcamPAYAPI\src\catcategorialicencia\catcategorialicencia.service.ts
+  17:7  warning  'catcategorialicencia' is never reassigned. Use 'const' instead  prefer-const
+
+D:\Spring\DashcamPAYAPI\src\cattipocombustible\catcombustible.controller.ts
+  14:26  warning  'req' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\cattipodescuento\cattipodescuento.service.ts
+  17:7  warning  'cattipodescuento' is never reassigned. Use 'const' instead  prefer-const
+
+D:\Spring\DashcamPAYAPI\src\cattipolicencia\cattipolicencia.service.ts
+  17:7  warning  'cattipolicencia' is never reassigned. Use 'const' instead  prefer-const
+
+D:\Spring\DashcamPAYAPI\src\cattipotransacciones\cattipotransacciones.service.ts
+  17:7  warning  'catcategorialicencia' is never reassigned. Use 'const' instead  prefer-const
+
+D:\Spring\DashcamPAYAPI\src\clientes\clientes.service.ts
+  386:5  warning  'rol' is defined but never used. Allowed unused args must match /^_/u      @typescript-eslint/no-unused-vars
+  392:7  warning  'clientes' is never reassigned. Use 'const' instead                        prefer-const
+  642:5  warning  'cliente' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\common\socket-io.adapter.ts
+  79:11  warning  'disconnect$' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\instalaciones\instalaciones.service.ts
+  1744:5  warning  'rol' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  1748:7  warning  'instalacion' is never reassigned. Use 'const' instead                 prefer-const
+
+D:\Spring\DashcamPAYAPI\src\main.ts
+  129:1  warning  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+
+D:\Spring\DashcamPAYAPI\src\monederos\monederos.controller.ts
+  104:16  warning  'req' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  177:69  warning  'req' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\monitoreo\monitoreo.gateway.ts
+  176:9  warning  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+  190:9  warning  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+
+D:\Spring\DashcamPAYAPI\src\monitoreo\monitoreo.service.ts
+  170:25  warning  'placeholders' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  306:5   warning  'cliente' is defined but never used. Allowed unused args must match /^_/u                @typescript-eslint/no-unused-vars
+  307:5   warning  'rol' is defined but never used. Allowed unused args must match /^_/u                    @typescript-eslint/no-unused-vars
+  325:7   warning  'recorridoMonitoreo' is never reassigned. Use 'const' instead                            prefer-const
+
+D:\Spring\DashcamPAYAPI\src\operadores\operadores.service.ts
+  532:5   warning  'idUser' is defined but never used. Allowed unused args must match /^_/u                 @typescript-eslint/no-unused-vars
+  533:5   warning  'rol' is defined but never used. Allowed unused args must match /^_/u                    @typescript-eslint/no-unused-vars
+  698:24  warning  'placeholders' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\permisos\permisos.service.ts
+  105:7  warning  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+
+D:\Spring\DashcamPAYAPI\src\rutas\rutas.service.ts
+  52:7  warning  'zona' is never reassigned. Use 'const' instead  prefer-const
+
+D:\Spring\DashcamPAYAPI\src\talleres\talleres.service.ts
+   94:20  warning  'placeholders' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  126:20  warning  'placeholders' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\tarifas\tarifas.service.ts
+  50:7  warning  'variante' is never reassigned. Use 'const' instead  prefer-const
+
+D:\Spring\DashcamPAYAPI\src\transacciones\transacciones.service.ts
+  1091:5   warning  'cliente' is defined but never used. Allowed unused args must match /^_/u              @typescript-eslint/no-unused-vars
+  2813:7   warning  'estado' is assigned a value but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  4814:7   warning  'fechaInicio' is never reassigned. Use 'const' instead                                 prefer-const
+  4815:7   warning  'fechaFin' is never reassigned. Use 'const' instead                                    prefer-const
+  4816:7   warning  'entidadRecarga' is never reassigned. Use 'const' instead                              prefer-const
+  4817:7   warning  'entidadDebito' is never reassigned. Use 'const' instead                               prefer-const
+  5181:7   warning  'transacciones' is never reassigned. Use 'const' instead                               prefer-const
+  5261:7   warning  'transacciones' is never reassigned. Use 'const' instead                               prefer-const
+  6156:17  warning  'pasajeroId' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\usuariosinstalaciones\usuariosinstalaciones.service.ts
+  262:36  warning  'usuarioInstalacionUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\usuarioszonas\usuarioszonas.controller.ts
+  55:16  warning  'req' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\usuarioszonas\usuarioszonas.service.ts
+  258:28  warning  'usuarioZonaUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\variantes\variantes.service.ts
+    60:35  warning  'distanciaKm' is assigned a value but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+   680:24  warning  'placeholders' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  1189:7   warning  'variante' is never reassigned. Use 'const' instead                                      prefer-const
+  1259:53  warning  'distanciaKm' is assigned a value but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  1325:7   warning  'variante' is never reassigned. Use 'const' instead                                      prefer-const
+
+D:\Spring\DashcamPAYAPI\src\vehiculos\vehiculos.service.ts
+  150:5  warning  'idUser' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  151:5  warning  'rol' is defined but never used. Allowed unused args must match /^_/u     @typescript-eslint/no-unused-vars
+
+D:\Spring\DashcamPAYAPI\src\viajes\viajes.service.ts
+  1341:7  warning  'viajes' is never reassigned. Use 'const' instead  prefer-const
+
+Ô£û 48 problems (0 errors, 48 warnings)
+

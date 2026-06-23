@@ -22,22 +22,41 @@ export class HistoricoTransaccionesDebito {
   @Column('bigint', { name: 'IdTipoTransaccion' })
   idTipoTransaccion: number;
 
-  @Column('tinyint', { name: 'ControlTransaccion', nullable: true, unsigned: true })
+  @Column('tinyint', {
+    name: 'ControlTransaccion',
+    nullable: true,
+    unsigned: true,
+  })
   controlTransaccion: number | null;
 
   @Column('decimal', { name: 'Monto', precision: 10, scale: 2 })
   monto: number;
 
-  @Column('decimal', { name: 'LatitudInicial', precision: 10, scale: 7, nullable: true })
+  @Column('decimal', {
+    name: 'LatitudInicial',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
   latitudInicial: number | null;
 
-  @Column('decimal', { name: 'LongitudInicial', precision: 10, scale: 7, nullable: true })
+  @Column('decimal', {
+    name: 'LongitudInicial',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
   longitudInicial: number | null;
 
   @Column('datetime', { name: 'FechaHoraInicio', nullable: true })
   fechaHoraInicio: Date | null;
 
-  @Column('decimal', { name: 'DistanciaInicialKm', precision: 10, scale: 2, nullable: true })
+  @Column('decimal', {
+    name: 'DistanciaInicialKm',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   distanciaInicialKm: number | null;
 
   @Column('decimal', {
@@ -77,7 +96,12 @@ export class HistoricoTransaccionesDebito {
   @Column('tinyint', { name: 'EsQR', nullable: true, default: 0 })
   esQR: number | null;
 
-  @Column('decimal', { name: 'CobroMaximo', precision: 10, scale: 2, nullable: true })
+  @Column('decimal', {
+    name: 'CobroMaximo',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   cobroMaximo: number | null;
 
   @ManyToOne(() => Viajes, (viajes) => viajes, {
@@ -88,5 +112,4 @@ export class HistoricoTransaccionesDebito {
   idViaje2: Viajes | null;
 
   // -------- RELACIONES --------
-
 }

@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Clientes } from 'src/entities/Clientes';
@@ -26,12 +30,12 @@ export class ReportesService {
     const ids = idsFiltrados
       .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
       .filter(Boolean);
-    
+
     // Asegurar que el cliente mismo esté incluido en la lista
     if (!ids.includes(cliente)) {
       ids.unshift(cliente);
     }
-    
+
     if (ids.length === 0) {
       return { ids: [], placeholders: '' };
     }
@@ -47,13 +51,15 @@ export class ReportesService {
     try {
       // Si idCliente es null o undefined, usar el cliente del usuario autenticado y sus hijos
       // Si idCliente tiene valor, usar ese cliente y sus hijos
-      const clienteFiltro = filtros.idCliente !== null && filtros.idCliente !== undefined 
-        ? filtros.idCliente 
-        : cliente;
-      
+      const clienteFiltro =
+        filtros.idCliente !== null && filtros.idCliente !== undefined
+          ? filtros.idCliente
+          : cliente;
+
       // Obtener jerarquía de clientes (cliente y sus hijos)
-      const { ids: clienteIds, placeholders } = await this.clienteHijos(clienteFiltro);
-      
+      const { ids: clienteIds, placeholders } =
+        await this.clienteHijos(clienteFiltro);
+
       if (clienteIds.length === 0) {
         return {
           data: [],
@@ -92,7 +98,8 @@ export class ReportesService {
         parametros.push(filtros.idVariante);
       }
 
-      const whereClause = condiciones.length > 0 ? `WHERE ${condiciones.join(' AND ')}` : '';
+      const whereClause =
+        condiciones.length > 0 ? `WHERE ${condiciones.join(' AND ')}` : '';
 
       const query = `
 SELECT
@@ -139,7 +146,6 @@ ORDER BY DATE(td.FHRegistro) DESC, reg.Nombre, r.Nombre, d.Nombre;
       `;
 
       const resultados = await this.clienteRepository.query(query, parametros);
-      
 
       // Formatear resultados
       const data = resultados.map((row: any) => ({
@@ -152,12 +158,23 @@ ORDER BY DATE(td.FHRegistro) DESC, reg.Nombre, r.Nombre, d.Nombre;
         nombreVariante: row.nombreVariante || null,
         viajes: row.viajes ? Number(row.viajes) : 0,
         validaciones: row.validaciones ? Number(row.validaciones) : 0,
-        ingresos: row.ingresos ? Number(parseFloat(String(row.ingresos)).toFixed(2)) : 0,
-        ticketPromedio: row.ticketPromedio ? Number(parseFloat(String(row.ticketPromedio)).toFixed(2)) : 0,
-        porcentajeElectronico: row.porcentajeElectronico ? Number(parseFloat(String(row.porcentajeElectronico)).toFixed(2)) : 0,
+        ingresos: row.ingresos
+          ? Number(parseFloat(String(row.ingresos)).toFixed(2))
+          : 0,
+        ticketPromedio: row.ticketPromedio
+          ? Number(parseFloat(String(row.ticketPromedio)).toFixed(2))
+          : 0,
+        porcentajeElectronico: row.porcentajeElectronico
+          ? Number(parseFloat(String(row.porcentajeElectronico)).toFixed(2))
+          : 0,
         ascensos: row.ascensos ? Number(row.ascensos) : 0,
-        evasionAbsoluta: row.evasionAbsoluta !== null && row.evasionAbsoluta !== undefined ? Number(row.evasionAbsoluta) : 0,
-        evasionPorcentual: row.evasionPorcentual ? Number(parseFloat(String(row.evasionPorcentual)).toFixed(2)) : 0,
+        evasionAbsoluta:
+          row.evasionAbsoluta !== null && row.evasionAbsoluta !== undefined
+            ? Number(row.evasionAbsoluta)
+            : 0,
+        evasionPorcentual: row.evasionPorcentual
+          ? Number(parseFloat(String(row.evasionPorcentual)).toFixed(2))
+          : 0,
       }));
 
       return {
@@ -181,17 +198,19 @@ ORDER BY DATE(td.FHRegistro) DESC, reg.Nombre, r.Nombre, d.Nombre;
   ): Promise<ApiResponseCommon> {
     let query: string = '';
     let parametrosCompletos: any[] = [];
-    
+
     try {
       // Si idCliente es null o undefined, usar el cliente del usuario autenticado y sus hijos
       // Si idCliente tiene valor, usar ese cliente y sus hijos
-      const clienteFiltro = filtros.idCliente !== null && filtros.idCliente !== undefined 
-        ? filtros.idCliente 
-        : cliente;
-      
+      const clienteFiltro =
+        filtros.idCliente !== null && filtros.idCliente !== undefined
+          ? filtros.idCliente
+          : cliente;
+
       // Obtener jerarquía de clientes (cliente y sus hijos)
-      const { ids: clienteIds, placeholders } = await this.clienteHijos(clienteFiltro);
-      
+      const { ids: clienteIds, placeholders } =
+        await this.clienteHijos(clienteFiltro);
+
       if (clienteIds.length === 0) {
         return {
           data: [],
@@ -199,12 +218,14 @@ ORDER BY DATE(td.FHRegistro) DESC, reg.Nombre, r.Nombre, d.Nombre;
       }
 
       // Preparar filtros de fecha - SOLO PARA TRANSACCIONES
-      const fechaInicio = filtros.fechaInicio ? filtros.fechaInicio.split('T')[0] : null;
+      const fechaInicio = filtros.fechaInicio
+        ? filtros.fechaInicio.split('T')[0]
+        : null;
       const fechaFin = filtros.fechaFin ? filtros.fechaFin.split('T')[0] : null;
 
       // Construir la lista de IDs de clientes como string para usar en subconsultas
       const clienteIdsStr = clienteIds.join(',');
-      
+
       // Consulta: empezar desde transacciones y agrupar por operador
       // Las subconsultas de turnos y viajes NO tienen filtro de fecha
       query = `
@@ -288,7 +309,7 @@ ORDER BY datos.ingresos DESC, datos.operador ASC;
       // Construir parámetros para la consulta principal
       // Orden: clienteIds (para datos), fechas WHERE principal (solo transacciones), idOperador
       parametrosCompletos = [...clienteIds];
-      
+
       // Parámetros de fecha para el WHERE principal (solo transacciones)
       if (fechaInicio) {
         parametrosCompletos.push(fechaInicio);
@@ -296,14 +317,16 @@ ORDER BY datos.ingresos DESC, datos.operador ASC;
       if (fechaFin) {
         parametrosCompletos.push(fechaFin);
       }
-      
+
       // Parámetro de operador si existe
       if (filtros.idOperador) {
         parametrosCompletos.push(filtros.idOperador);
       }
 
-      const resultados = await this.clienteRepository.query(query, parametrosCompletos);
-      
+      const resultados = await this.clienteRepository.query(
+        query,
+        parametrosCompletos,
+      );
 
       // Formatear resultados
       const data = resultados.map((row: any) => {
@@ -316,8 +339,10 @@ ORDER BY datos.ingresos DESC, datos.operador ASC;
           viajes: Number(row.viajes) || 0,
           validaciones: Number(row.validaciones) || 0,
           ingresos: Number(parseFloat(String(row.ingresos)).toFixed(2)) || 0,
-          ticketPromedio: Number(parseFloat(String(row.ticketPromedio)).toFixed(2)) || 0,
-          evasionPorcentual: Number(parseFloat(String(row.evasionPorcentual)).toFixed(2)) || 0,
+          ticketPromedio:
+            Number(parseFloat(String(row.ticketPromedio)).toFixed(2)) || 0,
+          evasionPorcentual:
+            Number(parseFloat(String(row.evasionPorcentual)).toFixed(2)) || 0,
           ultimoTurno: row.ultimoTurno || null,
         };
       });
@@ -347,13 +372,15 @@ ORDER BY datos.ingresos DESC, datos.operador ASC;
     try {
       // Si idCliente es null o undefined, usar el cliente del usuario autenticado y sus hijos
       // Si idCliente tiene valor, usar ese cliente y sus hijos
-      const clienteFiltro = filtros.idCliente !== null && filtros.idCliente !== undefined 
-        ? filtros.idCliente 
-        : cliente;
-      
+      const clienteFiltro =
+        filtros.idCliente !== null && filtros.idCliente !== undefined
+          ? filtros.idCliente
+          : cliente;
+
       // Obtener jerarquía de clientes (cliente y sus hijos)
-      const { ids: clienteIds, placeholders } = await this.clienteHijos(clienteFiltro);
-      
+      const { ids: clienteIds, placeholders } =
+        await this.clienteHijos(clienteFiltro);
+
       if (clienteIds.length === 0) {
         return {
           data: [],
@@ -361,7 +388,9 @@ ORDER BY datos.ingresos DESC, datos.operador ASC;
       }
 
       // Preparar filtros de fecha - SOLO PARA TRANSACCIONES
-      const fechaInicio = filtros.fechaInicio ? filtros.fechaInicio.split('T')[0] : null;
+      const fechaInicio = filtros.fechaInicio
+        ? filtros.fechaInicio.split('T')[0]
+        : null;
       const fechaFin = filtros.fechaFin ? filtros.fechaFin.split('T')[0] : null;
 
       // Consulta principal: empezar desde transacciones y agrupar por vehículo
@@ -443,7 +472,7 @@ ORDER BY datos.ingresos DESC, datos.numeroEconomico ASC;
       // Construir parámetros para la consulta principal
       // Orden: clienteIds, fechas (solo transacciones), idVehiculo, idRuta
       const parametrosCompletos = [...clienteIds];
-      
+
       // Parámetros de fecha (solo para transacciones)
       if (fechaInicio) {
         parametrosCompletos.push(fechaInicio);
@@ -451,19 +480,21 @@ ORDER BY datos.ingresos DESC, datos.numeroEconomico ASC;
       if (fechaFin) {
         parametrosCompletos.push(fechaFin);
       }
-      
+
       // Parámetro de vehículo si existe
       if (filtros.idVehiculo) {
         parametrosCompletos.push(filtros.idVehiculo);
       }
-      
+
       // Parámetro de ruta si existe
       if (filtros.idRuta) {
         parametrosCompletos.push(filtros.idRuta);
       }
 
-      const resultados = await this.clienteRepository.query(query, parametrosCompletos);
-      
+      const resultados = await this.clienteRepository.query(
+        query,
+        parametrosCompletos,
+      );
 
       // Formatear resultados
       const data = resultados.map((row: any) => ({
@@ -473,13 +504,16 @@ ORDER BY datos.ingresos DESC, datos.numeroEconomico ASC;
         marca: row.marca || null,
         modelo: row.modelo || null,
         ano: row.ano ? Number(row.ano) : null,
-        marcaModeloAno: `${row.marca || ''} ${row.modelo || ''} ${row.ano || ''}`.trim(),
+        marcaModeloAno:
+          `${row.marca || ''} ${row.modelo || ''} ${row.ano || ''}`.trim(),
         turnos: Number(row.turnos) || 0,
         viajes: Number(row.viajes) || 0,
         validaciones: Number(row.validaciones) || 0,
         ingresos: Number(parseFloat(String(row.ingresos)).toFixed(2)) || 0,
-        ticketPromedio: Number(parseFloat(String(row.ticketPromedio)).toFixed(2)) || 0,
-        horasServicio: Number(parseFloat(String(row.horasServicio)).toFixed(2)) || 0,
+        ticketPromedio:
+          Number(parseFloat(String(row.ticketPromedio)).toFixed(2)) || 0,
+        horasServicio:
+          Number(parseFloat(String(row.horasServicio)).toFixed(2)) || 0,
       }));
 
       return {
@@ -504,13 +538,15 @@ ORDER BY datos.ingresos DESC, datos.numeroEconomico ASC;
     try {
       // Si idCliente es null o undefined, usar el cliente del usuario autenticado y sus hijos
       // Si idCliente tiene valor, usar ese cliente y sus hijos
-      const clienteFiltro = filtros.idCliente !== null && filtros.idCliente !== undefined 
-        ? filtros.idCliente 
-        : cliente;
-      
+      const clienteFiltro =
+        filtros.idCliente !== null && filtros.idCliente !== undefined
+          ? filtros.idCliente
+          : cliente;
+
       // Obtener jerarquía de clientes (cliente y sus hijos)
-      const { ids: clienteIds, placeholders } = await this.clienteHijos(clienteFiltro);
-      
+      const { ids: clienteIds, placeholders } =
+        await this.clienteHijos(clienteFiltro);
+
       if (clienteIds.length === 0) {
         return {
           data: [],
@@ -518,7 +554,9 @@ ORDER BY datos.ingresos DESC, datos.numeroEconomico ASC;
       }
 
       // Preparar filtros de fecha - SOLO PARA TRANSACCIONES
-      const fechaInicio = filtros.fechaInicio ? filtros.fechaInicio.split('T')[0] : null;
+      const fechaInicio = filtros.fechaInicio
+        ? filtros.fechaInicio.split('T')[0]
+        : null;
       const fechaFin = filtros.fechaFin ? filtros.fechaFin.split('T')[0] : null;
 
       // Consulta principal: empezar desde transacciones y agrupar por instalación/dispositivo
@@ -586,7 +624,7 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
       // Construir parámetros para la consulta principal
       // Orden: clienteIds (para ins.IdCliente), fechas (solo transacciones), idDispositivo, idInstalacion
       const parametrosCompletos = [...clienteIds];
-      
+
       // Parámetros de fecha (solo para transacciones)
       if (fechaInicio) {
         parametrosCompletos.push(fechaInicio);
@@ -594,19 +632,21 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
       if (fechaFin) {
         parametrosCompletos.push(fechaFin);
       }
-      
+
       // Parámetro de dispositivo si existe
       if (filtros.idValidador) {
         parametrosCompletos.push(filtros.idValidador);
       }
-      
+
       // Parámetro de instalación si existe
       if (filtros.idInstalacion) {
         parametrosCompletos.push(filtros.idInstalacion);
       }
 
-      const resultados = await this.clienteRepository.query(query, parametrosCompletos);
-      
+      const resultados = await this.clienteRepository.query(
+        query,
+        parametrosCompletos,
+      );
 
       // Formatear resultados
       const data = resultados.map((row: any) => ({
@@ -618,12 +658,20 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
         vehiculo: row.vehiculo || null,
         validaciones: Number(row.validaciones) || 0,
         ingresos: Number(parseFloat(String(row.ingresos)).toFixed(2)) || 0,
-        estadoDispositivo: row.estadoDispositivo !== null ? Number(row.estadoDispositivo) : null,
-        ultimaPosicion: row.ultimaPosicionLatitud && row.ultimaPosicionLongitud ? {
-          latitud: Number(parseFloat(String(row.ultimaPosicionLatitud)).toFixed(7)),
-          longitud: Number(parseFloat(String(row.ultimaPosicionLongitud)).toFixed(7)),
-          fecha: row.ultimaPosicionFecha || null,
-        } : null,
+        estadoDispositivo:
+          row.estadoDispositivo !== null ? Number(row.estadoDispositivo) : null,
+        ultimaPosicion:
+          row.ultimaPosicionLatitud && row.ultimaPosicionLongitud
+            ? {
+                latitud: Number(
+                  parseFloat(String(row.ultimaPosicionLatitud)).toFixed(7),
+                ),
+                longitud: Number(
+                  parseFloat(String(row.ultimaPosicionLongitud)).toFixed(7),
+                ),
+                fecha: row.ultimaPosicionFecha || null,
+              }
+            : null,
       }));
 
       return {
@@ -650,18 +698,21 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
     try {
       let query: string = '';
       let parametrosCompletos: any[] = [];
-      
+
       // Convertir rol a número
       const rolNumero = Number(rol);
-      
+
       // Si idCliente es null o undefined, usar el cliente del usuario autenticado y sus hijos
       // Si idCliente tiene valor, usar ese cliente y sus hijos
-      const clienteFiltro = filtros.idCliente !== null && filtros.idCliente !== undefined 
-        ? filtros.idCliente 
-        : cliente;
-      
+      const clienteFiltro =
+        filtros.idCliente !== null && filtros.idCliente !== undefined
+          ? filtros.idCliente
+          : cliente;
+
       // Preparar filtros de fecha
-      const fechaInicio = filtros.fechaInicio ? filtros.fechaInicio.split('T')[0] : null;
+      const fechaInicio = filtros.fechaInicio
+        ? filtros.fechaInicio.split('T')[0]
+        : null;
       const fechaFin = filtros.fechaFin ? filtros.fechaFin.split('T')[0] : null;
 
       // Construir condiciones WHERE
@@ -684,11 +735,11 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
             `SELECT Id FROM Pasajeros WHERE IdUsuario = ?`,
             [idUser],
           );
-          
+
           if (!pasajeroByUser || pasajeroByUser.length === 0) {
             return { data: [] };
           }
-          
+
           const idPasajero = pasajeroByUser[0].Id;
           condiciones.push(`m.IdPasajero = ?`);
           parametros.push(idPasajero);
@@ -699,12 +750,13 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
         case 10:
         default:
           // Administrador, Reportes, Capturista y otros - usar clienteHijos
-          const { ids: clienteIds, placeholders } = await this.clienteHijos(clienteFiltro);
-          
+          const { ids: clienteIds, placeholders } =
+            await this.clienteHijos(clienteFiltro);
+
           if (clienteIds.length === 0) {
             return { data: [] };
           }
-          
+
           condiciones.push(`m.IdCliente IN (${placeholders})`);
           parametros.push(...clienteIds);
           break;
@@ -738,7 +790,8 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
         parametros.push(filtros.idVariante);
       }
 
-      const whereClause = condiciones.length > 0 ? `WHERE ${condiciones.join(' AND ')}` : '';
+      const whereClause =
+        condiciones.length > 0 ? `WHERE ${condiciones.join(' AND ')}` : '';
 
       query = `
 SELECT
@@ -765,7 +818,10 @@ ORDER BY td.FechaHoraFinal DESC, td.Id DESC;
 
       parametrosCompletos = [...parametros];
 
-      const resultados = await this.clienteRepository.query(query, parametrosCompletos);
+      const resultados = await this.clienteRepository.query(
+        query,
+        parametrosCompletos,
+      );
 
       // Formatear resultados
       const data = resultados.map((row: any) => ({
@@ -774,8 +830,12 @@ ORDER BY td.FechaHoraFinal DESC, td.Id DESC;
         monto: row.monto ? Number(parseFloat(String(row.monto)).toFixed(2)) : 0,
         numeroSerieMonedero: row.numeroSerieMonedero || null,
         numeroSerieValidador: row.numeroSerieValidador || null,
-        latitud: row.latitud ? Number(parseFloat(String(row.latitud)).toFixed(7)) : null,
-        longitud: row.longitud ? Number(parseFloat(String(row.longitud)).toFixed(7)) : null,
+        latitud: row.latitud
+          ? Number(parseFloat(String(row.latitud)).toFixed(7))
+          : null,
+        longitud: row.longitud
+          ? Number(parseFloat(String(row.longitud)).toFixed(7))
+          : null,
         nombreRuta: row.nombreRuta || null,
         numeroViaje: row.numeroViaje ? Number(row.numeroViaje) : null,
         numeroTurno: row.numeroTurno ? Number(row.numeroTurno) : null,

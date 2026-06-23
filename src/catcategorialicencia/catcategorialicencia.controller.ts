@@ -8,7 +8,9 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 @UseGuards(JwtAuthGuard)
 @Controller('catcategorialicencia')
 export class CatcategorialicenciaController {
-  constructor(private readonly catcategorialicenciaService: CatcategorialicenciaService) {}
+  constructor(
+    private readonly catcategorialicenciaService: CatcategorialicenciaService,
+  ) {}
 
   @Get('list')
   findAll() {

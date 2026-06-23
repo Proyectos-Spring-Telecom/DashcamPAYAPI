@@ -11,7 +11,8 @@ export class CancelRefundDto {
   tokenId: string;
 
   @ApiPropertyOptional({
-    description: 'Monto parcial a reembolsar como string (si no se especifica, se reembolsa el total)',
+    description:
+      'Monto parcial a reembolsar como string (si no se especifica, se reembolsa el total)',
     example: '500',
   })
   @IsString()

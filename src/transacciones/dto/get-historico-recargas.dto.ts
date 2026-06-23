@@ -28,7 +28,10 @@ export class GetHistoricoRecargasDto {
     example: '2025-09-12',
     required: false,
   })
-  @IsDateString({}, { message: 'La fecha de inicio debe estar en formato ISO8601' })
+  @IsDateString(
+    {},
+    { message: 'La fecha de inicio debe estar en formato ISO8601' },
+  )
   @IsOptional()
   fechaInicio?: string;
 
@@ -37,7 +40,10 @@ export class GetHistoricoRecargasDto {
     example: '2025-09-12',
     required: false,
   })
-  @IsDateString({}, { message: 'La fecha de fin debe estar en formato ISO8601' })
+  @IsDateString(
+    {},
+    { message: 'La fecha de fin debe estar en formato ISO8601' },
+  )
   @IsOptional()
   fechaFin?: string;
 }

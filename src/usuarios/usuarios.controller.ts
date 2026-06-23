@@ -39,7 +39,7 @@ import { UpdateUsuarioValidadorDto } from './dto/update-usuario-validador.dto';
 @ApiBearerAuth('bearer-token')
 @Controller('usuarios')
 export class UsuariosController {
-  constructor(private readonly usuariosService: UsuariosService) { }
+  constructor(private readonly usuariosService: UsuariosService) {}
 
   // ========================================
   // 🔹 POST ROUTES (crear recursos)
@@ -83,7 +83,7 @@ export class UsuariosController {
     @Request() req,
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return await this.usuariosService.getAllListUsuariosCliente(id, +cliente);
   }
 
@@ -94,8 +94,8 @@ export class UsuariosController {
     @Request() req,
     @Param('cliente', ParseIntPipe) id: number,
   ): Promise<ApiResponseCommon> {
-    const cliente = req.user.cliente;
-    const rol = req.user.rol;
+    const _cliente = req.user.cliente;
+    const _rol = req.user.rol;
     return await this.usuariosService.getAllListUsuariosRol(+id);
   }
 
@@ -251,7 +251,8 @@ export class UsuariosController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Subir o actualizar foto de perfil del usuario',
-    description: 'Sube una nueva foto de perfil para el usuario autenticado. Si el usuario ya tiene una foto, se reemplazará automáticamente.',
+    description:
+      'Sube una nueva foto de perfil para el usuario autenticado. Si el usuario ya tiene una foto, se reemplazará automáticamente.',
   })
   @ApiBody({
     description: 'Archivo de imagen (PNG, JPG o JPEG)',

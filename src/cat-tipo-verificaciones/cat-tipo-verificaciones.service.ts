@@ -30,9 +30,10 @@ export class CatTipoVerificacionesService {
     idUser: number,
   ): Promise<ApiCrudResponse> {
     try {
-      const tipoVerificacion = await this.catTipoVerificacionesRepository.findOne({
-        where: { nombre: createCatTipoVerificacionesDto.nombre },
-      });
+      const tipoVerificacion =
+        await this.catTipoVerificacionesRepository.findOne({
+          where: { nombre: createCatTipoVerificacionesDto.nombre },
+        });
       if (tipoVerificacion) {
         throw new BadRequestException('El tipo de verificación ya existe');
       }
@@ -88,9 +89,11 @@ export class CatTipoVerificacionesService {
 
   async findAllList(): Promise<ApiResponseCommon> {
     try {
-      const tiposVerificacion = await this.catTipoVerificacionesRepository.find({
-        order: { nombre: 'ASC' },
-      });
+      const tiposVerificacion = await this.catTipoVerificacionesRepository.find(
+        {
+          order: { nombre: 'ASC' },
+        },
+      );
 
       // Forzamos ids a number
       const data = tiposVerificacion.map((item) => ({
@@ -114,11 +117,12 @@ export class CatTipoVerificacionesService {
 
   async findAll(page: number, limit: number): Promise<ApiResponseCommon> {
     try {
-      const [data, total] = await this.catTipoVerificacionesRepository.findAndCount({
-        order: { nombre: 'ASC' },
-        skip: (page - 1) * limit,
-        take: limit,
-      });
+      const [data, total] =
+        await this.catTipoVerificacionesRepository.findAndCount({
+          order: { nombre: 'ASC' },
+          skip: (page - 1) * limit,
+          take: limit,
+        });
 
       // Forzamos ids a number
       const tiposVerificacion = data.map((item) => ({
@@ -147,9 +151,10 @@ export class CatTipoVerificacionesService {
 
   async findOne(id: number): Promise<ApiResponseCommon> {
     try {
-      const tipoVerificacion = await this.catTipoVerificacionesRepository.findOne({
-        where: { id: id },
-      });
+      const tipoVerificacion =
+        await this.catTipoVerificacionesRepository.findOne({
+          where: { id: id },
+        });
       if (!tipoVerificacion) {
         throw new NotFoundException('Tipo de verificación no encontrado');
       }
@@ -179,9 +184,10 @@ export class CatTipoVerificacionesService {
     idUser: number,
   ): Promise<ApiCrudResponse> {
     try {
-      const tipoVerificacion = await this.catTipoVerificacionesRepository.findOne({
-        where: { id: id },
-      });
+      const tipoVerificacion =
+        await this.catTipoVerificacionesRepository.findOne({
+          where: { id: id },
+        });
       if (!tipoVerificacion) {
         throw new NotFoundException('Tipo de verificación no encontrado');
       }
@@ -192,7 +198,9 @@ export class CatTipoVerificacionesService {
           where: { nombre: updateCatTipoVerificacionesDto.nombre },
         });
         if (existing && existing.id !== id) {
-          throw new BadRequestException('El nombre del tipo de verificación ya existe');
+          throw new BadRequestException(
+            'El nombre del tipo de verificación ya existe',
+          );
         }
       }
 
@@ -200,9 +208,10 @@ export class CatTipoVerificacionesService {
         id,
         updateCatTipoVerificacionesDto,
       );
-      const tipoVerificacionResult = await this.catTipoVerificacionesRepository.findOne({
-        where: { id: id },
-      });
+      const tipoVerificacionResult =
+        await this.catTipoVerificacionesRepository.findOne({
+          where: { id: id },
+        });
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updateCatTipoVerificacionesDto };
@@ -250,9 +259,10 @@ export class CatTipoVerificacionesService {
 
   async remove(id: number, idUser: number): Promise<ApiCrudResponse> {
     try {
-      const tipoVerificacion = await this.catTipoVerificacionesRepository.findOne({
-        where: { id: id },
-      });
+      const tipoVerificacion =
+        await this.catTipoVerificacionesRepository.findOne({
+          where: { id: id },
+        });
 
       if (!tipoVerificacion) {
         throw new NotFoundException('Tipo de verificación no encontrado');

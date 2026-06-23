@@ -6,10 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatReferenciaServicio } from 'src/entities/CatReferenciaServicio';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([CatReferenciaServicio]),
-    BitacoraModule,
-  ],
+  imports: [TypeOrmModule.forFeature([CatReferenciaServicio]), BitacoraModule],
   controllers: [CatReferenciaServicioController],
   providers: [CatReferenciaServicioService],
   exports: [CatReferenciaServicioService],

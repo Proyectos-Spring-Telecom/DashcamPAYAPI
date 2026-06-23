@@ -1,5 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsBoolean, IsOptional, ValidateNested, IsEmail, MaxLength, IsInt } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsBoolean,
+  IsOptional,
+  ValidateNested,
+  IsEmail,
+  MaxLength,
+  IsInt,
+} from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { DireccionTarjetaDto } from './direccion-tarjeta.dto';
 
@@ -13,7 +22,8 @@ export class AssignCardDto {
   customerId: string;
 
   @ApiProperty({
-    description: 'Token de la tarjeta a asignar (generado por NetpayJS en frontend)',
+    description:
+      'Token de la tarjeta a asignar (generado por NetpayJS en frontend)',
     example: 'tok_test_1234567890',
   })
   @IsString()
@@ -21,7 +31,8 @@ export class AssignCardDto {
   token: string;
 
   @ApiPropertyOptional({
-    description: 'Reference ID de la tarjeta (identificador único de la tarjeta guardada en Netpay). Si no se proporciona, se intentará obtener de la respuesta de Netpay.',
+    description:
+      'Reference ID de la tarjeta (identificador único de la tarjeta guardada en Netpay). Si no se proporciona, se intentará obtener de la respuesta de Netpay.',
     example: '1222337263222',
   })
   @IsString()
@@ -43,13 +54,8 @@ export class AssignCardDto {
   })
   preAuth?: boolean = false;
 
-  @ApiPropertyOptional({
-    description: 'CVV2 de la tarjeta (3 o 4 dígitos)',
-    example: '123',
-  })
-  @IsOptional()
-  @IsString()
-  cvv2?: string;
+  // NOTA: cvv2 NO se acepta en esta API. El CVV se tokeniza SOLO en el cliente con NetpayJS.
+  // Si el cliente envía cvv2, será ignorado silenciosamente.
 
   @ApiPropertyOptional({
     description: 'Nombre del titular de la tarjeta',
@@ -102,16 +108,18 @@ export class AssignCardDto {
   telefono?: string;
 
   @ApiPropertyOptional({
-    description: 'ID de la dirección existente a usar (si se proporciona, se usará esta dirección en lugar de crear una nueva)',
+    description:
+      'ID de la dirección existente a usar (si se proporciona, se usará esta dirección en lugar de crear una nueva)',
     example: 1,
   })
   @IsOptional()
   @IsInt()
-  @Transform(({ value }) => value ? Number(value) : undefined)
+  @Transform(({ value }) => (value ? Number(value) : undefined))
   idDireccion?: number;
 
   @ApiPropertyOptional({
-    description: 'Dirección de facturación del titular de la tarjeta (solo si no se proporciona idDireccion)',
+    description:
+      'Dirección de facturación del titular de la tarjeta (solo si no se proporciona idDireccion)',
     type: DireccionTarjetaDto,
   })
   @IsOptional()

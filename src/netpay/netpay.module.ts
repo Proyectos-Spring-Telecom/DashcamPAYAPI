@@ -8,14 +8,24 @@ import { DatosTarjeta } from 'src/entities/DatosTarjeta';
 import { DireccionesTarjeta } from 'src/entities/DireccionesTarjeta';
 import { TokenDirecciones } from 'src/entities/TokenDirecciones';
 import { NormalizeCreateCustomerBodyInterceptor } from './interceptors/normalize-create-customer-body.interceptor';
+import { LoggerService } from 'src/common/logger.service';
 
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([Pasajeros, DatosTarjeta, DireccionesTarjeta, TokenDirecciones]),
+    TypeOrmModule.forFeature([
+      Pasajeros,
+      DatosTarjeta,
+      DireccionesTarjeta,
+      TokenDirecciones,
+    ]),
   ],
   controllers: [NetpayController],
-  providers: [NetpayService, NormalizeCreateCustomerBodyInterceptor],
+  providers: [
+    NetpayService,
+    NormalizeCreateCustomerBodyInterceptor,
+    LoggerService,
+  ],
   exports: [NetpayService],
 })
 export class NetpayModule {}

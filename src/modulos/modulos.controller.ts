@@ -8,8 +8,6 @@ import {
   Delete,
   Put,
   Request,
-  Query,
-  Res,
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
@@ -60,17 +58,17 @@ export class ModulosController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateModuloDto: UpdateModuloDto,
     @Request() req,
-  ): Promise <ApiCrudResponse> {
+  ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.modulosService.update(id,updateModuloDto, idUser);
+    return await this.modulosService.update(id, updateModuloDto, idUser);
   }
 
   @Patch(':id/estatus')
   async updateModuloEstatus(
     @Param('id') id: string,
     @Request() req,
-    @Body()updateModulosEstatusDto: UpdateModulosEstatusDto,
-  ):Promise <ApiCrudResponse> {
+    @Body() updateModulosEstatusDto: UpdateModulosEstatusDto,
+  ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
     return await this.modulosService.updateModulosStatus(
       +id,
@@ -80,8 +78,11 @@ export class ModulosController {
   }
 
   @Delete(':id')
-  async remove(@Param('id',ParseIntPipe)id:number,@Request()req):Promise <ApiCrudResponse> {
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.modulosService.deleteModulo(id,idUser);
+    return await this.modulosService.deleteModulo(id, idUser);
   }
 }
