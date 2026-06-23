@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -73,6 +75,8 @@ import { LoggerService } from './common/logger.service';
         DB_DATABASE: Joi.string().required(),
         JWT_SECRET: Joi.string().required(),
         JWT_EXPIRES_IN: Joi.string().required(),
+        JWT_REFRESH_SECRET: Joi.string().required(),
+        JWT_REFRESH_EXPIRES: Joi.string().default('7d'),
         AWS_REGION: Joi.string().required(),
         AWS_ACCESS_KEY_ID: Joi.string().required(),
         AWS_SECRET_ACCESS_KEY: Joi.string().required(),
@@ -94,8 +98,18 @@ import { LoggerService } from './common/logger.service';
         SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
         SWAGGER_USER: Joi.string().optional(),
         SWAGGER_PASSWORD: Joi.string().optional(),
+        MAX_LOGIN_ATTEMPTS: Joi.number().default(10),
+        LOCKOUT_MINUTES: Joi.number().default(30),
+        OTP_MAX_ATTEMPTS: Joi.number().default(5),
       }),
     }),
+
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
 
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -231,6 +245,13 @@ import { LoggerService } from './common/logger.service';
     DireccionesModule,
   ],
   controllers: [AppController],
-  providers: [AppService, LoggerService],
+  providers: [
+    AppService,
+    LoggerService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

@@ -82,6 +82,12 @@ export class Usuarios {
   @Column('tinyint', { name: 'Estatus', default: () => "'1'" })
   estatus: number;
 
+  @Column('int', { name: 'IntentosFallidos', default: () => "'0'" })
+  intentosFallidos: number;
+
+  @Column('datetime', { name: 'BloqueadoHasta', nullable: true })
+  bloqueadoHasta: string | null;
+
   @Column('bigint', { name: 'IdRol' })
   idRol: number;
 

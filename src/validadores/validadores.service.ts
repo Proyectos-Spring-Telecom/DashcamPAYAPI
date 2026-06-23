@@ -255,12 +255,13 @@ ORDER BY d.Id DESC;
 FROM Validadores d
 INNER JOIN Clientes c ON d.IdCliente = c.Id
 
-WHERE d.IdCliente IN (${cliente})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+WHERE d.IdCliente IN (?)
   AND d.Estatus = 1
   AND c.Estatus = 1
 
 ORDER BY d.Id DESC;
         `,
+            [cliente],
           );
           break;
 

@@ -17,6 +17,7 @@ import { Pasajeros } from 'src/entities/Pasajeros';
 import { Monederos } from 'src/entities/Monederos';
 import { Turnos } from 'src/entities/Turnos';
 import { Viajes } from 'src/entities/Viajes';
+import { RefreshSessions } from 'src/entities/RefreshSessions';
 import { LoggerService } from 'src/common/logger.service';
 
 @Module({
@@ -43,6 +44,7 @@ import { LoggerService } from 'src/common/logger.service';
       Monederos,
       Turnos,
       Viajes,
+      RefreshSessions,
     ]),
   ],
   controllers: [AuthController],

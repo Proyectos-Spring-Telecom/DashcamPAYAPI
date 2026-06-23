@@ -18,7 +18,7 @@ export class CodigoAutenticacion {
   @Column({ name: 'IdUsuario', type: 'bigint' })
   idUsuario: number;
 
-  @Column({ name: 'Codigo', type: 'varchar', length: 4 })
+  @Column({ name: 'Codigo', type: 'varchar', length: 6 })
   codigo: string;
 
   @Column({ name: 'Tipo', type: 'tinyint' })
@@ -42,4 +42,7 @@ export class CodigoAutenticacion {
 
   @Column({ name: 'Estatus', type: 'tinyint', default: () => 1 })
   estatus: number;
+
+  @Column({ name: 'Intentos', type: 'int', default: () => 0 })
+  intentos: number;
 }
