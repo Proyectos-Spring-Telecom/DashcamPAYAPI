@@ -10,11 +10,7 @@ import { Operadores } from 'src/entities/Operadores';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      Incidentes,
-      Instalaciones,
-      Operadores,
-    ]),
+    TypeOrmModule.forFeature([Incidentes, Instalaciones, Operadores]),
     BitacoraModule,
     S3Module,
   ],

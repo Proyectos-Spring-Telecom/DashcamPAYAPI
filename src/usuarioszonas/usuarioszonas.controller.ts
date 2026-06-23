@@ -24,9 +24,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 @UseGuards(JwtAuthGuard)
 @Controller('usuarioszonas')
 export class UsuarioszonasController {
-  constructor(
-    private readonly usuarioszonasService: UsuarioszonasService,
-  ) {}
+  constructor(private readonly usuarioszonasService: UsuarioszonasService) {}
 
   @Post()
   async create(
@@ -46,7 +44,7 @@ export class UsuarioszonasController {
   }
 
   @Get('usuario/:idUsuario')
-  async findOneUsuario(@Param('idUsuario',ParseIntPipe) id: number) {
+  async findOneUsuario(@Param('idUsuario', ParseIntPipe) id: number) {
     return await this.usuarioszonasService.findOneUsuario(id);
   }
 
@@ -54,7 +52,7 @@ export class UsuarioszonasController {
   async findAll(
     @Param('page', ParseIntPipe) page: number,
     @Param('limit', ParseIntPipe) limit: number,
-    @Request() req,
+    @Request() _req,
   ): Promise<ApiResponseCommon> {
     return await this.usuarioszonasService.findAll(page, limit);
   }
@@ -85,17 +83,15 @@ export class UsuarioszonasController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return this.usuarioszonasService.update(
-      +id,
-      idUser,
-      updateUsuarioszonaDto,
-    );
+    return this.usuarioszonasService.update(+id, idUser, updateUsuarioszonaDto);
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string, @Request() req): Promise<ApiCrudResponse> {
+  async remove(
+    @Param('id') id: string,
+    @Request() req,
+  ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
     return await this.usuarioszonasService.remove(+id, idUser);
   }
 }
-

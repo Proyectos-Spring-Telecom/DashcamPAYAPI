@@ -1,11 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsOptional,
-  IsInt,
-  IsNumber,
-  Min,
-  Max,
-} from 'class-validator';
+import { IsOptional, IsInt, IsNumber, Min, Max } from 'class-validator';
 
 export class CreateMantenimientoKilometrajeDto {
   @ApiProperty({
@@ -58,4 +52,3 @@ export class CreateMantenimientoKilometrajeDto {
   @IsOptional()
   anio?: number;
 }
-

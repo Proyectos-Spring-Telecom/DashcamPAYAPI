@@ -11,8 +11,6 @@ export class CatcombustibleService {
     private readonly catPasajeroRepository: Repository<CatTipoCombustible>,
   ) {}
 
-
-
   // ========================================
   // 🔹 OBTENER UN LISTADO DE TIPOS COMBUSTIBLES
   // ========================================

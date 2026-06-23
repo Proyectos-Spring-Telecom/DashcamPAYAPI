@@ -3,9 +3,7 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
-  Delete,
   UseGuards,
   Request,
   ParseIntPipe,
@@ -22,7 +20,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 export class ViajestransaccionesController {
   constructor(
     private readonly viajestransaccionesService: ViajestransaccionesService,
-  ) { }
+  ) {}
 
   @Post()
   create(
@@ -37,15 +35,11 @@ export class ViajestransaccionesController {
   }
 
   @Get('list')
-  findAllList(@Request() req,) {
+  findAllList(@Request() req) {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     const idUser = req.user.userId;
-    return this.viajestransaccionesService.findAllList(
-      +idUser,
-      +cliente,
-      +rol,
-    );
+    return this.viajestransaccionesService.findAllList(+idUser, +cliente, +rol);
   }
 
   @Get('viajes/:id')
@@ -71,7 +65,8 @@ export class ViajestransaccionesController {
       +idUser,
       +cliente,
       +rol,
-      page, 
-      limit);
+      page,
+      limit,
+    );
   }
 }

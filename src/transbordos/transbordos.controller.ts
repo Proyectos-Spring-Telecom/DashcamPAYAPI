@@ -59,7 +59,8 @@ export class TransbordosController {
     schema: {
       example: {
         statusCode: 400,
-        message: 'El número de detalles (5) no puede exceder el número de transbordos permitidos (3)',
+        message:
+          'El número de detalles (5) no puede exceder el número de transbordos permitidos (3)',
         error: 'Bad Request',
       },
     },
@@ -76,7 +77,8 @@ export class TransbordosController {
   @Get('tipos-descuento')
   @ApiOperation({
     summary: 'Obtener listado de tipos de descuento',
-    description: 'Retorna todos los tipos de descuento disponibles para transbordos.',
+    description:
+      'Retorna todos los tipos de descuento disponibles para transbordos.',
   })
   @ApiResponse({
     status: 200,
@@ -98,10 +100,21 @@ export class TransbordosController {
   @Get(':page/:limit')
   @ApiOperation({
     summary: 'Obtener listado de transbordos con paginación',
-    description: 'Retorna todos los transbordos del cliente con sus detalles, paginados.',
+    description:
+      'Retorna todos los transbordos del cliente con sus detalles, paginados.',
   })
-  @ApiParam({ name: 'page', type: 'number', description: 'Número de página', example: 1 })
-  @ApiParam({ name: 'limit', type: 'number', description: 'Cantidad de registros por página', example: 10 })
+  @ApiParam({
+    name: 'page',
+    type: 'number',
+    description: 'Número de página',
+    example: 1,
+  })
+  @ApiParam({
+    name: 'limit',
+    type: 'number',
+    description: 'Cantidad de registros por página',
+    example: 10,
+  })
   @ApiResponse({
     status: 200,
     description: 'Lista de transbordos obtenida exitosamente',
@@ -117,9 +130,9 @@ export class TransbordosController {
             numeroTransbordos: 3,
             cantidadDetalles: 3,
             detalles: [
-              { nroTransbordo: 1, costo: 5.50 },
-              { nroTransbordo: 2, costo: 3.00 },
-              { nroTransbordo: 3, costo: 2.00 },
+              { nroTransbordo: 1, costo: 5.5 },
+              { nroTransbordo: 2, costo: 3.0 },
+              { nroTransbordo: 3, costo: 2.0 },
             ],
           },
         ],
@@ -142,9 +155,15 @@ export class TransbordosController {
   @Get(':id')
   @ApiOperation({
     summary: 'Obtener un transbordo por ID',
-    description: 'Retorna los detalles completos de un transbordo específico con todos sus detalles.',
+    description:
+      'Retorna los detalles completos de un transbordo específico con todos sus detalles.',
   })
-  @ApiParam({ name: 'id', type: 'number', description: 'ID del transbordo', example: 1 })
+  @ApiParam({
+    name: 'id',
+    type: 'number',
+    description: 'ID del transbordo',
+    example: 1,
+  })
   @ApiResponse({
     status: 200,
     description: 'Transbordo encontrado',
@@ -158,9 +177,9 @@ export class TransbordosController {
           idCliente: 5,
           nombreCliente: 'TRANSPORTES SA',
           detalles: [
-            { id: 1, costo: 5.50, nroTransbordo: 1 },
-            { id: 2, costo: 3.00, nroTransbordo: 2 },
-            { id: 3, costo: 2.00, nroTransbordo: 3 },
+            { id: 1, costo: 5.5, nroTransbordo: 1 },
+            { id: 2, costo: 3.0, nroTransbordo: 2 },
+            { id: 3, costo: 2.0, nroTransbordo: 3 },
           ],
         },
       },
@@ -183,7 +202,12 @@ export class TransbordosController {
       'Si se proporcionan nuevos detalles, se reemplazan todos los existentes. ' +
       'Valida que el número de detalles no exceda el número de transbordos permitidos.',
   })
-  @ApiParam({ name: 'id', type: 'number', description: 'ID del transbordo', example: 1 })
+  @ApiParam({
+    name: 'id',
+    type: 'number',
+    description: 'ID del transbordo',
+    example: 1,
+  })
   @ApiBody({ type: UpdateTransbordoDto })
   @ApiResponse({
     status: 200,
@@ -224,7 +248,12 @@ export class TransbordosController {
       'Activa un transbordo que estaba inactivo, cambiando su estatus a 1. ' +
       'Solo se pueden activar transbordos que estén inactivos (estatus = 0).',
   })
-  @ApiParam({ name: 'id', type: 'number', description: 'ID del transbordo', example: 1 })
+  @ApiParam({
+    name: 'id',
+    type: 'number',
+    description: 'ID del transbordo',
+    example: 1,
+  })
   @ApiResponse({
     status: 200,
     description: 'Transbordo activado exitosamente',
@@ -259,7 +288,12 @@ export class TransbordosController {
       'Da de baja un transbordo cambiando su estatus a 0 (eliminación lógica). ' +
       'El transbordo no se elimina físicamente, solo se marca como inactivo.',
   })
-  @ApiParam({ name: 'id', type: 'number', description: 'ID del transbordo', example: 1 })
+  @ApiParam({
+    name: 'id',
+    type: 'number',
+    description: 'ID del transbordo',
+    example: 1,
+  })
   @ApiResponse({
     status: 200,
     description: 'Transbordo dado de baja exitosamente',

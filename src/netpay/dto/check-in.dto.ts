@@ -12,7 +12,7 @@ export class CheckInDto {
 
   @ApiProperty({
     description: 'Monto del pago',
-    example: 100.50,
+    example: 100.5,
     minimum: 0.01,
   })
   @IsNumber()

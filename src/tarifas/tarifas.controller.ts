@@ -16,7 +16,13 @@ import { CreateTarifaDto } from './dto/create-tarifa.dto';
 import { UpdateTarifaDto } from './dto/update-tarifa.dto';
 import { UpdateTarifasEstatusDto } from './dto/update-tarifa-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+} from '@nestjs/swagger';
 
 @ApiTags('Tarifas')
 @ApiBearerAuth('bearer-token')
@@ -113,9 +119,9 @@ export class TarifasController {
     @Body() updateTarifasEstatusDto: UpdateTarifasEstatusDto,
     @Request() req,
   ) {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return this.tarifasService.updateEstatus(
       +id,
       +idUser,
@@ -129,15 +135,15 @@ export class TarifasController {
     @Body() updateTarifaDto: UpdateTarifaDto,
     @Request() req,
   ) {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return this.tarifasService.update(+id, +idUser, updateTarifaDto);
   }
 
   @Delete('eliminado/total/:id')
   removeTotal(@Param('id') id: string, @Request() req) {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
     return this.tarifasService.removeTotal(+id, +idUser, +rol);
@@ -145,9 +151,9 @@ export class TarifasController {
 
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req) {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return this.tarifasService.remove(+id, +idUser);
   }
 }

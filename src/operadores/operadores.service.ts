@@ -93,7 +93,7 @@ export class OperadoresService {
       const licenciaCreate =
         await this.licenciasRepository.create(bodyLicencia);
 
-      const licencia = await this.licenciasRepository.save(licenciaCreate);
+      const _licencia = await this.licenciasRepository.save(licenciaCreate);
 
       //-----Registro en la bitacora-----SUCCESS
       const querylogger = { createOperadoreDto };
@@ -509,7 +509,7 @@ ORDER BY o.Id DESC;
         idCategoriaLicencia: Number(item.idCategoriaLicencia),
       }));
 
-      const result: ApiResponseCommon = {
+      const _result: ApiResponseCommon = {
         data: data,
       };
       return data;
@@ -529,8 +529,8 @@ ORDER BY o.Id DESC;
   // ========================================
   async findByCliente(
     idCliente: number,
-    idUser: number,
-    rol: number,
+    _idUser: number,
+    _rol: number,
   ): Promise<ApiResponseCommon> {
     try {
       // Consulta directa de operadores por cliente (solo el cliente especificado)
@@ -695,7 +695,8 @@ ORDER BY o.Id DESC
           break;
 
         default:
-          const { ids, placeholders } = await this.clienteHijos(cliente);
+          const { ids, placeholders: _placeholders } =
+            await this.clienteHijos(cliente);
           // Consulta de datos paginados resto Usuario
           operador = await this.operadoresRepository.query(
             `
@@ -883,18 +884,32 @@ ORDER BY o.Id DESC
         throw new NotFoundException(`Operador con id: ${id} no encontrado`);
       }
       // Asignar solo los campos enviados al operador y guardar (save persiste correctamente)
-      if (updateOperadoreDto.fechaNacimiento !== undefined) operador.fechaNacimiento = updateOperadoreDto.fechaNacimiento;
-      if (updateOperadoreDto.identificacion !== undefined) operador.identificacion = updateOperadoreDto.identificacion;
-      if (updateOperadoreDto.comprobanteDomicilio !== undefined) operador.comprobanteDomicilio = updateOperadoreDto.comprobanteDomicilio;
-      if (updateOperadoreDto.certificadoMedico !== undefined) operador.certificadoMedico = updateOperadoreDto.certificadoMedico;
-      if (updateOperadoreDto.antecedentesNoPenales !== undefined) operador.antecedentesNoPenales = updateOperadoreDto.antecedentesNoPenales;
-      if (updateOperadoreDto.foto !== undefined) operador.foto = updateOperadoreDto.foto;
-      if (updateOperadoreDto.estatus !== undefined) operador.estatus = updateOperadoreDto.estatus;
-      if (updateOperadoreDto.idUsuario !== undefined) operador.idUsuario = updateOperadoreDto.idUsuario;
+      if (updateOperadoreDto.fechaNacimiento !== undefined)
+        operador.fechaNacimiento = updateOperadoreDto.fechaNacimiento;
+      if (updateOperadoreDto.identificacion !== undefined)
+        operador.identificacion = updateOperadoreDto.identificacion;
+      if (updateOperadoreDto.comprobanteDomicilio !== undefined)
+        operador.comprobanteDomicilio = updateOperadoreDto.comprobanteDomicilio;
+      if (updateOperadoreDto.certificadoMedico !== undefined)
+        operador.certificadoMedico = updateOperadoreDto.certificadoMedico;
+      if (updateOperadoreDto.antecedentesNoPenales !== undefined)
+        operador.antecedentesNoPenales =
+          updateOperadoreDto.antecedentesNoPenales;
+      if (updateOperadoreDto.foto !== undefined)
+        operador.foto = updateOperadoreDto.foto;
+      if (updateOperadoreDto.estatus !== undefined)
+        operador.estatus = updateOperadoreDto.estatus;
+      if (updateOperadoreDto.idUsuario !== undefined)
+        operador.idUsuario = updateOperadoreDto.idUsuario;
       await this.operadoresRepository.save(operador);
       // Sincronizar la foto en Usuarios.FotoPerfil usando el idUsuario del operador
-      if (updateOperadoreDto.foto !== undefined && updateOperadoreDto.foto !== '') {
-        await this.usuariosRepository.update(operador.idUsuario, { fotoPerfil: updateOperadoreDto.foto });
+      if (
+        updateOperadoreDto.foto !== undefined &&
+        updateOperadoreDto.foto !== ''
+      ) {
+        await this.usuariosRepository.update(operador.idUsuario, {
+          fotoPerfil: updateOperadoreDto.foto,
+        });
       }
 
       //-----Registro en la bitacora-----SUCCESS

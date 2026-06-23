@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum, IsOptional } from 'class-validator';
-import { EstadoComponente } from 'src/common/estatus.enum'; 
+import { EstadoComponente } from 'src/common/estatus.enum';
 
 export class UpdateContadoresEstadoDto {
   @ApiProperty({
@@ -16,4 +16,3 @@ export class UpdateContadoresEstadoDto {
   @IsOptional()
   estadoActual?: EstadoComponente = EstadoComponente.DISPONIBLE;
 }
-

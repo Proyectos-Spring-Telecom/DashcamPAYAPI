@@ -45,14 +45,20 @@ export class DireccionesTarjeta {
   @Column('bigint', { name: 'IdDatosTarjeta', nullable: true })
   idDatosTarjeta: number | null;
 
-  @ManyToOne(() => DatosTarjeta, (datosTarjeta) => datosTarjeta.direccionesTarjeta, {
-    onDelete: 'NO ACTION',
-    onUpdate: 'NO ACTION',
-  })
+  @ManyToOne(
+    () => DatosTarjeta,
+    (datosTarjeta) => datosTarjeta.direccionesTarjeta,
+    {
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+    },
+  )
   @JoinColumn([{ name: 'IdDatosTarjeta', referencedColumnName: 'id' }])
   idDatosTarjeta2: DatosTarjeta | null;
 
-  @OneToMany(() => TokenDirecciones, (tokenDirecciones) => tokenDirecciones.idDireccion2)
+  @OneToMany(
+    () => TokenDirecciones,
+    (tokenDirecciones) => tokenDirecciones.idDireccion2,
+  )
   tokenDirecciones: TokenDirecciones[];
 }
-

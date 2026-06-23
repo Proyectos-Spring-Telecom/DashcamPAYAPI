@@ -13,7 +13,11 @@ import { Repository } from 'typeorm';
 import { Instalaciones } from 'src/entities/Instalaciones';
 import { Usuarios } from 'src/entities/Usuarios';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
-import { ApiCrudResponse, ApiResponseCommon, EstatusEnumBitcora } from 'src/common/ApiResponse';
+import {
+  ApiCrudResponse,
+  ApiResponseCommon,
+  EstatusEnumBitcora,
+} from 'src/common/ApiResponse';
 import { UpdateUsuariosInstalacionesEstatusDto } from './dto/update-usuariosinstalacione-estatus.dto';
 
 @Injectable()
@@ -59,7 +63,9 @@ export class UsuariosinstalacionesService {
               select: { idCliente: true },
             });
             if (!instalacion) {
-              throw new NotFoundException(`Instalación con ID ${i} no encontrada`);
+              throw new NotFoundException(
+                `Instalación con ID ${i} no encontrada`,
+              );
             }
             if (idUsuarioCliente !== instalacion.idCliente) {
               throw new BadRequestException(
@@ -122,7 +128,7 @@ export class UsuariosinstalacionesService {
         EstatusEnumBitcora.ERROR,
         error.message,
       );
-      
+
       if (error instanceof HttpException) {
         throw error;
       }
@@ -253,7 +259,7 @@ export class UsuariosinstalacionesService {
   ): Promise<ApiCrudResponse> {
     try {
       // Extraer instalaciones del DTO
-      const { idsInstalaciones, ...usuarioInstalacionUpdate } =
+      const { idsInstalaciones, ..._usuarioInstalacionUpdate } =
         updateUsuariosinstalacioneDto;
 
       // ----- ACTUALIZACIÓN DE INSTALACIONES -----

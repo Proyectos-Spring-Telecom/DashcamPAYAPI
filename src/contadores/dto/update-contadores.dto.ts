@@ -37,4 +37,3 @@ export class UpdateContadoresDto {
   })
   idCliente?: number;
 }
-

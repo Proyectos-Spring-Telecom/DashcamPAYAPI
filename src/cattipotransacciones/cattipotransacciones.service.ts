@@ -13,9 +13,9 @@ export class CattipotransaccionesService {
 
   async findAllList() {
     try {
-      let catcategorialicencia;
-      catcategorialicencia = await this.catcategorialicenciaRepository.query(
-        `
+      const catcategorialicencia =
+        await this.catcategorialicenciaRepository.query(
+          `
         SELECT 
       Id AS idCatTiposTransacciones,
       Nombre AS nombreCatTiposTransacciones
@@ -23,7 +23,7 @@ export class CattipotransaccionesService {
     ORDER BY Nombre ASC;
           
                     `,
-      );
+        );
 
       //Forzamos los BigInt a number
       const data = catcategorialicencia.map((item) => ({

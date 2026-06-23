@@ -55,7 +55,7 @@ export enum EnumModulos {
   VIAJESTRANSACCIONES = 29,
   HISTORICOTRANSACCIONES = 30,
   CATALOGOPASAJERO = 31,
-  CATMETODOSPAGO = 37
+  CATMETODOSPAGO = 37,
 }
 
 export enum EnumSolicitudPasajero {

@@ -7,7 +7,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { UsuariosPermisos } from 'src/entities/UsuariosPermisos';
 import { JwtStrategy } from './jwt.strategy';
-import { UsuariosModule } from 'src/usuarios/usuarios.module';
 import { MailModule } from 'src/mail/mail.module';
 import { BitacoraModule } from 'src/bitacora/bitacora.module';
 import { CodigoAutenticacion } from 'src/entities/CodigoAutenticacion';
@@ -18,6 +17,7 @@ import { Pasajeros } from 'src/entities/Pasajeros';
 import { Monederos } from 'src/entities/Monederos';
 import { Turnos } from 'src/entities/Turnos';
 import { Viajes } from 'src/entities/Viajes';
+import { LoggerService } from 'src/common/logger.service';
 
 @Module({
   imports: [
@@ -35,10 +35,18 @@ import { Viajes } from 'src/entities/Viajes';
         signOptions: { expiresIn: config.get<string>('JWT_EXPIRES_IN') },
       }),
     }),
-    TypeOrmModule.forFeature([Usuarios, UsuariosPermisos, CodigoAutenticacion, Pasajeros, Monederos, Turnos, Viajes]),
+    TypeOrmModule.forFeature([
+      Usuarios,
+      UsuariosPermisos,
+      CodigoAutenticacion,
+      Pasajeros,
+      Monederos,
+      Turnos,
+      Viajes,
+    ]),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, LoggerService],
   exports: [JwtModule],
 })
 export class AuthModule {}

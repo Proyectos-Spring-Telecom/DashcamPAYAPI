@@ -47,7 +47,7 @@ export class MonitoreoService {
     private readonly turnosRepository: Repository<Turnos>,
     @InjectRepository(Viajes)
     private readonly viajesRepository: Repository<Viajes>,
-  ) { }
+  ) {}
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
@@ -160,14 +160,14 @@ ORDER BY d.Id DESC;
         case 10:
         case 11:
         case 13:
-          // Consulta de datos Usuarios 
+          // Consulta de datos Usuarios
           data = await this.consultarVarianteListado(cliente);
-          ultimaPosicion = await this.ultimaPosicion(cliente)
+          ultimaPosicion = await this.ultimaPosicion(cliente);
           break;
 
         default:
           // Consulta de datos Usuarios con permiso
-          const { ids, placeholders } = await this.clienteHijos(cliente);
+          const { ids } = await this.clienteHijos(cliente);
           data = await this.usuarioszonasRepository.query(
             `
       SELECT 
@@ -207,7 +207,7 @@ ORDER BY d.Id DESC;
       `,
             [idUser], // parámetro seguro
           );
-          ultimaPosicion = await this.ultimaPosicion(cliente)
+          ultimaPosicion = await this.ultimaPosicion(cliente);
           break;
       }
 
@@ -218,7 +218,7 @@ ORDER BY d.Id DESC;
         distanciaKm: Number(item.distanciaKm),
       }));
 
-      const posicion = ultimaPosicion.map(item => ({
+      const posicion = ultimaPosicion.map((item) => ({
         ...item,
         id: Number(item.id),
         idDispositivo: Number(item.idDispositivo),
@@ -227,7 +227,7 @@ ORDER BY d.Id DESC;
       }));
 
       // Transformación de resultados
-      const result: ApiResponseCommon = {
+      const _result: ApiResponseCommon = {
         data: variantes,
       };
 
@@ -298,11 +298,14 @@ ORDER BY up.Id DESC;
     return this.usuarioszonasRepository.query(query);
   }
 
-
   // ========================================
   // 🔹 OBTENER EL RECORRIDO DE UN DISPOSITIVO
   // ========================================
-  async monitoreoRecorrido(recorridoMonitoreoDto: RecorridoMonitoreoDto, cliente: number, rol: number) {
+  async monitoreoRecorrido(
+    recorridoMonitoreoDto: RecorridoMonitoreoDto,
+    _cliente: number,
+    _rol: number,
+  ) {
     try {
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
@@ -312,14 +315,13 @@ ORDER BY up.Id DESC;
       const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
       // Solo la fecha del momento
       const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
-      let recorridoMonitoreo;
       const { NumeroSerieValidador } = recorridoMonitoreoDto;
-      
+
       // Usar parámetros preparados para evitar SQL injection
       const fechaInicio = `${fechaActual} 00:00:00`;
       const fechaFin = `${fechaActual} 23:59:59`;
-      
-      recorridoMonitoreo = await this.usuarioszonasRepository.query(
+
+      const recorridoMonitoreo = await this.usuarioszonasRepository.query(
         `
 SELECT
   up.Id AS id,
@@ -389,7 +391,7 @@ ORDER BY up.FechaHora ASC
         [fechaInicio, fechaFin, NumeroSerieValidador],
       );
       console.log(recorridoMonitoreo);
-      const posicion = recorridoMonitoreo.map(item => ({
+      const posicion = recorridoMonitoreo.map((item) => ({
         ...item,
         id: Number(item.id),
         idDispositivo: Number(item.idDispositivo),
@@ -397,10 +399,8 @@ ORDER BY up.FechaHora ASC
         idVehiculo: Number(item.idVehiculo),
       }));
 
-
-
       // Transformación de resultados
-      const result: ApiResponseCommon = {
+      const _result: ApiResponseCommon = {
         data: posicion,
       };
 
@@ -556,14 +556,18 @@ ORDER BY v.Id ASC, p.FechaHora DESC;
       const unidadesUnicas = new Map<number, any>();
       resultados.forEach((item: any) => {
         const idVehiculo = Number(item.idVehiculo);
-        const fechaHora = item.fechaHora ? new Date(item.fechaHora).getTime() : 0;
-        
+        const fechaHora = item.fechaHora
+          ? new Date(item.fechaHora).getTime()
+          : 0;
+
         if (!unidadesUnicas.has(idVehiculo)) {
           unidadesUnicas.set(idVehiculo, item);
         } else {
           const existente = unidadesUnicas.get(idVehiculo);
-          const fechaHoraExistente = existente.fechaHora ? new Date(existente.fechaHora).getTime() : 0;
-          
+          const fechaHoraExistente = existente.fechaHora
+            ? new Date(existente.fechaHora).getTime()
+            : 0;
+
           // Si la nueva posición es más reciente, reemplazar
           if (fechaHora > fechaHoraExistente) {
             unidadesUnicas.set(idVehiculo, item);
@@ -575,7 +579,7 @@ ORDER BY v.Id ASC, p.FechaHora DESC;
       const unidades = Array.from(unidadesUnicas.values()).map((item) => {
         // Formatear fechaHora a formato HH:mm
         const fechaHora = item.fechaHora ? new Date(item.fechaHora) : null;
-        const ultimoPing = fechaHora 
+        const ultimoPing = fechaHora
           ? `${String(fechaHora.getHours()).padStart(2, '0')}:${String(fechaHora.getMinutes()).padStart(2, '0')}`
           : null;
 
@@ -583,7 +587,7 @@ ORDER BY v.Id ASC, p.FechaHora DESC;
         let estado = 'pausa'; // Por defecto
         const tieneTurno = item.idTurno && item.turnoEstatus === 1;
         const tieneViaje = item.idViaje && item.viajeEstatus === 1;
-        
+
         if (tieneViaje) {
           // Si está en viaje, está en ruta
           estado = 'ruta';
@@ -596,7 +600,7 @@ ORDER BY v.Id ASC, p.FechaHora DESC;
         }
 
         // Formatear velocidad
-        const velocidad = item.velocidad 
+        const velocidad = item.velocidad
           ? `${Math.round(item.velocidad)} km/h`
           : '0 km/h';
 
@@ -653,7 +657,10 @@ ORDER BY v.Id ASC, p.FechaHora DESC;
    * Obtiene los datos completos de una unidad por numeroSerieValidador
    * Retorna el mismo formato que obtenerUnidades pero para una unidad específica
    */
-  async obtenerUnidadPorValidador(numeroSerieValidador: string, idCliente: number): Promise<any | null> {
+  async obtenerUnidadPorValidador(
+    numeroSerieValidador: string,
+    idCliente: number,
+  ): Promise<any | null> {
     try {
       const { ids, placeholders } = await this.clienteHijos(idCliente);
 
@@ -787,7 +794,10 @@ ORDER BY p.FechaHora DESC
 LIMIT 1;
       `;
 
-      const resultados = await this.clienteRepository.query(query, [...ids, numeroSerieValidador]);
+      const resultados = await this.clienteRepository.query(query, [
+        ...ids,
+        numeroSerieValidador,
+      ]);
 
       if (!resultados || resultados.length === 0) {
         return null;
@@ -797,7 +807,7 @@ LIMIT 1;
 
       // Formatear fechaHora a formato HH:mm
       const fechaHora = item.fechaHora ? new Date(item.fechaHora) : null;
-      const ultimoPing = fechaHora 
+      const ultimoPing = fechaHora
         ? `${String(fechaHora.getHours()).padStart(2, '0')}:${String(fechaHora.getMinutes()).padStart(2, '0')}`
         : null;
 
@@ -805,7 +815,7 @@ LIMIT 1;
       let estado = 'pausa'; // Por defecto
       const tieneTurno = item.idTurno && item.turnoEstatus === 1;
       const tieneViaje = item.idViaje && item.viajeEstatus === 1;
-      
+
       if (tieneViaje) {
         estado = 'ruta';
       } else if (tieneTurno) {
@@ -815,7 +825,7 @@ LIMIT 1;
       }
 
       // Formatear velocidad
-      const velocidad = item.velocidad 
+      const velocidad = item.velocidad
         ? `${Math.round(item.velocidad)} km/h`
         : '0 km/h';
 
@@ -851,7 +861,9 @@ LIMIT 1;
 
       return unidad;
     } catch (error) {
-      this.logger.error(`Error al obtener unidad por validador: ${error.message}`);
+      this.logger.error(
+        `Error al obtener unidad por validador: ${error.message}`,
+      );
       return null;
     }
   }

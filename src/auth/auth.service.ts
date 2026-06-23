@@ -20,18 +20,22 @@ import { LoginAuthResetDto } from './dto/login-recuperacion.dto';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { ApiCrudResponse, EstatusEnumBitcora } from 'src/common/ApiResponse';
 import { CodigoAutenticacion } from 'src/entities/CodigoAutenticacion';
-import { EnumModulos, EnumSolicitudPasajero, EstatusEnum, TipoCodigoAutenticacion } from 'src/common/estatus.enum';
+import {
+  EnumModulos,
+  EnumSolicitudPasajero,
+  EstatusEnum,
+  TipoCodigoAutenticacion,
+} from 'src/common/estatus.enum';
 import { CreateAltaPasajaroDto } from './dto/create-pasajero.dto';
 import { MonederosService } from 'src/monederos/monederos.service';
 import { PasajerosService } from 'src/pasajeros/pasajeros.service';
 import { CodigoPasajeroAutenticacion } from './dto/login-autenticacion.dto';
-import { number } from 'joi';
-import { Licencias } from 'src/entities/Licencias';
 import { NetpayService } from 'src/netpay/netpay.service';
 import { Pasajeros } from 'src/entities/Pasajeros';
 import { Monederos } from 'src/entities/Monederos';
 import { Turnos } from 'src/entities/Turnos';
 import { Viajes } from 'src/entities/Viajes';
+import { LoggerService } from 'src/common/logger.service';
 
 @Injectable()
 export class AuthService {
@@ -56,7 +60,8 @@ export class AuthService {
     private readonly monederoService: MonederosService,
     private readonly pasajeroService: PasajerosService,
     private readonly netpayService: NetpayService,
-  ) { }
+    private readonly loggerService: LoggerService,
+  ) {}
 
   // ========================================
   // 🔹 FUNCIÓN PRIVADA PARA GENERAR NÚMERO DE SERIE ÚNICO
@@ -111,7 +116,7 @@ export class AuthService {
 
         // Generar número de serie aleatorio único
         numeroSerieMonedero = await this.generarNumeroSerieUnico();
-        
+
         // Crear nuevo monedero con el número de serie generado
         const ahora = new Date();
         const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
@@ -127,15 +132,16 @@ export class AuthService {
           esVirtual: 1, // Monedero virtual creado automáticamente
         });
 
-        const monederoGuardado = await this.monederosRepository.save(nuevoMonedero);
-        
+        const monederoGuardado =
+          await this.monederosRepository.save(nuevoMonedero);
+
         // Convertir a formato esperado
         monederos = {
           data: {
             id: monederoGuardado.id,
             idCliente: monederoGuardado.idCliente,
             idPasajero: monederoGuardado.idPasajero,
-          }
+          },
         };
 
         idClienteMonedero = monederoGuardado.idCliente;
@@ -145,7 +151,10 @@ export class AuthService {
           'Monederos',
           `Se creó un monedero automático con número de serie: ${numeroSerieMonedero} durante el registro de pasajero.`,
           'CREATE',
-          { numeroSerie: numeroSerieMonedero, idCliente: createAltaPasajaroDto.idCliente },
+          {
+            numeroSerie: numeroSerieMonedero,
+            idCliente: createAltaPasajaroDto.idCliente,
+          },
           1, // Usuario sistema por defecto
           EnumModulos.MONEDEROS,
           EstatusEnumBitcora.SUCCESS,
@@ -163,7 +172,7 @@ export class AuthService {
           const pasajeroAsociado = await this.pasajeroRepository.findOne({
             where: { id: monederos.data.idPasajero },
           });
-          
+
           if (pasajeroAsociado) {
             throw new BadRequestException(
               `El monedero con número de serie ${createAltaPasajaroDto.numeroSerieMonedero} ya está asignado al pasajero ${pasajeroAsociado.nombre} ${pasajeroAsociado.apellidoPaterno} (ID: ${pasajeroAsociado.id}).`,
@@ -210,7 +219,7 @@ export class AuthService {
       };
 
       //Creamos el usuario
-      const newUser = await this.usuariosRepository.create(bodyUsuario);
+      const newUser = this.usuariosRepository.create(bodyUsuario);
       const userSave = await this.usuariosRepository.save(newUser); //creamos el usuario
 
       //Le añadimos los permisos correspondientes
@@ -246,28 +255,30 @@ export class AuthService {
       );
 
       // Crear customer en NetPay si el pasajero tiene correo
-      console.log('[AUTH] Verificando si se debe crear customer en NetPay...');
-      console.log('[AUTH] createAltaPasajaroDto.correo:', createAltaPasajaroDto.correo);
-      console.log('[AUTH] pasajero.data?.id:', pasajero.data?.id);
-      
+      this.loggerService.debug(
+        'AuthService',
+        'Checking if NetPay customer creation is needed',
+        {
+          hasEmail: !!createAltaPasajaroDto.correo,
+          hasPasajeroId: !!pasajero.data?.id,
+        },
+      );
+
       if (createAltaPasajaroDto.correo && pasajero.data?.id) {
         try {
-          console.log('[AUTH] Entrando al bloque de creación de customer en NetPay');
-          
           // Combinar apellidos para lastName
           const lastName = createAltaPasajaroDto.apellidoMaterno
             ? `${createAltaPasajaroDto.apellidoPaterno} ${createAltaPasajaroDto.apellidoMaterno}`
             : createAltaPasajaroDto.apellidoPaterno;
 
           // Generar número aleatorio de 10 dígitos para identifier
-          const randomIdentifier = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+          const randomIdentifier = Math.floor(
+            1000000000 + Math.random() * 9000000000,
+          ).toString();
 
-          console.log('[AUTH] Creando customer en NetPay con datos:', {
-            firstName: createAltaPasajaroDto.nombre,
-            lastName,
+          this.loggerService.debug('AuthService', 'Creating NetPay customer', {
             email: createAltaPasajaroDto.correo,
-            phone: createAltaPasajaroDto.telefono,
-            identifier: randomIdentifier,
+            phone: createAltaPasajaroDto.telefono ? 'present' : 'absent',
           });
 
           const customerResponse = await this.netpayService.createCustomer({
@@ -278,52 +289,47 @@ export class AuthService {
             identifier: randomIdentifier,
           });
 
-          console.log('[AUTH] Respuesta completa de NetPay:', JSON.stringify(customerResponse, null, 2));
-          
           // El customerId viene en el campo 'id' de la respuesta de NetPay
-          const customerId = customerResponse?.id || customerResponse?.customerId;
-          
-          console.log('[AUTH] customerId extraído:', customerId);
-          console.log('[AUTH] pasajero.data.id:', pasajero.data.id);
-          console.log('[AUTH] userSave.id:', userSave.id);
-          
+          const customerId =
+            customerResponse?.id || customerResponse?.customerId;
+
+          this.loggerService.debug('AuthService', 'NetPay customer created', {
+            hasCustomerId: !!customerId,
+          });
+
           if (customerId) {
             const updateData = {
               customerIdNetPay: customerId,
               idUsuario: userSave.id,
             };
-            
-            console.log('[AUTH] Datos a actualizar en pasajero:', updateData);
-            
-            const updateResult = await this.pasajeroRepository.update(pasajero.data.id, updateData);
-            
-            console.log('[AUTH] Resultado de update:', updateResult);
-            
-            // Verificar que se actualizó correctamente
-            const pasajeroActualizado = await this.pasajeroRepository.findOne({
-              where: { id: pasajero.data.id },
-            });
-            
-            console.log('[AUTH] Pasajero después de actualizar:', {
-              id: pasajeroActualizado?.id,
-              idUsuario: pasajeroActualizado?.idUsuario,
-              customerIdNetPay: pasajeroActualizado?.customerIdNetPay,
-            });
+
+            const updateResult = await this.pasajeroRepository.update(
+              pasajero.data.id,
+              updateData,
+            );
 
             // Registro en la bitácora SUCCESS
             await this.bitacoraLogger.logToBitacora(
               'Pasajeros',
               `Se creó el customer en NetPay para el pasajero con ID: ${pasajero.data.id}, customerId: ${customerId}, idUsuario: ${userSave.id}`,
               'CREATE',
-              { pasajeroId: pasajero.data.id, customerId, idUsuario: userSave.id, updateResult },
+              {
+                pasajeroId: pasajero.data.id,
+                customerId,
+                idUsuario: userSave.id,
+                updateResult,
+              },
               Number(userSave.id),
               21, // EnumModulos.PASAJEROS
               EstatusEnumBitcora.SUCCESS,
             );
           } else {
-            console.error('[AUTH] ERROR: No se obtuvo customerId de la respuesta de NetPay');
-            console.error('[AUTH] Respuesta completa:', JSON.stringify(customerResponse, null, 2));
-            
+            this.loggerService.error(
+              'AuthService',
+              'NetPay customer created but customerId not found',
+              customerResponse,
+            );
+
             await this.bitacoraLogger.logToBitacora(
               'Pasajeros',
               `Se creó el customer en NetPay pero no se obtuvo el customerId. Respuesta: ${JSON.stringify(customerResponse)}`,
@@ -335,26 +341,35 @@ export class AuthService {
               'No se obtuvo customerId de la respuesta de NetPay',
             );
           }
-        } catch (netpayError) {
-          console.error('[AUTH] Error al crear customer en NetPay:', netpayError);
+        } catch (netpayError: unknown) {
+          this.loggerService.error(
+            'AuthService',
+            'NetPay customer creation failed',
+            netpayError,
+          );
+          const netpayErrorMessage =
+            netpayError instanceof Error
+              ? netpayError.message
+              : 'Unknown NetPay error';
           // Si falla la creación en NetPay, no fallar la creación del pasajero
           // Solo registrar el error en la bitácora
           await this.bitacoraLogger.logToBitacora(
             'Pasajeros',
             `Error al crear customer en NetPay para el pasajero con ID: ${pasajero.data.id}. El pasajero fue creado correctamente.`,
             'CREATE',
-            { pasajeroId: pasajero.data.id, error: netpayError.message },
+            { pasajeroId: pasajero.data.id, error: netpayErrorMessage },
             Number(userSave.id),
             21,
             EstatusEnumBitcora.ERROR,
-            netpayError.message,
+            netpayErrorMessage,
           );
         }
       } else {
-        console.log('[AUTH] No se creará customer en NetPay porque:', {
-          tieneCorreo: !!createAltaPasajaroDto.correo,
-          tienePasajeroId: !!pasajero.data?.id,
-        });
+        this.loggerService.debug(
+          'AuthService',
+          'NetPay customer creation skipped',
+          { reason: 'Missing email or pasajero ID' },
+        );
       }
 
       //armamos el payload para el token
@@ -382,15 +397,11 @@ export class AuthService {
           token,
           codigo,
         );
-      } catch (emailError) {
+      } catch (_emailError) {
         // Log del error pero no fallar la creación del pasajero
       }
 
       //afiliamos el monedero al pasajero y cambiamos estatus activo
-      function pad(n: number) {
-        return n < 10 ? '0' + n : n;
-      }
-
       // Actualizar el monedero con el ID del pasajero y activarlo
       if (monederos && monederos.data) {
         function pad(n: number) {
@@ -434,8 +445,7 @@ export class AuthService {
         data: {
           id: Number(usuarioSinPassword.id),
           nombre:
-            `${usuarioSinPassword.nombre} ${usuarioSinPassword.apellidoPaterno} ` ||
-            '',
+            `${usuarioSinPassword.nombre} ${usuarioSinPassword.apellidoPaterno}`.trim(),
         },
       };
       return result;
@@ -443,6 +453,7 @@ export class AuthService {
       if (error instanceof HttpException) {
         throw error;
       }
+      this.loggerService.error('AuthService', 'Operation failed', error);
       throw new InternalServerErrorException(
         'Ha ocurrido un error durante el proceso de creación del pasajero.',
       );
@@ -473,7 +484,6 @@ export class AuthService {
         },
       });
 
-
       if (user?.idCliente2?.estatus === 0) {
         throw new UnauthorizedException(
           'Acceso denegado: el cliente ha sido dado de baja.',
@@ -483,7 +493,9 @@ export class AuthService {
         throw new NotFoundException('No se encontró al usuario.');
       }
       if (user.validadorId !== loginAuthPin.validadorId) {
-        throw new NotFoundException('El dispositivo reportado no coincide con el dispositivo asignado al usuario.');
+        throw new NotFoundException(
+          'El dispositivo reportado no coincide con el dispositivo asignado al usuario.',
+        );
       }
 
       if (
@@ -571,7 +583,7 @@ SELECT
     lj.Licencias
 FROM DatosUsuario du
 LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
-          `)
+          `);
 
       if (!operador || operador.length === 0 || !operador[0]) {
         throw new NotFoundException('No se encontró información del operador.');
@@ -582,7 +594,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         email: user.userName,
         cliente: user.idCliente,
         rol: user.idRol,
-        idOperador: operador[0].idOperador
+        idOperador: operador[0].idOperador,
       };
 
       // Si el rol es 3 (operador), buscar turno y viaje activos
@@ -631,7 +643,8 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         identificacion: operador[0].identificacion,
         comprobanteDomicilioOperador: operador[0].comprobanteDomicilioOperador,
         certificadoMedicoOperador: operador[0].certificadoMedicoOperador,
-        antecedentesNoPenalesOperador: operador[0].antecedentesNoPenalesOperador,
+        antecedentesNoPenalesOperador:
+          operador[0].antecedentesNoPenalesOperador,
         estatusOperador: operador[0].estatusOperador,
         idCliente: Number(operador[0].idCliente),
         nombreCliente: operador[0].nombreCliente,
@@ -656,7 +669,10 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new InternalServerErrorException(error);
+      this.loggerService.error('AuthService', 'Operation failed', error);
+      throw new InternalServerErrorException(
+        'Internal error occurred. Please contact support.',
+      );
     }
   }
 
@@ -665,14 +681,12 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
   // ========================================
   async signIn(loginAuthDto: LoginAuthDto) {
     try {
-      console.log(loginAuthDto);
       const user = await this.usuariosRepository.findOne({
         relations: ['idRol2', 'idCliente2', 'idCliente2.idPadre2'],
         where: {
           userName: loginAuthDto.userName,
           estatus: 1,
           emailConfirmado: 1,
-        
         },
       });
       if (!user) {
@@ -774,9 +788,11 @@ SELECT
     lj.Licencias
 FROM DatosUsuario du
 LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
-          `)
+          `);
         if (!operador || operador.length === 0 || !operador[0]) {
-          throw new NotFoundException('No se encontró información del operador.');
+          throw new NotFoundException(
+            'No se encontró información del operador.',
+          );
         }
 
         const payload = {
@@ -784,7 +800,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
           email: user.userName,
           cliente: user.idCliente,
           rol: user.idRol,
-          idOperador: operador[0].idOperador
+          idOperador: operador[0].idOperador,
         };
 
         // Si el rol es 3 (operador), buscar turno y viaje activos
@@ -831,9 +847,11 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
           apellidoMaterno: operador[0].apellidoMaterno,
           fechaNacimiento: operador[0].fechaNacimiento,
           identificacion: operador[0].identificacion,
-          comprobanteDomicilioOperador: operador[0].comprobanteDomicilioOperador,
+          comprobanteDomicilioOperador:
+            operador[0].comprobanteDomicilioOperador,
           certificadoMedicoOperador: operador[0].certificadoMedicoOperador,
-          antecedentesNoPenalesOperador: operador[0].antecedentesNoPenalesOperador,
+          antecedentesNoPenalesOperador:
+            operador[0].antecedentesNoPenalesOperador,
           estatusOperador: operador[0].estatusOperador,
           idCliente: Number(operador[0].idCliente),
           nombreCliente: operador[0].nombreCliente,
@@ -856,7 +874,10 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         };
       }
       // Obtener logotipo del cliente o del padre si es null
-      const logotipo = user.idCliente2?.logotipo || user.idCliente2?.idPadre2?.logotipo || null;
+      const logotipo =
+        user.idCliente2?.logotipo ||
+        user.idCliente2?.idPadre2?.logotipo ||
+        null;
 
       return {
         message: `login exitoso`,
@@ -882,7 +903,10 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new InternalServerErrorException(error);
+      this.loggerService.error('AuthService', 'Operation failed', error);
+      throw new InternalServerErrorException(
+        'Internal error occurred. Please contact support.',
+      );
     }
   }
 
@@ -956,10 +980,10 @@ Muchas gracias por su preferencia.`;
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new InternalServerErrorException({
-        message: 'Ocurrió un error al registrar pasajero.',
-        error: error.message,
-      });
+      this.loggerService.error('AuthService', 'Operation failed', error);
+      throw new InternalServerErrorException(
+        'Internal error occurred. Please contact support.',
+      );
     }
   }
 
@@ -977,7 +1001,7 @@ Muchas gracias por su preferencia.`;
       if (!user) throw new BadRequestException('Usuario no encontrado');
 
       //Generamos el codigo
-      const codigo = await this.generarCodigo(
+      const _codigo = await this.generarCodigo(
         user.id,
         TipoCodigoAutenticacion.RECUPERACION_CONTRASENA,
       );
@@ -992,7 +1016,8 @@ Muchas gracias por su preferencia.`;
       const token = this.jwtService.sign(payload, {
         expiresIn: `${process.env.JWT_CONFIRMACION}`,
       });
-      const name = `${user.nombre ?? ''} ${user.apellidoPaterno ?? ''} ${user.apellidoMaterno ?? ''}`.trim();
+      const name =
+        `${user.nombre ?? ''} ${user.apellidoPaterno ?? ''} ${user.apellidoMaterno ?? ''}`.trim();
       await this.emailService.sendResetPasswordEmail(
         user.userName,
         name,
@@ -1003,10 +1028,10 @@ Muchas gracias por su preferencia.`;
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new InternalServerErrorException({
-        message: 'Ocurrió un error al recuperar contraseña del usuario.',
-        error: error.message,
-      });
+      this.loggerService.error('AuthService', 'Operation failed', error);
+      throw new InternalServerErrorException(
+        'Internal error occurred. Please contact support.',
+      );
     }
   }
 
@@ -1082,7 +1107,8 @@ Muchas gracias por su preferencia.`;
       const token = this.jwtService.sign(payload, {
         expiresIn: `${process.env.JWT_CONFIRMACION}`,
       });
-      const name = `${user.nombre ?? ''} ${user.apellidoPaterno ?? ''} ${user.apellidoMaterno ?? ''}`.trim();
+      const name =
+        `${user.nombre ?? ''} ${user.apellidoPaterno ?? ''} ${user.apellidoMaterno ?? ''}`.trim();
       await this.emailService.sendConfirmationEmail(
         user.userName,
         name,
@@ -1094,10 +1120,10 @@ Muchas gracias por su preferencia.`;
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new InternalServerErrorException({
-        message: 'Ocurrió un error al confirmar el usuario.',
-        error: error.message,
-      });
+      this.loggerService.error('AuthService', 'Operation failed', error);
+      throw new InternalServerErrorException(
+        'Internal error occurred. Please contact support.',
+      );
     }
   }
 
@@ -1132,10 +1158,10 @@ Muchas gracias por su preferencia.`;
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new InternalServerErrorException({
-        message: 'Ocurrió un error al actualizar contraseña del usuario.',
-        error: error.message,
-      });
+      this.loggerService.error('AuthService', 'Operation failed', error);
+      throw new InternalServerErrorException(
+        'Internal error occurred. Please contact support.',
+      );
     }
   }
 }

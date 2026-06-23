@@ -47,4 +47,3 @@ export class RecaudacionDiariaRutaDto {
   @IsOptional()
   idVariante?: number;
 }
-

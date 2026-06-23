@@ -8,7 +8,7 @@ import {
   IsIn,
   IsEnum,
 } from 'class-validator';
-import { EstadoComponente } from 'src/common/estatus.enum'; 
+import { EstadoComponente } from 'src/common/estatus.enum';
 
 export class CreateContadoresDto {
   @IsString()
@@ -63,4 +63,3 @@ export class CreateContadoresDto {
   })
   idCliente: number;
 }
-

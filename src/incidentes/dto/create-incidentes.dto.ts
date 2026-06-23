@@ -49,7 +49,9 @@ export class CreateIncidentesDto {
     maxLength: 1000,
   })
   @IsString({ message: 'El incidente debe ser una cadena de texto.' })
-  @MaxLength(1000, { message: 'El incidente no puede exceder los 1000 caracteres.' })
+  @MaxLength(1000, {
+    message: 'El incidente no puede exceder los 1000 caracteres.',
+  })
   @IsOptional()
   incidente?: string;
 
@@ -87,8 +89,10 @@ export class CreateIncidentesDto {
     description: 'Fecha y hora de registro del incidente',
     required: false,
   })
-  @IsDateString({}, { message: 'La fecha de registro debe ser una fecha válida.' })
+  @IsDateString(
+    {},
+    { message: 'La fecha de registro debe ser una fecha válida.' },
+  )
   @IsOptional()
   fhRegistro?: string;
 }
-

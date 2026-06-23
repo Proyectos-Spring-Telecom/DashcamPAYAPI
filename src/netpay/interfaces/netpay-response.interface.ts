@@ -2,12 +2,6 @@
  * Interfaces para las respuestas de la API de Netpay
  */
 
-export interface NetpayTokenResponse {
-  token: string;
-  cardType?: string;
-  cardBrand?: string;
-}
-
 export interface NetpayReferenceIdResponse {
   referenceId: string;
 }

@@ -29,4 +29,3 @@ import { Clientes } from 'src/entities/Clientes';
   exports: [VerificacionesService],
 })
 export class VerificacionesModule {}
-

@@ -9,7 +9,9 @@ describe('CatTipoVerificacionesService', () => {
       providers: [CatTipoVerificacionesService],
     }).compile();
 
-    service = module.get<CatTipoVerificacionesService>(CatTipoVerificacionesService);
+    service = module.get<CatTipoVerificacionesService>(
+      CatTipoVerificacionesService,
+    );
   });
 
   it('should be defined', () => {

@@ -36,7 +36,8 @@ export class CatEstatusMantenimientoController {
   @Post()
   @ApiOperation({
     summary: 'Crear un nuevo estatus de mantenimiento',
-    description: 'Crea un nuevo registro de estatus de mantenimiento en el catálogo.',
+    description:
+      'Crea un nuevo registro de estatus de mantenimiento en el catálogo.',
   })
   @ApiBody({
     type: CreateCatEstatusMantenimientoDto,
@@ -68,7 +69,8 @@ export class CatEstatusMantenimientoController {
   @Get('list')
   @ApiOperation({
     summary: 'Obtener listado de estatus de mantenimiento',
-    description: 'Obtiene un listado completo de todos los estatus de mantenimiento sin paginación.',
+    description:
+      'Obtiene un listado completo de todos los estatus de mantenimiento sin paginación.',
   })
   @ApiResponse({
     status: 200,
@@ -101,7 +103,8 @@ export class CatEstatusMantenimientoController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Listado paginado de estatus de mantenimiento obtenido exitosamente',
+    description:
+      'Listado paginado de estatus de mantenimiento obtenido exitosamente',
   })
   @ApiResponse({
     status: 401,
@@ -117,7 +120,8 @@ export class CatEstatusMantenimientoController {
   @Get(':id')
   @ApiOperation({
     summary: 'Obtener un estatus de mantenimiento por ID',
-    description: 'Obtiene los detalles de un estatus de mantenimiento específico por su ID.',
+    description:
+      'Obtiene los detalles de un estatus de mantenimiento específico por su ID.',
   })
   @ApiParam({
     name: 'id',
@@ -144,7 +148,8 @@ export class CatEstatusMantenimientoController {
   @Patch(':id')
   @ApiOperation({
     summary: 'Actualizar un estatus de mantenimiento',
-    description: 'Actualiza los datos de un estatus de mantenimiento existente.',
+    description:
+      'Actualiza los datos de un estatus de mantenimiento existente.',
   })
   @ApiParam({
     name: 'id',
@@ -188,7 +193,8 @@ export class CatEstatusMantenimientoController {
   @Delete(':id')
   @ApiOperation({
     summary: 'Eliminar un estatus de mantenimiento',
-    description: 'Elimina permanentemente un estatus de mantenimiento del catálogo.',
+    description:
+      'Elimina permanentemente un estatus de mantenimiento del catálogo.',
   })
   @ApiParam({
     name: 'id',

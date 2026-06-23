@@ -1,13 +1,13 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe} from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpStringResponseFilter } from './utils/http-string-response.filter';
 import { SocketIOAdapter } from './common/socket-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
+
   // Configurar el adaptador de Socket.IO
   app.useWebSocketAdapter(new SocketIOAdapter(app));
 
@@ -23,10 +23,10 @@ async function bootstrap() {
 
   const config = new DocumentBuilder()
     .setTitle('DashCam API')
-    .setDescription('Documentación de la API de DashCam') 
-    .setVersion('2.0') 
-    .addServer('https://dashcampay.com/apidev', 'Servidor de Desarrollo')   
-     .addServer('http://localhost:3000', 'Servidor de Desarrollo')
+    .setDescription('Documentación de la API de DashCam')
+    .setVersion('2.0')
+    .addServer('https://dashcampay.com/apidev', 'Servidor de Desarrollo')
+    .addServer('http://localhost:3000', 'Servidor de Desarrollo')
     .addBearerAuth(
       {
         type: 'http',
@@ -41,15 +41,27 @@ async function bootstrap() {
     .addTag('Autenticación', 'Endpoints de autenticación y registro')
     .addTag('Bitácora', 'Registro de actividades del sistema')
     .addTag('Contadores', 'Gestión de dispositivos Contadores')
-    .addTag('Catálogo categoría licencia', 'Catálogo de categorías de licencias')
+    .addTag(
+      'Catálogo categoría licencia',
+      'Catálogo de categorías de licencias',
+    )
     .addTag('Catálogo combustible', 'Catálogo de tipos de combustible')
-    .addTag('Catálogo estatus mantenimiento', 'Catálogo de estatus de mantenimiento')
-    .addTag('Catálogo referencia servicio', 'Catálogo de referencias de servicio')
+    .addTag(
+      'Catálogo estatus mantenimiento',
+      'Catálogo de estatus de mantenimiento',
+    )
+    .addTag(
+      'Catálogo referencia servicio',
+      'Catálogo de referencias de servicio',
+    )
     .addTag('Catálogo tipo combustible', 'Catálogo de tipos de combustible')
     .addTag('Catálogo tipo descuento', 'Catálogo de tipos de descuento')
     .addTag('Catálogo tipo licencia', 'Catálogo de tipos de licencia')
     .addTag('Catálogo tipo transacciones', 'Catálogo de tipos de transacciones')
-    .addTag('Catálogo tipo verificaciones', 'Catálogo de tipos de verificaciones')
+    .addTag(
+      'Catálogo tipo verificaciones',
+      'Catálogo de tipos de verificaciones',
+    )
     .addTag('Catálogo tipos pasajeros', 'Catálogo de tipos de pasajeros')
     .addTag('Clientes', 'Gestión de clientes')
     .addTag('Conteo pasajeros', 'Registro y consulta de conteo de pasajeros')
@@ -61,8 +73,14 @@ async function bootstrap() {
     .addTag('Instalaciones', 'Gestión de instalaciones')
     .addTag('Licencias', 'Gestión de licencias')
     .addTag('Mail', 'Servicio de correo electrónico')
-    .addTag('Mantenimiento combustible', 'Registro de mantenimiento de combustible')
-    .addTag('Mantenimiento kilometraje', 'Registro de mantenimiento por kilometraje')
+    .addTag(
+      'Mantenimiento combustible',
+      'Registro de mantenimiento de combustible',
+    )
+    .addTag(
+      'Mantenimiento kilometraje',
+      'Registro de mantenimiento por kilometraje',
+    )
     .addTag('Mantenimiento vehicular', 'Gestión de mantenimiento vehicular')
     .addTag('Modulos', 'Gestión de módulos del sistema')
     .addTag('Monederos', 'Gestión de monederos electrónicos')
@@ -96,16 +114,16 @@ async function bootstrap() {
       persistAuthorization: true,
       defaultModelsExpandDepth: -1,
     },
-  }); 
-  
+  });
+
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,       
-      forbidNonWhitelisted: true, 
-      transform: true,      
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
     }),
   );
-  
+
   await app.listen(process.env.PORT ?? 3001);
 }
-bootstrap();
+void bootstrap();

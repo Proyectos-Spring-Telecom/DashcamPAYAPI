@@ -1,9 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsDateString, IsInt, IsNotEmpty, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsString } from 'class-validator';
 
 export class CreateTurnoDto {
-
-
   @ApiProperty({
     description: 'Numero de serie del dispositivo.',
     example: 300,
@@ -11,5 +9,4 @@ export class CreateTurnoDto {
   @IsString()
   @IsNotEmpty()
   numeroSerieValidador: string;
-
 }

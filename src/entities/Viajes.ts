@@ -14,7 +14,7 @@ import { Operadores } from './Operadores';
 import { Turnos } from './Turnos';
 import { ConteoPasajeros } from './ConteoPasajeros';
 import { ViajesConteos } from './ViajesConteos';
-import { applySchema } from "src/common/apply-schema.decorator";
+import { applySchema } from 'src/common/apply-schema.decorator';
 
 @applySchema
 @Index('IX_Viajes_IdTurno_Inicio', ['inicio', 'idTurno'], {})
@@ -94,7 +94,10 @@ export class Viajes {
   )
   conteoPasajeros: ConteoPasajeros[];
 
-  @OneToMany(() => ConteoPasajeros, (conteoPasajeros) => conteoPasajeros.idViaje2)
+  @OneToMany(
+    () => ConteoPasajeros,
+    (conteoPasajeros) => conteoPasajeros.idViaje2,
+  )
   conteoPasajerosDirectos: ConteoPasajeros[];
 
   @OneToMany(() => ViajesConteos, (vc) => vc.viaje)

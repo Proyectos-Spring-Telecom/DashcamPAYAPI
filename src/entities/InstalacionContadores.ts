@@ -34,18 +34,25 @@ export class InstalacionContadores {
   @Column('tinyint', { name: 'Estatus', nullable: true, default: () => "'1'" })
   estatus: number | null;
 
-  @ManyToOne(() => Instalaciones, (instalaciones) => instalaciones.instalacionContadores, {
-    onDelete: 'NO ACTION',
-    onUpdate: 'NO ACTION',
-  })
+  @ManyToOne(
+    () => Instalaciones,
+    (instalaciones) => instalaciones.instalacionContadores,
+    {
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+    },
+  )
   @JoinColumn([{ name: 'IdInstalacion', referencedColumnName: 'id' }])
   instalacion: Instalaciones;
 
-  @ManyToOne(() => Contadores, (contadores) => contadores.instalacionContadores, {
-    onDelete: 'NO ACTION',
-    onUpdate: 'NO ACTION',
-  })
+  @ManyToOne(
+    () => Contadores,
+    (contadores) => contadores.instalacionContadores,
+    {
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+    },
+  )
   @JoinColumn([{ name: 'IdContador', referencedColumnName: 'id' }])
   contador: Contadores;
 }
-

@@ -11,7 +11,7 @@ export class CatcombustibleController {
   constructor(private readonly catcombustibleService: CatcombustibleService) {}
 
   @Get('list')
-  findAllList(@Request() req) {
+  findAllList(@Request() _req) {
     return this.catcombustibleService.findAllList();
   }
 }

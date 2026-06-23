@@ -46,10 +46,7 @@ export class RutasService {
     createRutaDto: CreateRutaDto,
   ): Promise<ApiCrudResponse> {
     try {
-      let zona;
-      const idZonaRuta = createRutaDto.idZona;
-
-      zona = await this.zonasRepository.findOne({
+      const zona = await this.zonasRepository.findOne({
         where: { id: createRutaDto.idZona },
       });
       if (!zona) throw new NotFoundException('Zona no encontrada');
@@ -229,11 +226,7 @@ ORDER BY ru.Id DESC
 
   LIMIT ? OFFSET ?;
     `;
-    return this.usuarioszonasRepository.query(query, [
-      ...ids,
-      limit,
-      offset,
-    ]);
+    return this.usuarioszonasRepository.query(query, [...ids, limit, offset]);
   }
 
   private async consultarTotalRutasPaginados(cliente: number) {
@@ -707,7 +700,7 @@ ORDER BY ru.Id DESC;
   // ========================================
   // 🔹 OBTENER RUTAS POR REGIÓN
   // ========================================
-  async findByZona(idZona: number, idUser: number, rol: number) {
+  async findByZona(idZona: number, _idUser: number, _rol: number) {
     try {
       // Consulta directa de rutas por zona (solo la zona especificada)
       const rutas = await this.rutasRepository.query(
@@ -793,7 +786,7 @@ ORDER BY ru.Id DESC
     }
   }
 
-  async findByCliente(idCliente: number, idUser: number, rol: number) {
+  async findByCliente(idCliente: number, _idUser: number, _rol: number) {
     try {
       // Consulta directa de rutas por cliente (a través de las zonas)
       const rutas = await this.rutasRepository.query(
@@ -932,7 +925,6 @@ ORDER BY ru.Id DESC;
     return await this.usuarioszonasRepository.query(query, [...ids, id]);
   }
 
-
   // ========================================
   // 🔹 OBTENER UNA RUTA
   // ========================================
@@ -1006,7 +998,7 @@ ORDER BY ru.Id DESC;
       }
 
       // Conversión directa de IDs
-      const zona = ruta.idZona2;
+      const _zona = ruta.idZona2;
 
       const data = ruta.map((item) => ({
         ...item,
@@ -1160,7 +1152,7 @@ ORDER BY ru.Id DESC;
   // ========================================
   // 🔹 ELIMINADO LOGICO
   // ========================================
-  async remove(id: number, idUser: number, rol: number) {
+  async remove(id: number, idUser: number, _rol: number) {
     try {
       const ruta = await this.rutasRepository.findOne({ where: { id: id } });
       if (!ruta) throw new NotFoundException('Ruta no encontrada');

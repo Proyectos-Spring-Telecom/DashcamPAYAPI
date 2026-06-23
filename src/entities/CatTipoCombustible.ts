@@ -11,6 +11,9 @@ export class CatTipoCombustible {
   @Column('varchar', { name: 'Nombre', length: 100 })
   nombre: string;
 
-  @OneToMany(() => MantenimientoCombustible, (mantenimientoCombustible) => mantenimientoCombustible.tipoCombustible)
+  @OneToMany(
+    () => MantenimientoCombustible,
+    (mantenimientoCombustible) => mantenimientoCombustible.tipoCombustible,
+  )
   mantenimientosCombustible: MantenimientoCombustible[];
 }

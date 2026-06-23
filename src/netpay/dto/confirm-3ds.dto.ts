@@ -3,7 +3,8 @@ import { IsNotEmpty, IsString } from 'class-validator';
 
 export class Confirm3DSDto {
   @ApiProperty({
-    description: 'Transaction Token ID de la transacción 3DS (transaccionTokenId)',
+    description:
+      'Transaction Token ID de la transacción 3DS (transaccionTokenId)',
     example: 'transaccionTokenId_1234567890',
     required: true,
   })

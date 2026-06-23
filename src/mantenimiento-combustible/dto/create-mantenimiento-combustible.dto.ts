@@ -14,7 +14,9 @@ export class CreateMantenimientoCombustibleDto {
     description: 'ID del tipo de combustible',
     required: false,
   })
-  @IsInt({ message: 'El ID del tipo de combustible debe ser un número entero.' })
+  @IsInt({
+    message: 'El ID del tipo de combustible debe ser un número entero.',
+  })
   @IsOptional()
   idTipoCombustible?: number;
 
@@ -87,4 +89,3 @@ export class CreateMantenimientoCombustibleDto {
   @IsOptional()
   idOperador?: number;
 }
-

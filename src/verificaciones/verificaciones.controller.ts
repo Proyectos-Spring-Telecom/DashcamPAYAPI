@@ -35,9 +35,7 @@ import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 @UseGuards(JwtAuthGuard)
 @Controller('verificaciones')
 export class VerificacionesController {
-  constructor(
-    private readonly verificacionesService: VerificacionesService,
-  ) {}
+  constructor(private readonly verificacionesService: VerificacionesService) {}
 
   @Post()
   @UseInterceptors(
@@ -45,12 +43,14 @@ export class VerificacionesController {
       storage: multer.memoryStorage(),
       limits: { fileSize: 10 * 1024 * 1024 }, // máximo 10 MB
       fileFilter: (req, file, cb) => {
-        const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf'];
+        const allowedTypes = [
+          'image/png',
+          'image/jpeg',
+          'image/jpg',
+          'application/pdf',
+        ];
         if (file && !allowedTypes.includes(file.mimetype)) {
-          return cb(
-            new Error('Solo se permiten PNG, JPG, JPEG o PDF'),
-            false,
-          );
+          return cb(new Error('Solo se permiten PNG, JPG, JPEG o PDF'), false);
         }
         cb(null, true);
       },
@@ -59,7 +59,8 @@ export class VerificacionesController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Crear una nueva verificación',
-    description: 'Crea un nuevo registro de verificación con toda la información. El campo notaVerificacion debe ser una imagen (archivo).',
+    description:
+      'Crea un nuevo registro de verificación con toda la información. El campo notaVerificacion debe ser una imagen (archivo).',
   })
   @ApiBody({
     type: CreateVerificacionesDto,
@@ -93,7 +94,8 @@ export class VerificacionesController {
   @Get()
   @ApiOperation({
     summary: 'Obtener verificaciones paginadas',
-    description: 'Obtiene un listado paginado de verificaciones con sus relaciones.',
+    description:
+      'Obtiene un listado paginado de verificaciones con sus relaciones.',
   })
   @ApiQuery({
     name: 'page',
@@ -124,13 +126,19 @@ export class VerificacionesController {
   ): Promise<ApiResponseCommon> {
     const idCliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.verificacionesService.findAll(page, limit, Number(idCliente), Number(rol));
+    return this.verificacionesService.findAll(
+      page,
+      limit,
+      Number(idCliente),
+      Number(rol),
+    );
   }
 
   @Get('categorias-mantenimiento-mecanico')
   @ApiOperation({
     summary: 'Obtener categorías de mantenimiento mecánico',
-    description: 'Obtiene las categorías de mantenimiento mecánico con sus características de evaluación.',
+    description:
+      'Obtiene las categorías de mantenimiento mecánico con sus características de evaluación.',
   })
   @ApiResponse({
     status: 200,
@@ -147,7 +155,8 @@ export class VerificacionesController {
   @Get(':id')
   @ApiOperation({
     summary: 'Obtener una verificación por ID',
-    description: 'Obtiene los detalles completos de una verificación específica por su ID, incluyendo todas sus relaciones.',
+    description:
+      'Obtiene los detalles completos de una verificación específica por su ID, incluyendo todas sus relaciones.',
   })
   @ApiParam({
     name: 'id',
@@ -167,10 +176,17 @@ export class VerificacionesController {
     status: 401,
     description: 'No autorizado',
   })
-  findOne(@Param('id', ParseIntPipe) id: number, @Request() req): Promise<ApiResponseCommon> {
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ): Promise<ApiResponseCommon> {
     const idCliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.verificacionesService.findOne(id, Number(idCliente), Number(rol));
+    return this.verificacionesService.findOne(
+      id,
+      Number(idCliente),
+      Number(rol),
+    );
   }
 
   @Patch(':id')
@@ -179,12 +195,14 @@ export class VerificacionesController {
       storage: multer.memoryStorage(),
       limits: { fileSize: 10 * 1024 * 1024 }, // máximo 10 MB
       fileFilter: (req, file, cb) => {
-        const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf'];
+        const allowedTypes = [
+          'image/png',
+          'image/jpeg',
+          'image/jpg',
+          'application/pdf',
+        ];
         if (file && !allowedTypes.includes(file.mimetype)) {
-          return cb(
-            new Error('Solo se permiten PNG, JPG, JPEG o PDF'),
-            false,
-          );
+          return cb(new Error('Solo se permiten PNG, JPG, JPEG o PDF'), false);
         }
         cb(null, true);
       },
@@ -193,7 +211,8 @@ export class VerificacionesController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Actualizar una verificación',
-    description: 'Actualiza los datos de una verificación existente. Solo se actualizan los campos proporcionados. El campo notaVerificacion puede ser una imagen (archivo) o una URL string.',
+    description:
+      'Actualiza los datos de una verificación existente. Solo se actualizan los campos proporcionados. El campo notaVerificacion puede ser una imagen (archivo) o una URL string.',
   })
   @ApiParam({
     name: 'id',
@@ -270,7 +289,8 @@ export class VerificacionesController {
   @Patch(':id/activar')
   @ApiOperation({
     summary: 'Activar una verificación',
-    description: 'Activa una verificación cambiando su estatus a 1 si estaba previamente en 0.',
+    description:
+      'Activa una verificación cambiando su estatus a 1 si estaba previamente en 0.',
   })
   @ApiParam({
     name: 'id',
@@ -302,4 +322,3 @@ export class VerificacionesController {
     return await this.verificacionesService.activar(id, idUser);
   }
 }
-

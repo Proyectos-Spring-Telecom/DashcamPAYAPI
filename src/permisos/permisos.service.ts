@@ -11,7 +11,11 @@ import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { UpdatePermisoEstatusDto } from './dto/update-permiso-estatus.dto';
-import { ApiCrudResponse, ApiResponseCommon, EstatusEnumBitcora } from 'src/common/ApiResponse';
+import {
+  ApiCrudResponse,
+  ApiResponseCommon,
+  EstatusEnumBitcora,
+} from 'src/common/ApiResponse';
 import { UsuariosPermisos } from 'src/entities/UsuariosPermisos';
 
 @Injectable()
@@ -98,7 +102,7 @@ export class PermisosService {
         idUsuario: 1, //Se asigna al usuario supremo
       };
       const permisoRoot = await this.usuarioPermiso.create(asignarRoot);
-      this.usuarioPermiso.save(permisoRoot);
+      void this.usuarioPermiso.save(permisoRoot);
 
       // --- Registro en la bitácora --- SUCCESS
       const querylogger = { createPermiso };
@@ -155,7 +159,7 @@ export class PermisosService {
       });
       if (!permiso) throw new NotFoundException('Permiso no encontrado');
       //Actualiza
-      const permisoResult = await this.permisoRepository.update(id, {
+      const _permisoResult = await this.permisoRepository.update(id, {
         estatus: updatePermisoEstatusDto.estatus,
       });
 
@@ -311,9 +315,8 @@ export class PermisosService {
     }
   }
   async obtenerPermisosAgrupados(idUsuario): Promise<any[]> {
-    try {
-      // Consulta SQL cruda
-      const query = `
+    // Consulta SQL cruda
+    const query = `
             SELECT 
             DISTINCT UsuariosPermisos.IdPermiso,
               Modulos.Id AS IdModulo,
@@ -330,40 +333,37 @@ export class PermisosService {
             WHERE 
               UsuariosPermisos.IdUsuario = '${idUsuario}'`;
 
-      // Ejecutar la consulta
-      const results = await this.permisoRepository.query(query);
+    // Ejecutar la consulta
+    const results = await this.permisoRepository.query(query);
 
-      if (!Array.isArray(results)) {
-        throw new Error('El resultado de la consulta no es un array');
+    if (!Array.isArray(results)) {
+      throw new Error('El resultado de la consulta no es un array');
+    }
+
+    // Agrupar resultados
+    const permisosAgrupados = results.reduce((result, item) => {
+      let moduloExistente = result.find(
+        (mod) => mod.IdModulo === item.IdModulo,
+      );
+
+      if (!moduloExistente) {
+        moduloExistente = {
+          IdModulo: item.IdModulo,
+          NombreModulo: item.NombreModulo,
+          Permisos: [],
+        };
+        result.push(moduloExistente);
       }
 
-      // Agrupar resultados
-      const permisosAgrupados = results.reduce((result, item) => {
-        let moduloExistente = result.find(
-          (mod) => mod.IdModulo === item.IdModulo,
-        );
+      moduloExistente.Permisos.push({
+        Id: item.PermisoId,
+        Nombre: item.PermisoNombre,
+        Descripcion: item.PermisoDescripcion,
+      });
 
-        if (!moduloExistente) {
-          moduloExistente = {
-            IdModulo: item.IdModulo,
-            NombreModulo: item.NombreModulo,
-            Permisos: [],
-          };
-          result.push(moduloExistente);
-        }
+      return result;
+    }, []);
 
-        moduloExistente.Permisos.push({
-          Id: item.PermisoId,
-          Nombre: item.PermisoNombre,
-          Descripcion: item.PermisoDescripcion,
-        });
-
-        return result;
-      }, []);
-
-      return permisosAgrupados;
-    } catch (error) {
-      throw error; // Lanzar el error para manejarlo en la capa superior si es necesario
-    }
+    return permisosAgrupados;
   }
 }

@@ -26,9 +26,9 @@ export class CatpasajeroController {
   @UseGuards(JwtAuthGuard)
   @Post()
   create(@Body() createCatpasajeroDto: CreateCatpasajeroDto, @Request() req) {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return this.catpasajeroService.create(+idUser, createCatpasajeroDto);
   }
 
@@ -36,7 +36,7 @@ export class CatpasajeroController {
   @Get('list')
   findAllList(@Request() req) {
     const cliente = req.user.cliente;
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const rol = req.user.rol;
     return this.catpasajeroService.findAllList(+cliente, +rol);
   }
@@ -60,9 +60,9 @@ export class CatpasajeroController {
     @Body() updateCatpasajeroDto: UpdateCatpasajeroDto,
     @Request() req,
   ) {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return this.catpasajeroService.update(+id, +idUser, updateCatpasajeroDto);
   }
 
@@ -73,18 +73,18 @@ export class CatpasajeroController {
     @Body() updateCatpasajeroDto: UpdateCatpasajeroDto,
     @Request() req,
   ) {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return this.catpasajeroService.update(+id, +idUser, updateCatpasajeroDto);
   }
 
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req) {
-    const cliente = req.user.cliente;
+    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     return this.catpasajeroService.remove(+id, +idUser);
   }
 }

@@ -1,8 +1,6 @@
-
-import {  IsOptional, IsNumber } from 'class-validator';
+import { IsOptional, IsNumber } from 'class-validator';
 
 export class UpdateHistoricoDto {
-
   @IsOptional()
   @IsNumber()
   idInstalacion?: number;
@@ -10,7 +8,6 @@ export class UpdateHistoricoDto {
   @IsOptional()
   @IsNumber()
   idValidador?: number;
-
 
   @IsOptional()
   @IsNumber()
@@ -20,9 +17,7 @@ export class UpdateHistoricoDto {
   @IsNumber()
   idVehiculo?: number;
 
-
   @IsOptional()
   @IsNumber()
   idCliente?: number;
-
 }

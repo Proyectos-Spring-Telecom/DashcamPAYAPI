@@ -35,4 +35,3 @@ export class TokenDirecciones {
   @JoinColumn([{ name: 'IdDireccion', referencedColumnName: 'id' }])
   idDireccion2: DireccionesTarjeta;
 }
-

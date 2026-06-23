@@ -12,7 +12,7 @@ import { Type } from 'class-transformer';
 export class CreateDetalleTransbordoDto {
   @ApiProperty({
     description: 'Costo del transbordo',
-    example: 5.50,
+    example: 5.5,
     type: Number,
     minimum: 0,
     maximum: 9999.99,
@@ -39,4 +39,3 @@ export class CreateDetalleTransbordoDto {
   @Min(1, { message: 'El número de transbordo debe ser al menos 1' })
   nroTransbordo: number;
 }
-

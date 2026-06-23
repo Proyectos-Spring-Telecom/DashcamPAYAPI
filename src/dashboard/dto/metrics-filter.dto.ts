@@ -19,11 +19,11 @@ export class MetricsFilterDto {
   @IsOptional()
   @ApiProperty({
     enum: EnumFiltroMetricas,
-    description: 'Filtro de período para las métricas: 1 (hoy), 2 (últimos 7 días), 3 (mes actual), 4 (año actual)',
+    description:
+      'Filtro de período para las métricas: 1 (hoy), 2 (últimos 7 días), 3 (mes actual), 4 (año actual)',
     example: EnumFiltroMetricas.HOY,
     required: false,
     default: EnumFiltroMetricas.HOY,
   })
   filtro?: EnumFiltroMetricas = EnumFiltroMetricas.HOY;
 }
-

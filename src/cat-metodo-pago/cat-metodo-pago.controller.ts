@@ -27,9 +27,7 @@ import { ApiResponseCommon, ApiCrudResponse } from 'src/common/ApiResponse';
 @ApiBearerAuth('bearer-token')
 @Controller('cat-metodo-pago')
 export class CatMetodoPagoController {
-  constructor(
-    private readonly catMetodoPagoService: CatMetodoPagoService,
-  ) {}
+  constructor(private readonly catMetodoPagoService: CatMetodoPagoService) {}
 
   @UseGuards(JwtAuthGuard)
   @Post()
@@ -61,7 +59,8 @@ export class CatMetodoPagoController {
   @Get('list')
   @ApiOperation({
     summary: 'Obtener listado de métodos de pago',
-    description: 'Obtiene un listado completo de todos los métodos de pago sin paginación.',
+    description:
+      'Obtiene un listado completo de todos los métodos de pago sin paginación.',
   })
   @ApiResponse({
     status: 200,
@@ -79,7 +78,8 @@ export class CatMetodoPagoController {
   @Get(':id')
   @ApiOperation({
     summary: 'Obtener un método de pago por ID',
-    description: 'Obtiene los detalles de un método de pago específico por su ID.',
+    description:
+      'Obtiene los detalles de un método de pago específico por su ID.',
   })
   @ApiResponse({
     status: 200,
@@ -136,7 +136,8 @@ export class CatMetodoPagoController {
   @Patch(':id')
   @ApiOperation({
     summary: 'Actualizar parcialmente un método de pago',
-    description: 'Actualiza parcialmente los datos de un método de pago existente.',
+    description:
+      'Actualiza parcialmente los datos de un método de pago existente.',
   })
   @ApiResponse({
     status: 200,

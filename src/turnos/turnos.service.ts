@@ -35,7 +35,7 @@ export class TurnosService {
     @InjectRepository(Instalaciones)
     private readonly instalacionesRepository: Repository<Instalaciones>,
     private readonly bitacoraLogger: BitacoraLoggerService,
-  ) { }
+  ) {}
 
   async create(
     idUser: number,
@@ -46,7 +46,9 @@ export class TurnosService {
     try {
       //validamos que el usuario sea rol operador
       if (!idOperador) {
-        throw new UnauthorizedException(`El usuario no está autorizado para generar un turno.`)
+        throw new UnauthorizedException(
+          `El usuario no está autorizado para generar un turno.`,
+        );
       }
 
       // Validar que el operador no tenga 2 turnos activos al mismo tiempo
@@ -58,11 +60,13 @@ export class TurnosService {
       });
 
       // Verificar si hay turnos activos sin fecha de fin (aún en curso)
-      const turnosActivosSinFin = turnosActivos.filter(turno => turno.fin === null);
+      const turnosActivosSinFin = turnosActivos.filter(
+        (turno) => turno.fin === null,
+      );
 
       if (turnosActivosSinFin.length > 0) {
         throw new BadRequestException(
-          `El operador ya tiene un turno activo. No se puede crear otro turno hasta que se finalice el turno actual (ID: ${turnosActivosSinFin[0].id}).`
+          `El operador ya tiene un turno activo. No se puede crear otro turno hasta que se finalice el turno actual (ID: ${turnosActivosSinFin[0].id}).`,
         );
       }
 
@@ -73,10 +77,9 @@ export class TurnosService {
       const ahora = new Date();
       const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
       const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
-
-      const { numeroSerieValidador } = createTurnoDto
+      const { numeroSerieValidador } = createTurnoDto;
 
       const query = `
       SELECT
@@ -85,19 +88,21 @@ FROM Validadores d
 LEFT JOIN Instalaciones i ON i.idValidador = d.Id
 WHERE d.NumeroSerie = '${numeroSerieValidador}'
 AND i.Estatus = 1
-      `
+      `;
 
       const instalacion = await this.turnosRepository.query(query);
       if (instalacion.length === 0) {
-        throw new NotFoundException('No se ha encontrado la instalación asignada al validador.');
+        throw new NotFoundException(
+          'No se ha encontrado la instalación asignada al validador.',
+        );
       }
 
       const body = {
         estatus: EstatusEnum.ACTIVO,
         idCliente: cliente,
         idOperador: idOperador,
-        idInstalacion: instalacion[0].Id
-      }
+        idInstalacion: instalacion[0].Id,
+      };
 
       const newTurno = await this.turnosRepository.create(body);
       const turnoSave = await this.turnosRepository.save(newTurno);
@@ -1008,15 +1013,15 @@ ORDER BY t.Id DESC;
           break;
 
         case 2:
-          turnos = await this.consultarTurnoOne(cliente, id)
+          turnos = await this.consultarTurnoOne(cliente, id);
           break;
 
         case 8:
-          turnos = await this.consultarTurnoOne(cliente, id)
+          turnos = await this.consultarTurnoOne(cliente, id);
           break;
 
         case 10:
-          turnos = await this.consultarTurnoOne(cliente, id)
+          turnos = await this.consultarTurnoOne(cliente, id);
           break;
 
         default:
@@ -1198,16 +1203,21 @@ ORDER BY t.Inicio DESC;
     }
   }
 
-  async update(id: number, idUser: number,
+  async update(
+    id: number,
+    idUser: number,
     cliente: number,
     idOperador: number,
-    updateTurnoDto: UpdateTurnoDto) {
+    updateTurnoDto: UpdateTurnoDto,
+  ) {
     try {
       //validamos que el usuario sea rol operador
       if (!idOperador) {
-        throw new UnauthorizedException(`El usuario no está autorizado para actualizar un turno.`)
+        throw new UnauthorizedException(
+          `El usuario no está autorizado para actualizar un turno.`,
+        );
       }
-      const { numeroSerieValidador } = updateTurnoDto
+      const { numeroSerieValidador } = updateTurnoDto;
 
       const query = `
       SELECT
@@ -1216,13 +1226,15 @@ FROM Validadores d
 LEFT JOIN Instalaciones i ON i.idValidador = d.Id
 WHERE d.NumeroSerie = '${numeroSerieValidador}'
 AND i.Estatus = 1
-      `
+      `;
 
       const instalacion = await this.turnosRepository.query(query);
       if (instalacion.length === 0) {
-        throw new NotFoundException('No se ha encontrado la instalación asignada al validador.');
+        throw new NotFoundException(
+          'No se ha encontrado la instalación asignada al validador.',
+        );
       }
-      const idInstalacion = instalacion[0].Id
+      const idInstalacion = instalacion[0].Id;
       //Generamos el desfase de horarios
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
@@ -1230,21 +1242,31 @@ AND i.Estatus = 1
       const ahora = new Date();
       const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
       const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
       // buscamos el turno
-      const turnoFind = await this.turnosRepository.findOne({ where: { id: id } })
+      const turnoFind = await this.turnosRepository.findOne({
+        where: { id: id },
+      });
 
       if (!turnoFind) {
-        throw new NotFoundException(`El turno con ID: ${id} no fue encontrado.`)
+        throw new NotFoundException(
+          `El turno con ID: ${id} no fue encontrado.`,
+        );
       }
 
-      if (cliente != turnoFind.idCliente || idOperador != turnoFind.idOperador || idInstalacion != turnoFind.idInstalacion) {
-        throw new BadRequestException(`El turno con ID: ${id} no coincide los valores del turno con el del usuario.`)
+      if (
+        cliente != turnoFind.idCliente ||
+        idOperador != turnoFind.idOperador ||
+        idInstalacion != turnoFind.idInstalacion
+      ) {
+        throw new BadRequestException(
+          `El turno con ID: ${id} no coincide los valores del turno con el del usuario.`,
+        );
       }
       const body = {
         fin: fechaDesfasada,
         estatus: EstatusEnum.INACTIVO,
-      }
+      };
 
       //actualizamos
       await this.turnosRepository.update(id, body);

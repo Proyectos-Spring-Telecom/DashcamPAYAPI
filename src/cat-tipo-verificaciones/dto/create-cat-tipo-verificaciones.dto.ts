@@ -12,4 +12,3 @@ export class CreateCatTipoVerificacionesDto {
   @MaxLength(100, { message: 'El nombre no puede exceder los 100 caracteres.' })
   nombre: string;
 }
-

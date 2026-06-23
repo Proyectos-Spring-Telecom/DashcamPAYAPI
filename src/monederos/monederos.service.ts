@@ -76,7 +76,7 @@ export class MonederosService {
         if (monederoPorIdCard) {
           throw new BadRequestException(
             `El ID de tarjeta "${createMonederoDto.idCard}" ya está registrado. Por favor, use un ID de tarjeta diferente.`,
-        );
+          );
         }
       }
 
@@ -121,9 +121,9 @@ export class MonederosService {
         fechaHoraFinal: fechaActual,
         numeroSerieMonedero: monederoSave.numeroSerie,
         numeroSerieValidador: null,
-        idMetodoPago:1
+        idMetodoPago: 1,
       });
-      const transaccionSave =
+      const _transaccionSave =
         await this.transaccionesrecargaRepository.save(newTransaccion);
 
       // --- Registro en la bitácora --- SUCCESS
@@ -277,16 +277,16 @@ INNER JOIN Clientes c ON m.IdCliente = c.Id
             `SELECT Id FROM Pasajeros WHERE IdUsuario = ?`,
             [idUser],
           );
-          
+
           if (!pasajeroByUserPag || pasajeroByUserPag.length === 0) {
             // Si no tiene pasajero asociado, devolver array vacío
             monederos = [];
             totalResult = [{ total: 0 }];
             break;
           }
-          
+
           const idPasajeroPag = pasajeroByUserPag[0].Id;
-          
+
           monederos = await this.monederoRepository.query(
             `
 SELECT 
@@ -351,7 +351,7 @@ WHERE m.IdPasajero = ? AND m.Estatus = 1
         default:
           // Consulta de datos paginados resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
-          
+
           monederos = await this.monederoRepository.query(
             `
 SELECT 
@@ -535,16 +535,16 @@ WHERE m.Estatus = 1
             `SELECT Id FROM Pasajeros WHERE IdUsuario = ?`,
             [idUser],
           );
-          
+
           if (!pasajeroByUserAct || pasajeroByUserAct.length === 0) {
             // Si no tiene pasajero asociado, devolver array vacío
             monederos = [];
             totalResult = [{ total: 0 }];
             break;
           }
-          
+
           const idPasajeroAct = pasajeroByUserAct[0].Id;
-          
+
           monederos = await this.monederoRepository.query(
             `
 SELECT 
@@ -609,7 +609,7 @@ WHERE m.IdPasajero = ? AND m.Estatus = 1
         default:
           // Consulta de datos paginados resto Usuario - Solo activos
           const { ids, placeholders } = await this.clienteHijos(cliente);
-          
+
           monederos = await this.monederoRepository.query(
             `
 SELECT 
@@ -766,13 +766,19 @@ WHERE c.Id IN (${placeholders}) AND m.Estatus = 1
     rol: number,
   ): Promise<ApiResponseCommon> {
     try {
-      console.log('[MONEDEROS LIST] Parámetros recibidos:', { idUser, email, cliente, rol, tipoRol: typeof rol });
-      
+      console.log('[MONEDEROS LIST] Parámetros recibidos:', {
+        idUser,
+        email,
+        cliente,
+        rol,
+        tipoRol: typeof rol,
+      });
+
       let monederos;
       // Convertir rol a número para el switch
       const rolNumero = Number(rol);
       console.log('[MONEDEROS LIST] Rol convertido a número:', rolNumero);
-      
+
       switch (rolNumero) {
         case 1:
           monederos = await this.monederoRepository.query(
@@ -824,19 +830,25 @@ ORDER BY m.Id DESC;
             `SELECT Id FROM Pasajeros WHERE IdUsuario = ?`,
             [idUser],
           );
-          
-          console.log('[MONEDEROS LIST] Resultado búsqueda pasajero:', pasajeroByUser);
-          
+
+          console.log(
+            '[MONEDEROS LIST] Resultado búsqueda pasajero:',
+            pasajeroByUser,
+          );
+
           if (!pasajeroByUser || pasajeroByUser.length === 0) {
             // Si no tiene pasajero asociado, devolver array vacío
-            console.log('[MONEDEROS LIST] No se encontró pasajero para idUser:', idUser);
+            console.log(
+              '[MONEDEROS LIST] No se encontró pasajero para idUser:',
+              idUser,
+            );
             monederos = [];
             break;
           }
-          
+
           const idPasajero = pasajeroByUser[0].Id;
           console.log('[MONEDEROS LIST] idPasajero encontrado:', idPasajero);
-          
+
           // Traer TODOS los monederos del pasajero, tenga o no idCliente
           monederos = await this.monederoRepository.query(
             `
@@ -878,14 +890,24 @@ ORDER BY m.Id DESC;
             `,
             [idPasajero],
           );
-          
-          console.log('[MONEDEROS LIST] Cantidad de monederos encontrados:', monederos.length);
-          console.log('[MONEDEROS LIST] Primeros 3 monederos:', monederos.slice(0, 3).map(m => ({ id: m.id, idPasajero: m.idPasajero, numeroSerie: m.numeroSerie })));
+
+          console.log(
+            '[MONEDEROS LIST] Cantidad de monederos encontrados:',
+            monederos.length,
+          );
+          console.log(
+            '[MONEDEROS LIST] Primeros 3 monederos:',
+            monederos.slice(0, 3).map((m) => ({
+              id: m.id,
+              idPasajero: m.idPasajero,
+              numeroSerie: m.numeroSerie,
+            })),
+          );
           break;
 
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
-          
+
           monederos = await this.monederoRepository.query(
             `
 SELECT 
@@ -1001,10 +1023,7 @@ ORDER BY m.Id DESC;
   async findOneMonederoBySerie(NumeroSerie: string) {
     try {
       const monedero = await this.monederoRepository.findOne({
-        where: [
-          { numeroSerie: NumeroSerie },
-          { idCard: NumeroSerie },
-        ],
+        where: [{ numeroSerie: NumeroSerie }, { idCard: NumeroSerie }],
         relations: ['idPasajero2', 'idPasajero2.idUsuario2'],
       });
       if (!monedero) {
@@ -1276,7 +1295,10 @@ ORDER BY m.Id DESC;
       }
 
       // Validar que el numeroSerie no esté duplicado (solo si se está actualizando)
-      if (updateMonederoDto.numeroSerie !== undefined && updateMonederoDto.numeroSerie !== monedero.numeroSerie) {
+      if (
+        updateMonederoDto.numeroSerie !== undefined &&
+        updateMonederoDto.numeroSerie !== monedero.numeroSerie
+      ) {
         const monederoPorSerie = await this.monederoRepository.findOne({
           where: { numeroSerie: updateMonederoDto.numeroSerie },
         });
@@ -1288,7 +1310,10 @@ ORDER BY m.Id DESC;
       }
 
       // Validar que el idCard no esté duplicado (solo si se está actualizando y se proporciona)
-      if (updateMonederoDto.idCard !== undefined && updateMonederoDto.idCard !== null) {
+      if (
+        updateMonederoDto.idCard !== undefined &&
+        updateMonederoDto.idCard !== null
+      ) {
         // Solo validar si el idCard es diferente al actual o si el monedero actual no tiene idCard
         if (updateMonederoDto.idCard !== monedero.idCard) {
           const monederoPorIdCard = await this.monederoRepository.findOne({
@@ -1305,11 +1330,14 @@ ORDER BY m.Id DESC;
       // Validar que si se intenta asignar un idPasajero, el monedero no esté ya asignado a otro pasajero
       if (updateMonederoDto.idPasajero !== undefined) {
         // Si el monedero ya tiene un idPasajero y es diferente al que se intenta asignar
-        if (monedero.idPasajero && monedero.idPasajero !== updateMonederoDto.idPasajero) {
+        if (
+          monedero.idPasajero &&
+          monedero.idPasajero !== updateMonederoDto.idPasajero
+        ) {
           const pasajeroAsociado = await this.pasajeroRepository.findOne({
             where: { id: monedero.idPasajero },
           });
-          
+
           if (pasajeroAsociado) {
             throw new BadRequestException(
               `El monedero con número de serie ${monedero.numeroSerie} ya está asignado al pasajero ${pasajeroAsociado.nombre} ${pasajeroAsociado.apellidoPaterno} (ID: ${pasajeroAsociado.id}).`,
@@ -1333,7 +1361,7 @@ ORDER BY m.Id DESC;
           const pasajero = await this.pasajeroRepository.findOne({
             where: { id: updateMonederoDto.idPasajero },
           });
-          
+
           if (pasajero) {
             throw new BadRequestException(
               `El pasajero ${pasajero.nombre} ${pasajero.apellidoPaterno} (ID: ${pasajero.id}) ya tiene un monedero activo asignado (Número de serie: ${monederoExistente.numeroSerie}, ID: ${monederoExistente.id}). Un pasajero no puede tener dos monederos activos.`,
@@ -1502,7 +1530,7 @@ ORDER BY m.Id DESC;
       const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
       const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
 
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
       //Actualizamos los datos del monedero extraviado al nuevo monedero
       nuevoMonedero.saldo = monedero.saldo;
@@ -1611,7 +1639,7 @@ ORDER BY m.Id DESC;
           // El QR base64 contiene una imagen, pero el JSON original está embebido
           // Necesitamos extraer el JSON del QR para comparar el saldo
           // El QR fue generado con: JSON.stringify({ saldo, numeroSerie, idMonedero, idPasajero })
-          
+
           // Generar el JSON esperado con el saldo actual y numeroPasajes
           const qrDataEsperado = JSON.stringify({
             saldo: saldo,
@@ -1637,8 +1665,9 @@ ORDER BY m.Id DESC;
 
           // Verificar también si el numeroPasajes coincide con el QR existente
           // Si el numeroPasajes cambió, necesitamos generar un nuevo QR
-          const numeroPasajesCoincide = qrExistente.numeroPasajes === numeroPasajes;
-          
+          const numeroPasajesCoincide =
+            qrExistente.numeroPasajes === numeroPasajes;
+
           // Si son muy similares y el numeroPasajes coincide, devolver el QR existente
           if (qrExistenteInicio === qrTemporalInicio && numeroPasajesCoincide) {
             return {
@@ -1658,13 +1687,14 @@ ORDER BY m.Id DESC;
           await this.qrCodesRepository.update(qrExistente.id, {
             estatus: EstatusEnum.INACTIVO,
           });
-        } catch (comparisonError) {
+        } catch (_comparisonError) {
           // Si hay error al comparar, desactivar el anterior y generar uno nuevo
           try {
             await this.qrCodesRepository.update(qrExistente.id, {
               estatus: EstatusEnum.INACTIVO,
             });
-          } catch (updateError) {
+          } catch (_updateError) {
+            // Ignorar fallo al desactivar QR anterior
           }
         }
       }
@@ -1710,13 +1740,14 @@ ORDER BY m.Id DESC;
       };
     } catch (error) {
       // Log del error para debugging
-      
+
       if (error instanceof HttpException) {
         throw error;
       }
-      
+
       // Proporcionar más información sobre el error
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Error desconocido';
       throw new InternalServerErrorException(
         `Hubo un error al generar el código QR del monedero: ${errorMessage}`,
       );

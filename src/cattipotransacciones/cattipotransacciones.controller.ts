@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Body, UseGuards } from '@nestjs/common';
 import { CattipotransaccionesService } from './cattipotransacciones.service';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -8,7 +8,9 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 @UseGuards(JwtAuthGuard)
 @Controller('cattipotransacciones')
 export class CattipotransaccionesController {
-  constructor(private readonly cattipotransaccionesService: CattipotransaccionesService) {}
+  constructor(
+    private readonly cattipotransaccionesService: CattipotransaccionesService,
+  ) {}
 
   @Get('list')
   findAllList() {

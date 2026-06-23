@@ -4,7 +4,6 @@ import {
   IsArray,
   IsIn,
   IsInt,
-  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -22,7 +21,8 @@ export class ContadorAnteriorDto {
   idContador: number;
 
   @ApiProperty({
-    description: 'Estatus anterior del contador (0=Inactivo, 1=Disponible, 2=Asignado, 3=Mantenimiento, 4=Dañado, 5=Retirado)',
+    description:
+      'Estatus anterior del contador (0=Inactivo, 1=Disponible, 2=Asignado, 3=Mantenimiento, 4=Dañado, 5=Retirado)',
     example: 5,
   })
   @IsInt()
@@ -51,7 +51,8 @@ export class UpdateInstalacioneDto extends PartialType(CreateInstalacionesDto) {
   estatusValidadorAnterior?: number;
 
   @ApiProperty({
-    description: 'IDs de los contadores asociados a la instalación (nuevos o actuales)',
+    description:
+      'IDs de los contadores asociados a la instalación (nuevos o actuales)',
     example: [8, 10],
     type: [Number],
   })
@@ -64,7 +65,7 @@ export class UpdateInstalacioneDto extends PartialType(CreateInstalacionesDto) {
     description: 'Array de contadores anteriores con su ID y estatus anterior',
     example: [
       { idContador: 5, estatusAnterior: 5 },
-      { idContador: 7, estatusAnterior: 1 }
+      { idContador: 7, estatusAnterior: 1 },
     ],
     type: [ContadorAnteriorDto],
   })

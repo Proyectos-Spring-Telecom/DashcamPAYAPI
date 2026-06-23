@@ -1,17 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsDateString,
-  IsEmail,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  Matches,
-  Validate,
-  ValidatorConstraint,
-  ValidatorConstraintInterface,
-} from 'class-validator';
-
-
+import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
 
 export class UpdateUsuarioValidadorDto {
   @IsEmail()
@@ -30,5 +18,4 @@ export class UpdateUsuarioValidadorDto {
     required: true,
   })
   validadorId: string;
-  
 }

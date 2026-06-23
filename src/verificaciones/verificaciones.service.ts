@@ -12,7 +12,7 @@ import { Verificaciones } from 'src/entities/Verificaciones';
 import { Instalaciones } from 'src/entities/Instalaciones';
 import { Operadores } from 'src/entities/Operadores';
 import { CatTipoVerificaciones } from 'src/entities/CatTipoVerificaciones';
-import { Repository, In } from 'typeorm';
+import { Repository } from 'typeorm';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { S3Service } from 'src/s3/s3.service';
 import {
@@ -69,7 +69,10 @@ export class VerificacionesService {
   ): Promise<ApiCrudResponse> {
     try {
       // Validar claves foráneas si se proporcionan
-      if (createVerificacionesDto.idInstalacion !== undefined && createVerificacionesDto.idInstalacion !== null) {
+      if (
+        createVerificacionesDto.idInstalacion !== undefined &&
+        createVerificacionesDto.idInstalacion !== null
+      ) {
         const instalacionExists = await this.instalacionesRepository.findOne({
           where: { id: createVerificacionesDto.idInstalacion },
         });
@@ -80,7 +83,10 @@ export class VerificacionesService {
         }
       }
 
-      if (createVerificacionesDto.idOperador !== undefined && createVerificacionesDto.idOperador !== null) {
+      if (
+        createVerificacionesDto.idOperador !== undefined &&
+        createVerificacionesDto.idOperador !== null
+      ) {
         const operadorExists = await this.operadoresRepository.findOne({
           where: { id: createVerificacionesDto.idOperador },
         });
@@ -91,10 +97,14 @@ export class VerificacionesService {
         }
       }
 
-      if (createVerificacionesDto.idTipoVerificacion !== undefined && createVerificacionesDto.idTipoVerificacion !== null) {
-        const tipoVerificacionExists = await this.catTipoVerificacionesRepository.findOne({
-          where: { id: createVerificacionesDto.idTipoVerificacion },
-        });
+      if (
+        createVerificacionesDto.idTipoVerificacion !== undefined &&
+        createVerificacionesDto.idTipoVerificacion !== null
+      ) {
+        const tipoVerificacionExists =
+          await this.catTipoVerificacionesRepository.findOne({
+            where: { id: createVerificacionesDto.idTipoVerificacion },
+          });
         if (!tipoVerificacionExists) {
           throw new BadRequestException(
             `El tipo de verificación con ID ${createVerificacionesDto.idTipoVerificacion} no existe.`,
@@ -115,7 +125,9 @@ export class VerificacionesService {
       }
 
       // Convertir fechas de formato ISO a formato DATE (YYYY-MM-DD)
-      const formatDateForDB = (dateString: string | undefined): string | undefined => {
+      const formatDateForDB = (
+        dateString: string | undefined,
+      ): string | undefined => {
         if (!dateString) return undefined;
         // Si ya está en formato YYYY-MM-DD, retornarlo
         if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
@@ -130,14 +142,16 @@ export class VerificacionesService {
       // Crear el registro con los datos del DTO
       const dataToCreate = {
         ...createVerificacionesDto,
-        verificacionActual: formatDateForDB(createVerificacionesDto.verificacionActual),
-        proximaVerificacion: formatDateForDB(createVerificacionesDto.proximaVerificacion),
+        verificacionActual: formatDateForDB(
+          createVerificacionesDto.verificacionActual,
+        ),
+        proximaVerificacion: formatDateForDB(
+          createVerificacionesDto.proximaVerificacion,
+        ),
         notaVerificacion: notaVerificacionUrl,
       };
 
-      const create = this.verificacionesRepository.create(
-        dataToCreate,
-      );
+      const create = this.verificacionesRepository.create(dataToCreate);
       const savedResult = await this.verificacionesRepository.save(create);
       const saved = Array.isArray(savedResult) ? savedResult[0] : savedResult;
 
@@ -194,9 +208,10 @@ export class VerificacionesService {
     // Si evaluacion tiene categorías, expandirlas con sus nombres y características
     if (Array.isArray(evaluacion.categorias) || evaluacion.categoria) {
       // Obtener todas las categorías con sus características
-      const categorias = await this.catCategoriaMantenimientoMecanicoRepository.find({
-        relations: ['caracteristicasEvaluacion'],
-      });
+      const categorias =
+        await this.catCategoriaMantenimientoMecanicoRepository.find({
+          relations: ['caracteristicasEvaluacion'],
+        });
 
       // Crear un mapa de categorías por ID
       const categoriasMap = new Map();
@@ -204,12 +219,15 @@ export class VerificacionesService {
         categoriasMap.set(cat.id, {
           id: Number(cat.id),
           nombre: cat.nombre,
-          caracteristicasEvaluacion: cat.caracteristicasEvaluacion?.map((car) => ({
-            id: Number(car.id),
-            nombre: car.nombre,
-            idCatCategoriaMantenimientoMecanico: Number(car.idCatCategoriaMantenimientoMecanico),
-            validado: false,
-          })) || [],
+          caracteristicasEvaluacion:
+            cat.caracteristicasEvaluacion?.map((car) => ({
+              id: Number(car.id),
+              nombre: car.nombre,
+              idCatCategoriaMantenimientoMecanico: Number(
+                car.idCatCategoriaMantenimientoMecanico,
+              ),
+              validado: false,
+            })) || [],
         });
       });
 
@@ -217,18 +235,23 @@ export class VerificacionesService {
       if (Array.isArray(evaluacion.categorias)) {
         return {
           categorias: evaluacion.categorias.map((catEval: any) => {
-            const categoria = categoriasMap.get(catEval.id || catEval.categoria);
+            const categoria = categoriasMap.get(
+              catEval.id || catEval.categoria,
+            );
             if (categoria) {
               return {
                 ...categoria,
-                caracteristicasEvaluacion: categoria.caracteristicasEvaluacion.map((car: any) => {
-                  const carEval = catEval.caracteristicas?.find((c: any) => c.id === car.id);
-                  return {
-                    ...car,
-                    validado: carEval?.validado || false,
-                    valor: carEval?.valor || null,
-                  };
-                }),
+                caracteristicasEvaluacion:
+                  categoria.caracteristicasEvaluacion.map((car: any) => {
+                    const carEval = catEval.caracteristicas?.find(
+                      (c: any) => c.id === car.id,
+                    );
+                    return {
+                      ...car,
+                      validado: carEval?.validado || false,
+                      valor: carEval?.valor || null,
+                    };
+                  }),
               };
             }
             return catEval;
@@ -243,14 +266,17 @@ export class VerificacionesService {
           return {
             categoria: {
               ...categoria,
-              caracteristicasEvaluacion: categoria.caracteristicasEvaluacion.map((car: any) => {
-                const carEval = evaluacion.caracteristicas?.find((c: any) => c.id === car.id);
-                return {
-                  ...car,
-                  validado: carEval?.validado || false,
-                  valor: carEval?.valor || null,
-                };
-              }),
+              caracteristicasEvaluacion:
+                categoria.caracteristicasEvaluacion.map((car: any) => {
+                  const carEval = evaluacion.caracteristicas?.find(
+                    (c: any) => c.id === car.id,
+                  );
+                  return {
+                    ...car,
+                    validado: carEval?.validado || false,
+                    valor: carEval?.valor || null,
+                  };
+                }),
             },
           };
         }
@@ -261,7 +287,12 @@ export class VerificacionesService {
     return evaluacion;
   }
 
-  async findAll(page: number, limit: number, idCliente: number, rol: number): Promise<ApiResponseCommon> {
+  async findAll(
+    page: number,
+    limit: number,
+    idCliente: number,
+    rol: number,
+  ): Promise<ApiResponseCommon> {
     try {
       const offset = (page - 1) * limit;
       let verificaciones;
@@ -402,10 +433,12 @@ WHERE c.Id IN (${placeholders})
           let evaluacionTransformada = null;
           if (item.evaluacion) {
             try {
-              const evaluacionJson = typeof item.evaluacion === 'string' 
-                ? JSON.parse(item.evaluacion) 
-                : item.evaluacion;
-              evaluacionTransformada = await this.transformEvaluacion(evaluacionJson);
+              const evaluacionJson =
+                typeof item.evaluacion === 'string'
+                  ? JSON.parse(item.evaluacion)
+                  : item.evaluacion;
+              evaluacionTransformada =
+                await this.transformEvaluacion(evaluacionJson);
             } catch {
               evaluacionTransformada = item.evaluacion;
             }
@@ -415,29 +448,35 @@ WHERE c.Id IN (${placeholders})
             id: Number(item.id),
             verificacionActual: item.verificacionActual,
             proximaVerificacion: item.proximaVerificacion,
-            idInstalacion: item.idInstalacion ? Number(item.idInstalacion) : null,
+            idInstalacion: item.idInstalacion
+              ? Number(item.idInstalacion)
+              : null,
             idOperador: item.idOperador ? Number(item.idOperador) : null,
             estatus: item.estatus,
             notaVerificacion: item.notaVerificacion,
             fhRegistro: item.fhRegistro,
-            idTipoVerificacion: item.idTipoVerificacion ? Number(item.idTipoVerificacion) : null,
+            idTipoVerificacion: item.idTipoVerificacion
+              ? Number(item.idTipoVerificacion)
+              : null,
             evaluacion: evaluacionTransformada,
             nombreTipoVerificacion: item.nombreTipoVerificacion?.trim() || null,
             placaVehiculo: item.placaVehiculo || null,
             imagenVehiculo: item.imagenVehiculo || null,
             nombreOperador: item.nombreOperador?.trim() || null,
             nombreCliente: item.nombreCliente?.trim() || null,
-            ...(rol === 1 || rol === 2) && item.idClienteData ? {
-              cliente: {
-                id: Number(item.idClienteData),
-                nombre: item.nombreClienteData,
-                apellidoPaterno: item.apellidoPaternoCliente,
-                apellidoMaterno: item.apellidoMaternoCliente,
-                estatus: item.estatusCliente,
-              },
-            } : {},
+            ...((rol === 1 || rol === 2) && item.idClienteData
+              ? {
+                  cliente: {
+                    id: Number(item.idClienteData),
+                    nombre: item.nombreClienteData,
+                    apellidoPaterno: item.apellidoPaternoCliente,
+                    apellidoMaterno: item.apellidoMaternoCliente,
+                    estatus: item.estatusCliente,
+                  },
+                }
+              : {}),
           };
-        })
+        }),
       );
 
       const result: ApiResponseCommon = {
@@ -459,7 +498,11 @@ WHERE c.Id IN (${placeholders})
     }
   }
 
-  async findOne(id: number, idCliente: number, rol: number): Promise<ApiResponseCommon> {
+  async findOne(
+    id: number,
+    idCliente: number,
+    rol: number,
+  ): Promise<ApiResponseCommon> {
     try {
       let verificaciones;
 
@@ -569,10 +612,12 @@ AND v.Id = ?
       let evaluacionTransformada = null;
       if (item.evaluacion) {
         try {
-          const evaluacionJson = typeof item.evaluacion === 'string' 
-            ? JSON.parse(item.evaluacion) 
-            : item.evaluacion;
-          evaluacionTransformada = await this.transformEvaluacion(evaluacionJson);
+          const evaluacionJson =
+            typeof item.evaluacion === 'string'
+              ? JSON.parse(item.evaluacion)
+              : item.evaluacion;
+          evaluacionTransformada =
+            await this.transformEvaluacion(evaluacionJson);
         } catch {
           evaluacionTransformada = item.evaluacion;
         }
@@ -584,27 +629,33 @@ AND v.Id = ?
             id: Number(item.id),
             verificacionActual: item.verificacionActual,
             proximaVerificacion: item.proximaVerificacion,
-            idInstalacion: item.idInstalacion ? Number(item.idInstalacion) : null,
+            idInstalacion: item.idInstalacion
+              ? Number(item.idInstalacion)
+              : null,
             idOperador: item.idOperador ? Number(item.idOperador) : null,
             estatus: item.estatus,
             notaVerificacion: item.notaVerificacion,
             fhRegistro: item.fhRegistro,
-            idTipoVerificacion: item.idTipoVerificacion ? Number(item.idTipoVerificacion) : null,
+            idTipoVerificacion: item.idTipoVerificacion
+              ? Number(item.idTipoVerificacion)
+              : null,
             evaluacion: evaluacionTransformada,
             nombreTipoVerificacion: item.nombreTipoVerificacion?.trim() || null,
             placaVehiculo: item.placaVehiculo || null,
             imagenVehiculo: item.imagenVehiculo || null,
             nombreOperador: item.nombreOperador?.trim() || null,
             nombreCliente: item.nombreCliente?.trim() || null,
-            ...(rol === 1 || rol === 2) && item.idClienteData ? {
-              cliente: {
-                id: Number(item.idClienteData),
-                nombre: item.nombreClienteData,
-                apellidoPaterno: item.apellidoPaternoCliente,
-                apellidoMaterno: item.apellidoMaternoCliente,
-                estatus: item.estatusCliente,
-              },
-            } : {},
+            ...((rol === 1 || rol === 2) && item.idClienteData
+              ? {
+                  cliente: {
+                    id: Number(item.idClienteData),
+                    nombre: item.nombreClienteData,
+                    apellidoPaterno: item.apellidoPaternoCliente,
+                    apellidoMaterno: item.apellidoMaternoCliente,
+                    estatus: item.estatusCliente,
+                  },
+                }
+              : {}),
           },
         ],
       };
@@ -634,7 +685,10 @@ AND v.Id = ?
       }
 
       // Validar claves foráneas si se proporcionan
-      if (updateVerificacionesDto.idInstalacion !== undefined && updateVerificacionesDto.idInstalacion !== null) {
+      if (
+        updateVerificacionesDto.idInstalacion !== undefined &&
+        updateVerificacionesDto.idInstalacion !== null
+      ) {
         const instalacionExists = await this.instalacionesRepository.findOne({
           where: { id: updateVerificacionesDto.idInstalacion },
         });
@@ -645,7 +699,10 @@ AND v.Id = ?
         }
       }
 
-      if (updateVerificacionesDto.idOperador !== undefined && updateVerificacionesDto.idOperador !== null) {
+      if (
+        updateVerificacionesDto.idOperador !== undefined &&
+        updateVerificacionesDto.idOperador !== null
+      ) {
         const operadorExists = await this.operadoresRepository.findOne({
           where: { id: updateVerificacionesDto.idOperador },
         });
@@ -656,10 +713,14 @@ AND v.Id = ?
         }
       }
 
-      if (updateVerificacionesDto.idTipoVerificacion !== undefined && updateVerificacionesDto.idTipoVerificacion !== null) {
-        const tipoVerificacionExists = await this.catTipoVerificacionesRepository.findOne({
-          where: { id: updateVerificacionesDto.idTipoVerificacion },
-        });
+      if (
+        updateVerificacionesDto.idTipoVerificacion !== undefined &&
+        updateVerificacionesDto.idTipoVerificacion !== null
+      ) {
+        const tipoVerificacionExists =
+          await this.catTipoVerificacionesRepository.findOne({
+            where: { id: updateVerificacionesDto.idTipoVerificacion },
+          });
         if (!tipoVerificacionExists) {
           throw new BadRequestException(
             `El tipo de verificación con ID ${updateVerificacionesDto.idTipoVerificacion} no existe.`,
@@ -680,7 +741,9 @@ AND v.Id = ?
       }
 
       // Convertir fechas de formato ISO a formato DATE (YYYY-MM-DD)
-      const formatDateForDB = (dateString: string | undefined): string | undefined => {
+      const formatDateForDB = (
+        dateString: string | undefined,
+      ): string | undefined => {
         if (!dateString) return undefined;
         // Si ya está en formato YYYY-MM-DD, retornarlo
         if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
@@ -695,53 +758,57 @@ AND v.Id = ?
       // Preparar datos para actualizar, filtrando campos undefined, null y strings vacíos
       // (FormData puede enviar strings vacíos en lugar de undefined)
       const dataToUpdate: any = {};
-      
+
       // Helper para verificar si un valor está presente y no es vacío
       const hasValue = (value: any): boolean => {
         return value !== undefined && value !== null && value !== '';
       };
-      
+
       // Helper para convertir a número si es posible
       const toNumber = (value: any): number | null => {
         if (value === null || value === undefined || value === '') return null;
         const num = Number(value);
         return isNaN(num) ? null : num;
       };
-      
+
       // Verificar y agregar verificacionActual
       if (hasValue(updateVerificacionesDto.verificacionActual)) {
-        const fechaFormateada = formatDateForDB(String(updateVerificacionesDto.verificacionActual));
+        const fechaFormateada = formatDateForDB(
+          String(updateVerificacionesDto.verificacionActual),
+        );
         if (fechaFormateada) {
           dataToUpdate.verificacionActual = fechaFormateada;
         }
       }
-      
+
       // Verificar y agregar proximaVerificacion
       if (hasValue(updateVerificacionesDto.proximaVerificacion)) {
-        const fechaFormateada = formatDateForDB(String(updateVerificacionesDto.proximaVerificacion));
+        const fechaFormateada = formatDateForDB(
+          String(updateVerificacionesDto.proximaVerificacion),
+        );
         if (fechaFormateada) {
           dataToUpdate.proximaVerificacion = fechaFormateada;
         }
       }
-      
+
       // Verificar y agregar idInstalacion
       const idInstalacionNum = toNumber(updateVerificacionesDto.idInstalacion);
       if (idInstalacionNum !== null) {
         dataToUpdate.idInstalacion = idInstalacionNum;
       }
-      
+
       // Verificar y agregar idOperador
       const idOperadorNum = toNumber(updateVerificacionesDto.idOperador);
       if (idOperadorNum !== null) {
         dataToUpdate.idOperador = idOperadorNum;
       }
-      
+
       // Verificar y agregar estatus
       const estatusNum = toNumber(updateVerificacionesDto.estatus);
       if (estatusNum !== null) {
         dataToUpdate.estatus = estatusNum;
       }
-      
+
       // Verificar y agregar notaVerificacion
       // Si se subió un archivo nuevo, usar su URL
       // Si no, pero viene un string en el DTO, usar ese string (URL existente)
@@ -749,17 +816,24 @@ AND v.Id = ?
       if (notaVerificacionUrl) {
         dataToUpdate.notaVerificacion = notaVerificacionUrl;
       } else if (hasValue(updateVerificacionesDto.notaVerificacion)) {
-        dataToUpdate.notaVerificacion = String(updateVerificacionesDto.notaVerificacion).trim();
+        dataToUpdate.notaVerificacion = String(
+          updateVerificacionesDto.notaVerificacion,
+        ).trim();
       }
-      
+
       // Verificar y agregar idTipoVerificacion
-      const idTipoVerificacionNum = toNumber(updateVerificacionesDto.idTipoVerificacion);
+      const idTipoVerificacionNum = toNumber(
+        updateVerificacionesDto.idTipoVerificacion,
+      );
       if (idTipoVerificacionNum !== null) {
         dataToUpdate.idTipoVerificacion = idTipoVerificacionNum;
       }
-      
+
       // Verificar y agregar evaluacion
-      if (updateVerificacionesDto.evaluacion !== undefined && updateVerificacionesDto.evaluacion !== null) {
+      if (
+        updateVerificacionesDto.evaluacion !== undefined &&
+        updateVerificacionesDto.evaluacion !== null
+      ) {
         // Si es string, intentar parsearlo como JSON
         const evaluacionValue: any = updateVerificacionesDto.evaluacion;
         if (typeof evaluacionValue === 'string') {
@@ -778,13 +852,10 @@ AND v.Id = ?
 
       // Solo actualizar si hay campos para actualizar
       if (Object.keys(dataToUpdate).length > 0) {
-        await this.verificacionesRepository.update(
-          id,
-          dataToUpdate,
-        );
+        await this.verificacionesRepository.update(id, dataToUpdate);
       }
 
-      const verificacionResult = await this.verificacionesRepository.findOne({
+      const _verificacionResult = await this.verificacionesRepository.findOne({
         where: { id: id },
       });
 
@@ -954,18 +1025,24 @@ AND v.Id = ?
 
   async getCategoriasMantenimientoMecanico(): Promise<ApiResponseCommon> {
     try {
-      const categorias = await this.catCategoriaMantenimientoMecanicoRepository.find({relations: ['caracteristicasEvaluacion']});
-      
+      const categorias =
+        await this.catCategoriaMantenimientoMecanicoRepository.find({
+          relations: ['caracteristicasEvaluacion'],
+        });
+
       // Transformar los datos para asegurar que los IDs sean números
       const categoriasTransformadas = categorias.map((categoria) => ({
         id: Number(categoria.id),
         nombre: categoria.nombre,
-        caracteristicasEvaluacion: categoria.caracteristicasEvaluacion?.map((caracteristica) => ({
-          id: Number(caracteristica.id),
-          nombre: caracteristica.nombre,
-          idCatCategoriaMantenimientoMecanico: Number(caracteristica.idCatCategoriaMantenimientoMecanico),
-          validado:false
-        })) || [],
+        caracteristicasEvaluacion:
+          categoria.caracteristicasEvaluacion?.map((caracteristica) => ({
+            id: Number(caracteristica.id),
+            nombre: caracteristica.nombre,
+            idCatCategoriaMantenimientoMecanico: Number(
+              caracteristica.idCatCategoriaMantenimientoMecanico,
+            ),
+            validado: false,
+          })) || [],
       }));
 
       return {
@@ -976,9 +1053,9 @@ AND v.Id = ?
         throw error;
       }
       throw new BadRequestException(
-        error.message || 'Error al obtener las categorías de mantenimiento mecánico',
+        error.message ||
+          'Error al obtener las categorías de mantenimiento mecánico',
       );
     }
   }
 }
-

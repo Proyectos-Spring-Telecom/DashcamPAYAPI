@@ -31,7 +31,8 @@ export class RecaudacionPorDispositivoDto {
 
   @ApiProperty({
     example: 1,
-    description: 'ID del validador para filtrar. Si no se proporciona, se mostrarán todos los validadores del cliente',
+    description:
+      'ID del validador para filtrar. Si no se proporciona, se mostrarán todos los validadores del cliente',
     required: false,
   })
   @IsOptional()
@@ -40,11 +41,11 @@ export class RecaudacionPorDispositivoDto {
 
   @ApiProperty({
     example: 1,
-    description: 'ID de la instalación para filtrar. Si no se proporciona, se mostrarán todas las instalaciones del cliente',
+    description:
+      'ID de la instalación para filtrar. Si no se proporciona, se mostrarán todas las instalaciones del cliente',
     required: false,
   })
   @IsOptional()
   @IsInt()
   idInstalacion?: number;
 }
-

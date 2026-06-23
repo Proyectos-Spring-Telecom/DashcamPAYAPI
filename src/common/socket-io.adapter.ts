@@ -11,12 +11,13 @@ import { Server, ServerOptions } from 'socket.io';
  */
 export class SocketIOAdapter implements WebSocketAdapter {
   private static ioServer: Server | null = null;
-  
-  constructor(
-    private app: INestApplicationContext,
-  ) {}
 
-  create(port: number, options?: ServerOptions & { namespace?: string; server?: any }): any {
+  constructor(private app: INestApplicationContext) {}
+
+  create(
+    port: number,
+    options?: ServerOptions & { namespace?: string; server?: any },
+  ): any {
     // Si ya existe una instancia del servidor principal
     if (SocketIOAdapter.ioServer) {
       // Si se solicita un namespace específico, retornar ese namespace
@@ -27,22 +28,20 @@ export class SocketIOAdapter implements WebSocketAdapter {
       return SocketIOAdapter.ioServer;
     }
 
-    const { Server } = require('socket.io');
-    
     if (!this.app) {
       SocketIOAdapter.ioServer = new Server(port, options);
-      return options?.namespace 
-        ? SocketIOAdapter.ioServer!.of(options.namespace)
+      return options?.namespace
+        ? SocketIOAdapter.ioServer.of(options.namespace)
         : SocketIOAdapter.ioServer;
     }
 
     // Obtener el servidor HTTP de la aplicación
     const httpServer = this.getHttpServer();
-    
+
     if (!httpServer) {
       SocketIOAdapter.ioServer = new Server(port, options);
-      return options?.namespace 
-        ? SocketIOAdapter.ioServer!.of(options.namespace)
+      return options?.namespace
+        ? SocketIOAdapter.ioServer.of(options.namespace)
         : SocketIOAdapter.ioServer;
     }
 
@@ -58,7 +57,7 @@ export class SocketIOAdapter implements WebSocketAdapter {
 
     // Si se solicita un namespace, retornarlo
     if (options?.namespace) {
-      return SocketIOAdapter.ioServer!.of(options.namespace);
+      return SocketIOAdapter.ioServer.of(options.namespace);
     }
 
     return SocketIOAdapter.ioServer;
@@ -77,7 +76,7 @@ export class SocketIOAdapter implements WebSocketAdapter {
     handlers: MessageMappingProperties[],
     transform: (data: any) => Observable<any>,
   ) {
-    const disconnect$ = fromEvent(client, 'disconnect').pipe(
+    const _disconnect$ = fromEvent(client, 'disconnect').pipe(
       mergeMap(() => EMPTY),
     );
 
@@ -115,7 +114,7 @@ export class SocketIOAdapter implements WebSocketAdapter {
   }
 
   close(server: Server) {
-    server.close();
+    void server.close();
     // Limpiar la instancia singleton al cerrar
     SocketIOAdapter.ioServer = null;
   }
@@ -123,9 +122,11 @@ export class SocketIOAdapter implements WebSocketAdapter {
   private getHttpServer(): any {
     try {
       // Intentar obtener el servidor HTTP de la aplicación
-      return (this.app as any).getHttpServer?.() || 
-             (this.app as any).getHttpAdapter?.()?.getHttpServer?.() ||
-             (this.app as any).httpAdapter?.getHttpServer?.();
+      return (
+        (this.app as any).getHttpServer?.() ||
+        (this.app as any).getHttpAdapter?.()?.getHttpServer?.() ||
+        (this.app as any).httpAdapter?.getHttpServer?.()
+      );
     } catch {
       return null;
     }

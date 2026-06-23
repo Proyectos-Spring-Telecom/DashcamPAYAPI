@@ -30,9 +30,10 @@ export class CatReferenciaServicioService {
     idUser: number,
   ): Promise<ApiCrudResponse> {
     try {
-      const referenciaServicio = await this.catReferenciaServicioRepository.findOne({
-        where: { nombre: createCatReferenciaServicioDto.nombre },
-      });
+      const referenciaServicio =
+        await this.catReferenciaServicioRepository.findOne({
+          where: { nombre: createCatReferenciaServicioDto.nombre },
+        });
       if (referenciaServicio) {
         throw new BadRequestException('La referencia de servicio ya existe');
       }
@@ -88,10 +89,11 @@ export class CatReferenciaServicioService {
 
   async findAllList(): Promise<ApiResponseCommon> {
     try {
-      const referenciasServicio = await this.catReferenciaServicioRepository.find({
-        where: { estatus: 1 },
-        order: { nombre: 'ASC' },
-      });
+      const referenciasServicio =
+        await this.catReferenciaServicioRepository.find({
+          where: { estatus: 1 },
+          order: { nombre: 'ASC' },
+        });
 
       // Forzamos ids a number
       const data = referenciasServicio.map((item) => ({
@@ -117,11 +119,12 @@ export class CatReferenciaServicioService {
 
   async findAll(page: number, limit: number): Promise<ApiResponseCommon> {
     try {
-      const [data, total] = await this.catReferenciaServicioRepository.findAndCount({
-        order: { nombre: 'ASC' },
-        skip: (page - 1) * limit,
-        take: limit,
-      });
+      const [data, total] =
+        await this.catReferenciaServicioRepository.findAndCount({
+          order: { nombre: 'ASC' },
+          skip: (page - 1) * limit,
+          take: limit,
+        });
 
       // Forzamos ids a number
       const referenciasServicio = data.map((item) => ({
@@ -152,9 +155,10 @@ export class CatReferenciaServicioService {
 
   async findOne(id: number): Promise<ApiResponseCommon> {
     try {
-      const referenciaServicio = await this.catReferenciaServicioRepository.findOne({
-        where: { id: id },
-      });
+      const referenciaServicio =
+        await this.catReferenciaServicioRepository.findOne({
+          where: { id: id },
+        });
       if (!referenciaServicio) {
         throw new NotFoundException('Referencia de servicio no encontrada');
       }
@@ -186,9 +190,10 @@ export class CatReferenciaServicioService {
     idUser: number,
   ): Promise<ApiCrudResponse> {
     try {
-      const referenciaServicio = await this.catReferenciaServicioRepository.findOne({
-        where: { id: id },
-      });
+      const referenciaServicio =
+        await this.catReferenciaServicioRepository.findOne({
+          where: { id: id },
+        });
       if (!referenciaServicio) {
         throw new NotFoundException('Referencia de servicio no encontrada');
       }
@@ -199,7 +204,9 @@ export class CatReferenciaServicioService {
           where: { nombre: updateCatReferenciaServicioDto.nombre },
         });
         if (existing && existing.id !== id) {
-          throw new BadRequestException('El nombre de la referencia de servicio ya existe');
+          throw new BadRequestException(
+            'El nombre de la referencia de servicio ya existe',
+          );
         }
       }
 
@@ -207,9 +214,10 @@ export class CatReferenciaServicioService {
         id,
         updateCatReferenciaServicioDto,
       );
-      const referenciaServicioResult = await this.catReferenciaServicioRepository.findOne({
-        where: { id: id },
-      });
+      const referenciaServicioResult =
+        await this.catReferenciaServicioRepository.findOne({
+          where: { id: id },
+        });
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updateCatReferenciaServicioDto };
@@ -257,9 +265,10 @@ export class CatReferenciaServicioService {
 
   async remove(id: number, idUser: number): Promise<ApiCrudResponse> {
     try {
-      const referenciaServicio = await this.catReferenciaServicioRepository.findOne({
-        where: { id: id },
-      });
+      const referenciaServicio =
+        await this.catReferenciaServicioRepository.findOne({
+          where: { id: id },
+        });
 
       if (!referenciaServicio) {
         throw new NotFoundException('Referencia de servicio no encontrada');

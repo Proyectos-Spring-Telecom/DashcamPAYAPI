@@ -10,7 +10,6 @@ import {
   Request,
   Put,
   UseGuards,
-  Res,
 } from '@nestjs/common';
 import { RolesService } from './roles.service';
 import { CreateRolDto } from './dto/create-rol.dto';
@@ -31,8 +30,8 @@ export class RolesController {
   @Post()
   create(@Body() createRoleDto: CreateRolDto, @Request() req) {
     const idUser = req.user.userId;
-    const cliente = req.user.cliente;
-    const rol = req.user.rol;
+    const _cliente = req.user.cliente;
+    const _rol = req.user.rol;
     return this.rolesService.create(idUser, createRoleDto);
   }
 
@@ -40,22 +39,21 @@ export class RolesController {
   async findAll(
     @Param('page', ParseIntPipe) page: number,
     @Param('limit', ParseIntPipe) limit: number,
-    @Request() req
+    @Request() req,
   ): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
-    const cliente = req.user.cliente;
+    const _idUser = req.user.userId;
+    const _cliente = req.user.cliente;
     const rol = req.user.rol;
     return await this.rolesService.findAll(+rol, page, limit);
   }
 
   @Get('list')
   async findAllList(@Request() req): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
-    const cliente = req.user.cliente;
+    const _idUser = req.user.userId;
+    const _cliente = req.user.cliente;
     const rol = req.user.rol;
     return await this.rolesService.findAllList(+rol);
   }
-
 
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number) {

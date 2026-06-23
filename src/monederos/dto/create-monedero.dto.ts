@@ -6,7 +6,6 @@ import {
   IsOptional,
   IsInt,
   Min,
-  IsNotEmpty,
   IsIn,
 } from 'class-validator';
 

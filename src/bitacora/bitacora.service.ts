@@ -19,7 +19,7 @@ export class BitacoraLoggerService {
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
   ) {}
-  createBitacora(createBitacoraDto: CreateBitacoraDto) {
+  createBitacora(_createBitacoraDto: CreateBitacoraDto) {
     return 'This action adds a new bitacora';
   }
 
@@ -256,7 +256,7 @@ INNER JOIN Usuarios u ON b.IdUsuario = u.Id
 INNER JOIN Modulos m ON b.IdModulo = m.Id
 WHERE u.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
   `,
-  [...ids],
+            [...ids],
           );
           break;
       }
@@ -363,7 +363,7 @@ ORDER BY b.FechaCreacion DESC;
       return n < 10 ? '0' + n : n;
     }
     const ahora = new Date();
-    const FechaActual = `${ahora.getFullYear()}-${pad(ahora.getMonth() + 1)}-${pad(ahora.getDate())} ${pad(ahora.getHours())}:${pad(ahora.getMinutes())}:${pad(ahora.getSeconds())}`;
+    const _FechaActual = `${ahora.getFullYear()}-${pad(ahora.getMonth() + 1)}-${pad(ahora.getDate())} ${pad(ahora.getHours())}:${pad(ahora.getMinutes())}:${pad(ahora.getSeconds())}`;
 
     const registro = this.bitacoraRepository.create({
       modulo: modulo,

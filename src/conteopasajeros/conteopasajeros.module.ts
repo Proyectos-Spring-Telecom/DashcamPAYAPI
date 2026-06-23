@@ -13,8 +13,20 @@ import { InstalacionContadores } from 'src/entities/InstalacionContadores';
 import { Turnos } from 'src/entities/Turnos';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ConteoPasajeros, Contadores, Usuarios, Clientes, Viajes, Instalaciones, InstalacionContadores, Turnos]), BitacoraModule],
+  imports: [
+    TypeOrmModule.forFeature([
+      ConteoPasajeros,
+      Contadores,
+      Usuarios,
+      Clientes,
+      Viajes,
+      Instalaciones,
+      InstalacionContadores,
+      Turnos,
+    ]),
+    BitacoraModule,
+  ],
   controllers: [ConteopasajerosController],
   providers: [ConteopasajerosService],
 })
-export class ConteopasajerosModule { }
+export class ConteopasajerosModule {}

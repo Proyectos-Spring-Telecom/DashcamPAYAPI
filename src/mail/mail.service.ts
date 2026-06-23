@@ -1,7 +1,7 @@
 // src/email/email.service.ts
 
-import { Injectable } from "@nestjs/common";
-import * as nodemailer from "nodemailer";
+import { Injectable } from '@nestjs/common';
+import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class MailService {
@@ -14,7 +14,7 @@ export class MailService {
       secure: true,
       auth: {
         user: process.env.E_MAIL,
-        pass: "system.EB9##",
+        pass: 'system.EB9##',
       },
     });
   }
@@ -23,13 +23,13 @@ export class MailService {
     to: string,
     name: string,
     token: string,
-    codigo: string
+    codigo: string,
   ) {
-    const url = `https://dashcampay.com/dev/login/verify?token=${token}`;
+    const _url = `https://dashcampay.com/dev/login/verify?token=${token}`;
     await this.transporter.sendMail({
       from: `<${process.env.E_MAIL}>`,
       to,
-      subject: "¡Bienvenido!",
+      subject: '¡Bienvenido!',
       html: `
 <!DOCTYPE html>
 <html lang="en">
@@ -134,7 +134,7 @@ export class MailService {
     await this.transporter.sendMail({
       from: ` <${process.env.E_MAIL}>`,
       to,
-      subject: "Restablecer Contraseña",
+      subject: 'Restablecer Contraseña',
       html: `
 <!DOCTYPE html>
 <html lang="en">

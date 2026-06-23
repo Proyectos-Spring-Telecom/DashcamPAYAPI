@@ -1,7 +1,6 @@
 import {
   Controller,
   Get,
-  Post,
   Body,
   UseGuards,
   Param,
@@ -22,7 +21,7 @@ export class BitacoraController {
 
   @Get('list') //Obseleto
   async findAllListBitacora(@Request() req): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return await this.bitacoraService.findAllListBitacora(+cliente, +rol);
@@ -34,7 +33,7 @@ export class BitacoraController {
     @Param('limit', ParseIntPipe) limit: number,
     @Request() req,
   ): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.bitacoraService.findAll(+cliente, +rol, page, limit);
@@ -42,9 +41,9 @@ export class BitacoraController {
 
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    const idUser = req.user.userId;
-    const cliente = req.user.cliente;
-    const rol = req.user.rol;
+    const _idUser = req.user.userId;
+    const _cliente = req.user.cliente;
+    const _rol = req.user.rol;
     return await this.bitacoraService.findOne(id);
   }
 }

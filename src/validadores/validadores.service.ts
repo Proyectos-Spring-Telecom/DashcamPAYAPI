@@ -111,7 +111,7 @@ export class ValidadoresService {
   }
 
   //Obtener todos los Validadores por cliente
-  async findAllListValidadoresClientes(id: number, cliente: number) {
+  async findAllListValidadoresClientes(id: number, _cliente: number) {
     try {
       // Consulta SQL para obtener validadores DISPONIBLES y ASIGNADOS
       // Para los asignados a instalaciones, se agrega "-Asignado" al numeroSerie
@@ -563,10 +563,11 @@ ORDER BY d.Id DESC;
       }
       const { estatus } = updateValidadorEstatusDto;
       if (estatus === 0) {
-        const ValidadorInstalacion =
-          await this.instalacionesRepository.findOne({
+        const ValidadorInstalacion = await this.instalacionesRepository.findOne(
+          {
             where: { idValidador: Validador.id, estatus: 1 },
-          });
+          },
+        );
 
         if (ValidadorInstalacion)
           throw new BadRequestException(
@@ -651,11 +652,9 @@ ORDER BY d.Id DESC;
       }
 
       //buscamos que no este asiganada a una instalacion
-      const ValidadorInstalacion = await this.instalacionesRepository.findOne(
-        {
-          where: { idValidador: Validador.id, estatus: 1 },
-        },
-      );
+      const ValidadorInstalacion = await this.instalacionesRepository.findOne({
+        where: { idValidador: Validador.id, estatus: 1 },
+      });
 
       if (ValidadorInstalacion)
         throw new BadRequestException(
@@ -795,10 +794,7 @@ ORDER BY d.Id DESC;
     }
   }
   //Eliminar Validadores
-  async removeValidador(
-    id: number,
-    idUser: number,
-  ): Promise<ApiCrudResponse> {
+  async removeValidador(id: number, idUser: number): Promise<ApiCrudResponse> {
     try {
       const Validador = await this.validadoresRepository.findOne({
         where: { id: id },
@@ -809,11 +805,9 @@ ORDER BY d.Id DESC;
         );
       }
 
-      const ValidadorInstalacion = await this.instalacionesRepository.findOne(
-        {
-          where: { idValidador: Validador.id, estatus: 1 },
-        },
-      );
+      const ValidadorInstalacion = await this.instalacionesRepository.findOne({
+        where: { idValidador: Validador.id, estatus: 1 },
+      });
 
       if (ValidadorInstalacion)
         throw new BadRequestException(

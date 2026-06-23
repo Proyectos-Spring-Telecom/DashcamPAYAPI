@@ -73,4 +73,3 @@ export class DireccionTarjetaDto {
   @MaxLength(100)
   colonia?: string;
 }
-

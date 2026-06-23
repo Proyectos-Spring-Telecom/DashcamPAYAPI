@@ -13,7 +13,13 @@ import { QRCodes } from 'src/entities/QRCodes';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Monederos, Clientes, TransaccionesRecarga, Pasajeros, QRCodes]),
+    TypeOrmModule.forFeature([
+      Monederos,
+      Clientes,
+      TransaccionesRecarga,
+      Pasajeros,
+      QRCodes,
+    ]),
     BitacoraModule,
     ClientesModule,
     PasajerosModule,

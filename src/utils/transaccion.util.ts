@@ -21,15 +21,19 @@ export function transicionarEstado(
 ): EstadoTransaccion {
   switch (estadoActual) {
     case EstadoTransaccion.INICIADA:
-      if (evento === EventoTransaccion.CREAR) return EstadoTransaccion.VALIDANDO_SALDO;
+      if (evento === EventoTransaccion.CREAR)
+        return EstadoTransaccion.VALIDANDO_SALDO;
       break;
     case EstadoTransaccion.VALIDANDO_SALDO:
-      if (evento === EventoTransaccion.SALDO_OK) return EstadoTransaccion.APROBADA;
-      if (evento === EventoTransaccion.SALDO_INSUFICIENTE) return EstadoTransaccion.RECHAZADA;
+      if (evento === EventoTransaccion.SALDO_OK)
+        return EstadoTransaccion.APROBADA;
+      if (evento === EventoTransaccion.SALDO_INSUFICIENTE)
+        return EstadoTransaccion.RECHAZADA;
       break;
     case EstadoTransaccion.APROBADA:
     case EstadoTransaccion.RECHAZADA:
-      if (evento === EventoTransaccion.FINALIZAR) return EstadoTransaccion.FINALIZADA;
+      if (evento === EventoTransaccion.FINALIZAR)
+        return EstadoTransaccion.FINALIZADA;
       break;
     case EstadoTransaccion.ERROR:
       return EstadoTransaccion.ERROR;

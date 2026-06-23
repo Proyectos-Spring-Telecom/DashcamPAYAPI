@@ -43,8 +43,9 @@ export class CatMetodoPagoService {
       }
 
       // Crear el nuevo método de pago
-      const newCatMetodoPago =
-        await this.catMetodoPagoRepository.create(createCatMetodoPagoDto);
+      const newCatMetodoPago = await this.catMetodoPagoRepository.create(
+        createCatMetodoPagoDto,
+      );
 
       // Guardar en la base de datos
       const catMetodoPagoSave =
@@ -65,7 +66,8 @@ export class CatMetodoPagoService {
       // API response
       const result: ApiCrudResponse = {
         status: 'success',
-        message: 'El método de pago ha sido incorporado exitosamente al catálogo.',
+        message:
+          'El método de pago ha sido incorporado exitosamente al catálogo.',
         data: {
           id: catMetodoPagoSave.id,
           nombre: catMetodoPagoSave.nombre,
@@ -146,7 +148,7 @@ export class CatMetodoPagoService {
         id: Number(metodoPago.id),
         nombre: metodoPago.nombre,
       };
-      
+
       const result: ApiResponseCommon = {
         data: [dataItem],
       };
@@ -182,7 +184,10 @@ export class CatMetodoPagoService {
       }
 
       // Si se está actualizando el nombre, verificar que no exista otro con el mismo nombre
-      if (updateCatMetodoPagoDto.nombre && updateCatMetodoPagoDto.nombre !== metodoPago.nombre) {
+      if (
+        updateCatMetodoPagoDto.nombre &&
+        updateCatMetodoPagoDto.nombre !== metodoPago.nombre
+      ) {
         const existente = await this.catMetodoPagoRepository.findOne({
           where: { nombre: updateCatMetodoPagoDto.nombre },
         });
@@ -212,7 +217,8 @@ export class CatMetodoPagoService {
       // API response
       const result: ApiCrudResponse = {
         status: 'success',
-        message: 'Se ha actualizado el método de pago del catálogo correctamente.',
+        message:
+          'Se ha actualizado el método de pago del catálogo correctamente.',
         data: {
           id: id,
           nombre: updateCatMetodoPagoDto.nombre || metodoPago.nombre,
@@ -277,7 +283,8 @@ export class CatMetodoPagoService {
       // API response
       const result: ApiCrudResponse = {
         status: 'success',
-        message: 'El método de pago ha sido eliminado del catálogo correctamente.',
+        message:
+          'El método de pago ha sido eliminado del catálogo correctamente.',
         data: {
           id: id,
           nombre: metodoPago.nombre,

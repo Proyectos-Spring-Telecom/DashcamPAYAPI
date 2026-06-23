@@ -31,11 +31,11 @@ export class RecaudacionPorOperadorDto {
 
   @ApiProperty({
     example: 1,
-    description: 'ID del operador para filtrar. Si no se proporciona, se mostrarán todos los operadores del cliente',
+    description:
+      'ID del operador para filtrar. Si no se proporciona, se mostrarán todos los operadores del cliente',
     required: false,
   })
   @IsOptional()
   @IsInt()
   idOperador?: number;
 }
-

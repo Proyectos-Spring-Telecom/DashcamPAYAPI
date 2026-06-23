@@ -5,7 +5,6 @@ import {
   Body,
   Patch,
   Param,
-  Delete,
   Req,
   UseGuards,
   ParseIntPipe,
@@ -33,7 +32,7 @@ export class TalleresController {
   }
 
   @Get('list')
-  findAll(@Req() req:any) {
+  findAll(@Req() req: any) {
     return this.talleresService.findAll(req);
   }
 
@@ -52,15 +51,19 @@ export class TalleresController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateTallereDto: UpdateTallereDto,@Req() req) {
-    return this.talleresService.update(+id, updateTallereDto,req.user.userId);
+  update(
+    @Param('id') id: string,
+    @Body() updateTallereDto: UpdateTallereDto,
+    @Req() req,
+  ) {
+    return this.talleresService.update(+id, updateTallereDto, req.user.userId);
   }
-    @Patch('desactivar/:id')
-  remove(@Param('id') id: number,@Req() req:any) {
-    return this.talleresService.remove(+id,Number(req.user.userId));
+  @Patch('desactivar/:id')
+  remove(@Param('id') id: number, @Req() req: any) {
+    return this.talleresService.remove(+id, Number(req.user.userId));
   }
   @Patch('activar/:id')
-  activar(@Param('id') id: number,@Req() req:any) {
-    return this.talleresService.activar(+id,Number(req.user.userId));
+  activar(@Param('id') id: number, @Req() req: any) {
+    return this.talleresService.activar(+id, Number(req.user.userId));
   }
 }

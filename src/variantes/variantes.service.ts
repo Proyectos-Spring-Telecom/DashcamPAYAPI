@@ -9,7 +9,6 @@ import { CreateVarianteDto } from './dto/create-variante.dto';
 import { UpdateVarianteDto } from './dto/update-variante.dto';
 import { generarRecorridoDetallado } from '../utils/recorrido.utils';
 import {
-  
   ApiResponseCommon,
   ApiVarianteResponse,
   EstatusEnumBitcora,
@@ -48,18 +47,17 @@ export class VariantesService {
   ) {
     try {
       const { recorridoDetallado: puntos } = createVarianteDto;
-      
+
       // Si no viene idTipoVariante, asignar 1 por defecto
       const idTipoVariante = createVarianteDto.idTipoVariante || 1;
-      
-      const newVariante =
-        await this.variantesRepository.create({
-          ...createVarianteDto,
-          idTipoVariante: idTipoVariante,
-        });
+
+      const newVariante = await this.variantesRepository.create({
+        ...createVarianteDto,
+        idTipoVariante: idTipoVariante,
+      });
 
       // Aplicamos interpolación
-      const { recorridoDetallado, distanciaKm } =
+      const { recorridoDetallado, distanciaKm: _distanciaKm } =
         await generarRecorridoDetallado(puntos as any);
 
       newVariante.recorridoInterpolar = recorridoDetallado;
@@ -88,21 +86,27 @@ export class VariantesService {
           await this.variantesRepository.create(varianteRegresoData);
 
         // Aplicar interpolación a la variante de regreso
-        const { recorridoDetallado: recorridoInterpolarRegreso, distanciaKm: distanciaKmRegreso } =
-          await generarRecorridoDetallado(recorridoDetalladoRegreso as any);
+        const {
+          recorridoDetallado: recorridoInterpolarRegreso,
+          distanciaKm: distanciaKmRegreso,
+        } = await generarRecorridoDetallado(recorridoDetalladoRegreso as any);
 
         newVarianteRegreso.recorridoInterpolar = recorridoInterpolarRegreso;
         if (distanciaKmRegreso) {
           newVarianteRegreso.distanciaKm = distanciaKmRegreso;
         }
 
-        const varianteRegresoSave = await this.variantesRepository.save(newVarianteRegreso);
+        const varianteRegresoSave =
+          await this.variantesRepository.save(newVarianteRegreso);
 
         // La variante original mantiene idVarianteIda en null
         // Solo la variante de regreso tiene idVarianteIda apuntando a la original
 
         // Registro en la bitácora SUCCESS para ambas variantes
-        const querylogger = { createVarianteDto, varianteRegreso: varianteRegresoData };
+        const querylogger = {
+          createVarianteDto,
+          varianteRegreso: varianteRegresoData,
+        };
         await this.bitacoraLogger.logToBitacora(
           'Variantes',
           `Se creó un Variante con nombre: ${varianteSave.nombre} (Id: ${varianteSave.id}) y su variante de regreso: ${varianteRegresoSave.nombre} (Id: ${varianteRegresoSave.id})`,
@@ -259,11 +263,7 @@ ORDER BY d.Id DESC
 
   LIMIT ? OFFSET ?;
     `;
-    return this.usuarioszonasRepository.query(query, [
-      ...ids,
-      limit,
-      offset,
-    ]);
+    return this.usuarioszonasRepository.query(query, [...ids, limit, offset]);
   }
 
   private async consultarTotalVariantePaginados(cliente: number) {
@@ -408,7 +408,7 @@ WHERE ru.Estatus = 1         -- Solo rutas activas
 
         default:
           // Consulta de datos paginados Usuario
-          const { ids, placeholders } = await this.clienteHijos(cliente)
+          const { ids, placeholders } = await this.clienteHijos(cliente);
           data = await this.usuarioszonasRepository.query(
             `
   SELECT 
@@ -677,7 +677,8 @@ ORDER BY d.Id DESC;
 
         default:
           // Consulta de datos paginados Usuario
-          const { ids, placeholders } = await this.clienteHijos(cliente)
+          const { ids, placeholders: _placeholders } =
+            await this.clienteHijos(cliente);
           data = await this.usuarioszonasRepository.query(
             `
       SELECT 
@@ -773,7 +774,7 @@ ORDER BY d.Id DESC;
   // ========================================
   // 🔹 OBTENER VARIANTES POR RUTA
   // ========================================
-  async findByRuta(idRuta: number, idUser: number, rol: number) {
+  async findByRuta(idRuta: number, _idUser: number, _rol: number) {
     try {
       // Consulta directa de variantes por ruta (solo la ruta especificada)
       const variantes = await this.variantesRepository.query(
@@ -1085,7 +1086,7 @@ WHERE ur.IdUsuario = ?
 
         default:
           // Consulta de datos paginados Usuario
-          const { ids, placeholders } = await this.clienteHijos(cliente)
+          const { ids, placeholders } = await this.clienteHijos(cliente);
           data = await this.usuarioszonasRepository.query(
             `
     SELECT 
@@ -1185,15 +1186,14 @@ WHERE ur.IdUsuario = ?
     updateVariantesEstatusDto: UpdateVariantesEstatusDto,
   ) {
     try {
-      let variante;
-      variante = await this.variantesRepository.findOne({
+      const variante = await this.variantesRepository.findOne({
         where: { id: id },
       });
       if (!variante) throw new NotFoundException('Variante no encontrado');
 
       //actualizacion de estatus
       const estatus = updateVariantesEstatusDto.estatus;
-        await this.variantesRepository.update(id, { estatus: estatus });
+      await this.variantesRepository.update(id, { estatus: estatus });
 
       // Registro en la bitácora SUCCESS
       const querylogger = { updateVariantesEstatusDto };
@@ -1248,7 +1248,7 @@ WHERE ur.IdUsuario = ?
     updateVarianteDto: UpdateVarianteDto,
   ) {
     try {
-      let newVariante = this.variantesRepository.create(updateVarianteDto);
+      const newVariante = this.variantesRepository.create(updateVarianteDto);
 
       if (
         Array.isArray(updateVarianteDto.recorridoDetallado) &&
@@ -1256,8 +1256,10 @@ WHERE ur.IdUsuario = ?
       ) {
         const puntos = updateVarianteDto.recorridoDetallado;
 
-        const { recorridoDetallado: nuevoRecorrido, distanciaKm } =
-          await generarRecorridoDetallado(puntos as any);
+        const {
+          recorridoDetallado: nuevoRecorrido,
+          distanciaKm: _distanciaKm,
+        } = await generarRecorridoDetallado(puntos as any);
 
         newVariante.recorridoInterpolar = nuevoRecorrido;
       }
@@ -1319,16 +1321,15 @@ WHERE ur.IdUsuario = ?
     }
   }
 
-  async remove(id: number, idUser: number, cliente: number, rol: number) {
+  async remove(id: number, idUser: number, _cliente: number, _rol: number) {
     try {
-      let variante;
-      variante = await this.variantesRepository.findOne({
+      const variante = await this.variantesRepository.findOne({
         where: { id: id },
       });
       if (!variante) throw new NotFoundException('Variante no encontrado');
 
       //eliminado logico
-        await this.variantesRepository.update(id, { estatus: 0 });
+      await this.variantesRepository.update(id, { estatus: 0 });
 
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };
@@ -1417,8 +1418,7 @@ WHERE ur.IdUsuario = ?
           variante = await this.variantesRepository.findOne({
             where: { id: id },
           });
-          if (!variante)
-            throw new NotFoundException('Variante no encontrado');
+          if (!variante) throw new NotFoundException('Variante no encontrado');
           break;
 
         default:
@@ -1427,7 +1427,7 @@ WHERE ur.IdUsuario = ?
       }
 
       //eliminado completo
-        await this.variantesRepository.delete({ id: id });
+      await this.variantesRepository.delete({ id: id });
 
       // Registro en la bitácora SUCCESS
       const querylogger = { id: id, estatus: 0 };

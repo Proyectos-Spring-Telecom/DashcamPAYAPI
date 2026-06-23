@@ -1,9 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
-  IsDateString,
   IsEmail,
   IsNotEmpty,
-  IsOptional,
   IsString,
   Matches,
   Validate,
@@ -56,6 +54,4 @@ export class UpdateUsuarioOperadorDto {
     examples: ['[482915, 93746281]'],
   })
   codigohash: string;
-
-
 }

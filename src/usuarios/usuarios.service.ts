@@ -47,7 +47,7 @@ export class UsuariosService {
     private readonly emailService: MailService,
     private readonly jwtService: JwtService,
     private readonly s3Service: S3Service,
-  ) { }
+  ) {}
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
@@ -385,7 +385,7 @@ ORDER BY u.Id DESC;
         throw new NotFoundException('No se encontraron usuarios.');
       }
       const usuariosSinPassword = usuarios.map(
-        ({ passwordHash, ...rest }) => rest,
+        ({ passwordHash: _passwordHash, ...rest }) => rest,
       );
       const result: ApiResponseCommon = {
         data: usuariosSinPassword,
@@ -536,7 +536,6 @@ ORDER BY u.Id DESC
         where: { userName: updateUsuarioOperadorDto.userName },
       });
 
-
       if (!usuario) {
         throw new NotFoundException(
           `Usuario con nombre de usuario: ${updateUsuarioOperadorDto.userName} no encontrado.`,
@@ -567,7 +566,7 @@ ORDER BY u.Id DESC
       };
 
       //Agregamos el pin al updateUsuarioOperadorDto
-      const newPin = await this.usuarioRepository.update(
+      const _newPin = await this.usuarioRepository.update(
         usuario.id,
         bodyOperador,
       );
@@ -664,7 +663,7 @@ ORDER BY u.Id DESC
       };
 
       //Agregamos el dispositivo al usuario
-      const newPin = await this.usuarioRepository.update(
+      const _newPin = await this.usuarioRepository.update(
         usuario.id,
         bodyOperador,
       );
@@ -753,7 +752,7 @@ ORDER BY u.Id DESC
         await this.usuariosPermisosRepository.save(usuariosPermisos);
       }
 
-      const payload = {
+      const _payload = {
         id: userSave.id,
         email: userSave.userName,
       };
@@ -943,7 +942,7 @@ ORDER BY u.Id DESC
       }
       updateUsuarioDto.emailConfirmado = EstatusEnum.ACTIVO;
 
-      const { permisosIds, ...usuarioUpdate } = updateUsuarioDto;
+      const { permisosIds: _permisosIds, ...usuarioUpdate } = updateUsuarioDto;
       // ----- ACTUALIZACIÓN DE USUARIO -----
       await this.usuarioRepository.update(id, usuarioUpdate);
       const newUser = await this.usuarioRepository.findOne({
@@ -1153,7 +1152,7 @@ ORDER BY u.Id DESC
       await this.usuarioRepository.update(id, { estatus: 0 });
 
       //buscamos sus permisos
-      const permisos = await this.usuariosPermisosRepository.find({
+      const _permisos = await this.usuariosPermisosRepository.find({
         where: { idUsuario: id },
       });
 
@@ -1214,7 +1213,9 @@ ORDER BY u.Id DESC
       // Validar que solo sean imágenes
       const allowedMimeTypes = ['image/png', 'image/jpg', 'image/jpeg'];
       if (!allowedMimeTypes.includes(file.mimetype)) {
-        throw new BadRequestException('Solo se permiten imágenes PNG, JPG o JPEG');
+        throw new BadRequestException(
+          'Solo se permiten imágenes PNG, JPG o JPEG',
+        );
       }
 
       // Buscar el usuario por el ID del token
@@ -1259,7 +1260,9 @@ ORDER BY u.Id DESC
       });
 
       if (!usuarioActualizado) {
-        throw new NotFoundException('Usuario no encontrado después de la actualización');
+        throw new NotFoundException(
+          'Usuario no encontrado después de la actualización',
+        );
       }
 
       //-----Registro en la bitacora----- SUCCESS
@@ -1281,7 +1284,9 @@ ORDER BY u.Id DESC
         message: 'Foto de perfil actualizada exitosamente',
         data: {
           id: usuarioActualizado.id,
-          nombre: `${usuarioActualizado.nombre || ''} ${usuarioActualizado.apellidoPaterno || ''}`.trim() || 'Usuario',
+          nombre:
+            `${usuarioActualizado.nombre || ''} ${usuarioActualizado.apellidoPaterno || ''}`.trim() ||
+            'Usuario',
         },
       };
     } catch (error) {

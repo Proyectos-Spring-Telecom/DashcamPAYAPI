@@ -122,9 +122,9 @@ export class CatpasajeroService {
       const catpasajeros = await this.catTiposPasajerosRepository.find({
         where: {
           estatus: EstatusEnum.ACTIVO,
-          idCliente: cliente
-        }
-      })
+          idCliente: cliente,
+        },
+      });
 
       //Forzamos los BigInt a number
       const data = catpasajeros.map((item) => ({
@@ -391,7 +391,8 @@ ORDER BY cp.Id DESC;
       //Api response
       const result: ApiCrudResponse = {
         status: 'success',
-        message: 'Se ha actualizado el estatus de un pasajero del catálogo correctamente.',
+        message:
+          'Se ha actualizado el estatus de un pasajero del catálogo correctamente.',
         estatus: { estatus: estatus },
         data: {
           id: id,
@@ -416,8 +417,7 @@ ORDER BY cp.Id DESC;
         throw error;
       }
       throw new InternalServerErrorException({
-        message:
-          'No fue posible cambiar el estatus del tipo de pasajero.',
+        message: 'No fue posible cambiar el estatus del tipo de pasajero.',
         error: error.message,
       });
     }

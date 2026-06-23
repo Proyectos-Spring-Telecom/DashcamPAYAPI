@@ -1,4 +1,8 @@
-import { HttpException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  HttpException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { KpiDto } from './dto/kpi.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Clientes } from 'src/entities/Clientes';
@@ -14,7 +18,6 @@ import { ConteoPasajeros } from 'src/entities/ConteoPasajeros';
 import { Repository } from 'typeorm';
 import { EnumFiltros } from 'src/common/estatus.enum';
 import { error, log } from 'console';
-
 
 @Injectable()
 export class DashboardService {
@@ -39,7 +42,7 @@ export class DashboardService {
     private readonly historicoTransaccionesDebitoRepository: Repository<HistoricoTransaccionesDebito>,
     @InjectRepository(ConteoPasajeros)
     private readonly conteoPasajerosRepository: Repository<ConteoPasajeros>,
-  ) { }
+  ) {}
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
@@ -65,16 +68,35 @@ export class DashboardService {
   // ========================================
   async dashboardkpi(kpiDto: KpiDto, rol: number, cliente: number) {
     try {
-      const { fechaInicio, fechaFin, filtro, idCliente } = kpiDto
+      const { fechaInicio, fechaFin, filtro, idCliente } = kpiDto;
       let data;
       if (fechaInicio && fechaFin) {
-
-        data = await this.resolverPorFecha(fechaInicio, fechaFin, idCliente, cliente, rol)
+        data = await this.resolverPorFecha(
+          fechaInicio,
+          fechaFin,
+          idCliente,
+          cliente,
+          rol,
+        );
       } else {
-        const { fechaIni, fechaFinal } = await this.resolverPorFiltro(filtro || 1);
-        data = await this.resolverPorRol(fechaIni, fechaFinal, idCliente, cliente, rol)
+        const { fechaIni, fechaFinal } = await this.resolverPorFiltro(
+          filtro || 1,
+        );
+        data = await this.resolverPorRol(
+          fechaIni,
+          fechaFinal,
+          idCliente,
+          cliente,
+          rol,
+        );
       }
-      const { graficaIngresosTotales, graficaPasajerosPorRuta, graficaAscensosVsBoleto, dataGripTop5RutasPorIngresos, velocidadPromedioRuta } = data
+      const {
+        graficaIngresosTotales,
+        graficaPasajerosPorRuta,
+        graficaAscensosVsBoleto,
+        dataGripTop5RutasPorIngresos,
+        velocidadPromedioRuta,
+      } = data;
 
       //Forzamos a cambiar el id a number
       const graficaIngresos = graficaIngresosTotales.map((item) => ({
@@ -101,11 +123,13 @@ export class DashboardService {
         idRuta: Number(item.idRuta),
       }));
 
-      const dataGripTop5RutasPorIngreso = dataGripTop5RutasPorIngresos.map((item) => ({
-        ...item,
-        idRuta: Number(item.idRuta),
-        totalViajes: Number(item.totalViajes),
-      }));
+      const dataGripTop5RutasPorIngreso = dataGripTop5RutasPorIngresos.map(
+        (item) => ({
+          ...item,
+          idRuta: Number(item.idRuta),
+          totalViajes: Number(item.totalViajes),
+        }),
+      );
 
       const kpi1 = data.kpi1?.[0] ?? {};
       const kpi2 = data.kpi2?.[0] ?? {};
@@ -135,7 +159,6 @@ export class DashboardService {
         velocidadPromedioPorRuta,
         dataGripTop5RutasPorIngreso,
       };
-
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -152,12 +175,18 @@ export class DashboardService {
     fechaFin: string,
     idCliente: number,
     cliente: number,
-    rol: number
+    rol: number,
   ) {
     try {
-      fechaInicio = fechaInicio.split("T")[0];
-      fechaFin = fechaFin.split("T")[0];
-      return await this.resolverPorRol(fechaInicio, fechaFin, idCliente, cliente, rol)
+      fechaInicio = fechaInicio.split('T')[0];
+      fechaFin = fechaFin.split('T')[0];
+      return await this.resolverPorRol(
+        fechaInicio,
+        fechaFin,
+        idCliente,
+        cliente,
+        rol,
+      );
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -169,9 +198,7 @@ export class DashboardService {
     }
   }
 
-  async resolverPorFiltro(
-    filtro: number,
-  ): Promise<any> {
+  async resolverPorFiltro(filtro: number): Promise<any> {
     try {
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
@@ -193,29 +220,30 @@ export class DashboardService {
           const fechaMesAntes = `${fechaHaceUnMes.getFullYear()}-${pad(fechaHaceUnMes.getMonth() + 1)}-${pad(fechaHaceUnMes.getDate())}`;
 
           //Retornamos las fechas correspondientes
-          fechaIni = fechaMesAntes
-          fechaFinal = fechaActual
+          fechaIni = fechaMesAntes;
+          fechaFinal = fechaActual;
           break;
         case EnumFiltros.SEMANA:
           // Restar 7 días (7 * 24 * 60 * 60 * 1000 ms)
-          const hace7Dias = new Date(fechaDesfasada.getTime() - 7 * 24 * 60 * 60 * 1000);
+          const hace7Dias = new Date(
+            fechaDesfasada.getTime() - 7 * 24 * 60 * 60 * 1000,
+          );
 
           // Solo la fecha
           const fechaSemanaAntes = `${hace7Dias.getFullYear()}-${pad(hace7Dias.getMonth() + 1)}-${pad(hace7Dias.getDate())}`;
 
           //Retornamos las fechas correspondientes
-          fechaIni = fechaSemanaAntes
-          fechaFinal = fechaActual
+          fechaIni = fechaSemanaAntes;
+          fechaFinal = fechaActual;
           break;
 
         default:
-
           //Retornamos las fechas correspondientes
-          fechaIni = fechaActual
-          fechaFinal = fechaActual
+          fechaIni = fechaActual;
+          fechaFinal = fechaActual;
           break;
       }
-      return { fechaIni, fechaFinal }
+      return { fechaIni, fechaFinal };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -225,7 +253,6 @@ export class DashboardService {
         error: error.message,
       });
     }
-
   }
 
   async resolverPorRol(
@@ -233,7 +260,7 @@ export class DashboardService {
     fechaFin: string,
     idCliente: number,
     cliente: number,
-    rol: number
+    rol: number,
   ) {
     try {
       let kpi1;
@@ -246,56 +273,184 @@ export class DashboardService {
       switch (rol) {
         case 1:
           if (idCliente === cliente) {
-            kpi1 = await this.kpiParte1ClientePadre(fechaInicio, fechaFin, idCliente);
-            kpi2 = await this.kpiParte2ClientePadre(fechaInicio, fechaFin, idCliente);
-            graficaIngresosTotales = await this.graficaIngresosTotalesSA(fechaInicio, fechaFin, idCliente);
-            graficaPasajerosPorRuta = await this.graficaPasajerosPorRutaSA(fechaInicio, fechaFin, idCliente);
-            graficaAscensosVsBoleto = await this.graficaAscensosVsBoletoSA(fechaInicio, fechaFin, idCliente);
-            velocidadPromedioRuta = await this.velocidadPromedioRutaSA(fechaInicio, fechaFin, idCliente);
-            dataGripTop5RutasPorIngresos = await this.dataGripTop5RutasPorIngresosSA(fechaInicio, fechaFin, idCliente);
+            kpi1 = await this.kpiParte1ClientePadre(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            kpi2 = await this.kpiParte2ClientePadre(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            graficaIngresosTotales = await this.graficaIngresosTotalesSA(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            graficaPasajerosPorRuta = await this.graficaPasajerosPorRutaSA(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            graficaAscensosVsBoleto = await this.graficaAscensosVsBoletoSA(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            velocidadPromedioRuta = await this.velocidadPromedioRutaSA(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            dataGripTop5RutasPorIngresos =
+              await this.dataGripTop5RutasPorIngresosSA(
+                fechaInicio,
+                fechaFin,
+                idCliente,
+              );
           } else {
             kpi1 = await this.kpiParte1(fechaInicio, fechaFin, idCliente);
             kpi2 = await this.kpi2Parte2(fechaInicio, fechaFin, idCliente);
-            graficaIngresosTotales = await this.graficaIngresosTotales(fechaInicio, fechaFin, idCliente);
-            graficaPasajerosPorRuta = await this.graficaPasajerosPorRuta(fechaInicio, fechaFin, idCliente);
-            graficaAscensosVsBoleto = await this.graficaAscensosVsBoleto(fechaInicio, fechaFin, idCliente);
-            velocidadPromedioRuta = await this.velocidadPromedioRuta(fechaInicio, fechaFin, idCliente);
-            dataGripTop5RutasPorIngresos = await this.dataGripTop5RutasPorIngresos(fechaInicio, fechaFin, idCliente);
+            graficaIngresosTotales = await this.graficaIngresosTotales(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            graficaPasajerosPorRuta = await this.graficaPasajerosPorRuta(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            graficaAscensosVsBoleto = await this.graficaAscensosVsBoleto(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            velocidadPromedioRuta = await this.velocidadPromedioRuta(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            dataGripTop5RutasPorIngresos =
+              await this.dataGripTop5RutasPorIngresos(
+                fechaInicio,
+                fechaFin,
+                idCliente,
+              );
           }
 
           break;
         case 2:
           if (idCliente === cliente) {
-            kpi1 = await this.kpiParte1ClientePadre(fechaInicio, fechaFin, idCliente);
-            kpi2 = await this.kpiParte2ClientePadre(fechaInicio, fechaFin, idCliente);
-            graficaIngresosTotales = await this.graficaIngresosTotalesSA(fechaInicio, fechaFin, idCliente);
-            graficaPasajerosPorRuta = await this.graficaPasajerosPorRutaSA(fechaInicio, fechaFin, idCliente);
-            graficaAscensosVsBoleto = await this.graficaAscensosVsBoletoSA(fechaInicio, fechaFin, idCliente);
-            velocidadPromedioRuta = await this.velocidadPromedioRutaSA(fechaInicio, fechaFin, idCliente);
-            dataGripTop5RutasPorIngresos = await this.dataGripTop5RutasPorIngresosSA(fechaInicio, fechaFin, idCliente);
+            kpi1 = await this.kpiParte1ClientePadre(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            kpi2 = await this.kpiParte2ClientePadre(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            graficaIngresosTotales = await this.graficaIngresosTotalesSA(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            graficaPasajerosPorRuta = await this.graficaPasajerosPorRutaSA(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            graficaAscensosVsBoleto = await this.graficaAscensosVsBoletoSA(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            velocidadPromedioRuta = await this.velocidadPromedioRutaSA(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            dataGripTop5RutasPorIngresos =
+              await this.dataGripTop5RutasPorIngresosSA(
+                fechaInicio,
+                fechaFin,
+                idCliente,
+              );
           } else {
             kpi1 = await this.kpiParte1(fechaInicio, fechaFin, idCliente);
             kpi2 = await this.kpi2Parte2(fechaInicio, fechaFin, idCliente);
-            graficaIngresosTotales = await this.graficaIngresosTotales(fechaInicio, fechaFin, idCliente);
-            graficaPasajerosPorRuta = await this.graficaPasajerosPorRuta(fechaInicio, fechaFin, idCliente);
-            graficaAscensosVsBoleto = await this.graficaAscensosVsBoleto(fechaInicio, fechaFin, idCliente);
-            velocidadPromedioRuta = await this.velocidadPromedioRuta(fechaInicio, fechaFin, idCliente);
-            dataGripTop5RutasPorIngresos = await this.dataGripTop5RutasPorIngresos(fechaInicio, fechaFin, idCliente);
+            graficaIngresosTotales = await this.graficaIngresosTotales(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            graficaPasajerosPorRuta = await this.graficaPasajerosPorRuta(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            graficaAscensosVsBoleto = await this.graficaAscensosVsBoleto(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            velocidadPromedioRuta = await this.velocidadPromedioRuta(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
+            dataGripTop5RutasPorIngresos =
+              await this.dataGripTop5RutasPorIngresos(
+                fechaInicio,
+                fechaFin,
+                idCliente,
+              );
           }
           break;
 
         default:
           kpi1 = await this.kpiParte1(fechaInicio, fechaFin, idCliente);
           kpi2 = await this.kpi2Parte2(fechaInicio, fechaFin, idCliente);
-          graficaIngresosTotales = await this.graficaIngresosTotales(fechaInicio, fechaFin, idCliente);
-          graficaPasajerosPorRuta = await this.graficaPasajerosPorRuta(fechaInicio, fechaFin, idCliente);
-          graficaAscensosVsBoleto = await this.graficaAscensosVsBoleto(fechaInicio, fechaFin, idCliente);
-          velocidadPromedioRuta = await this.velocidadPromedioRuta(fechaInicio, fechaFin, idCliente);
-          dataGripTop5RutasPorIngresos = await this.dataGripTop5RutasPorIngresos(fechaInicio, fechaFin, idCliente);
+          graficaIngresosTotales = await this.graficaIngresosTotales(
+            fechaInicio,
+            fechaFin,
+            idCliente,
+          );
+          graficaPasajerosPorRuta = await this.graficaPasajerosPorRuta(
+            fechaInicio,
+            fechaFin,
+            idCliente,
+          );
+          graficaAscensosVsBoleto = await this.graficaAscensosVsBoleto(
+            fechaInicio,
+            fechaFin,
+            idCliente,
+          );
+          velocidadPromedioRuta = await this.velocidadPromedioRuta(
+            fechaInicio,
+            fechaFin,
+            idCliente,
+          );
+          dataGripTop5RutasPorIngresos =
+            await this.dataGripTop5RutasPorIngresos(
+              fechaInicio,
+              fechaFin,
+              idCliente,
+            );
           break;
       }
-      return { kpi1, kpi2, graficaIngresosTotales, graficaPasajerosPorRuta, graficaAscensosVsBoleto, dataGripTop5RutasPorIngresos, velocidadPromedioRuta }
-
+      return {
+        kpi1,
+        kpi2,
+        graficaIngresosTotales,
+        graficaPasajerosPorRuta,
+        graficaAscensosVsBoleto,
+        dataGripTop5RutasPorIngresos,
+        velocidadPromedioRuta,
+      };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -307,11 +462,10 @@ export class DashboardService {
     }
   }
 
-
   private async kpiParte1ClientePadre(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const { ids, placeholders } = await this.clienteHijos(idCliente);
     const query = `
@@ -349,7 +503,7 @@ INNER JOIN Validadores d ON td.NumeroSerieValidador = d.NumeroSerie
 INNER JOIN Clientes c ON d.IdCliente = c.Id
 WHERE td.FechaHoraFinal BETWEEN '${fechaInicio}T00:00:00Z' AND '${fechaFin}T23:59:59Z'
   AND c.Id IN (${placeholders})
-  GROUP BY c.Id;`
+  GROUP BY c.Id;`;
 
     return this.clienteRepository.query(query, [...ids]);
   }
@@ -357,7 +511,7 @@ WHERE td.FechaHoraFinal BETWEEN '${fechaInicio}T00:00:00Z' AND '${fechaFin}T23:5
   private async kpiParte2ClientePadre(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const { ids, placeholders } = await this.clienteHijos(idCliente);
     const query = `
@@ -425,7 +579,7 @@ LEFT JOIN Turnos t ON t.IdCliente = v.IdCliente
 LEFT JOIN Ocupacion o ON o.IdCliente = v.IdCliente AND o.idVehiculo = v.Id
 WHERE v.Estatus = 1
   AND v.IdCliente IN (${placeholders});
-`
+`;
     return this.clienteRepository.query(query, [...ids]);
   }
 
@@ -433,9 +587,8 @@ WHERE v.Estatus = 1
   private async kpiParte1(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
-
     const query = `
     -- kpi parte 1
 SELECT
@@ -473,15 +626,15 @@ WHERE td.FechaHoraFinal BETWEEN '${fechaInicio}T00:00:00Z' AND '${fechaFin}T23:5
   AND c.Id IN (${idCliente})
   
   GROUP BY c.Id;
-`
+`;
 
-    return this.clienteRepository.query(query,);
+    return this.clienteRepository.query(query);
   }
 
   private async kpi2Parte2(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const query = `
 
@@ -549,7 +702,7 @@ LEFT JOIN Turnos t ON t.IdCliente = v.IdCliente
 LEFT JOIN Ocupacion o ON o.IdCliente = v.IdCliente AND o.idVehiculo = v.Id
 WHERE v.Estatus = 1
   AND v.IdCliente IN (${idCliente});
-`
+`;
     return this.clienteRepository.query(query);
   }
 
@@ -558,7 +711,7 @@ WHERE v.Estatus = 1
   private async graficaIngresosTotales(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const query = `
 WITH rango AS (
@@ -624,14 +777,14 @@ SELECT
 FROM datos
 ORDER BY periodo;
 
-`
+`;
     return this.clienteRepository.query(query);
   }
 
   private async graficaIngresosTotalesSA(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const { ids, placeholders } = await this.clienteHijos(idCliente);
     const query = `
@@ -698,7 +851,7 @@ SELECT
 FROM datos
 ORDER BY periodo;
 
-`
+`;
     return this.clienteRepository.query(query, [...ids]);
   }
 
@@ -707,7 +860,7 @@ ORDER BY periodo;
   private async graficaPasajerosPorRuta(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const query = `
 WITH rango AS (
@@ -753,14 +906,14 @@ SELECT *
 FROM Pasajeros
 ORDER BY periodo, ruta;
 
-`
+`;
     return this.clienteRepository.query(query);
   }
 
   private async graficaPasajerosPorRutaSA(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const { ids, placeholders } = await this.clienteHijos(idCliente);
     const query = `
@@ -807,7 +960,7 @@ SELECT *
 FROM Pasajeros
 ORDER BY periodo, ruta;
 
-`
+`;
     return this.clienteRepository.query(query, [...ids]);
   }
 
@@ -816,7 +969,7 @@ ORDER BY periodo, ruta;
   private async graficaAscensosVsBoleto(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const query = `
 
@@ -914,14 +1067,14 @@ LEFT JOIN ascensos a ON a.periodo = p.periodo
 LEFT JOIN boletos  b ON b.periodo = p.periodo
 ORDER BY p.periodo;
 
-`
+`;
     return this.clienteRepository.query(query);
   }
 
   private async graficaAscensosVsBoletoSA(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const { ids, placeholders } = await this.clienteHijos(idCliente);
     const query = `
@@ -1020,8 +1173,13 @@ LEFT JOIN ascensos a ON a.periodo = p.periodo
 LEFT JOIN boletos  b ON b.periodo = p.periodo
 ORDER BY p.periodo;
 
-`
-    return this.clienteRepository.query(query, [...ids, ...ids, ...ids, ...ids]);
+`;
+    return this.clienteRepository.query(query, [
+      ...ids,
+      ...ids,
+      ...ids,
+      ...ids,
+    ]);
   }
 
   /////////*/*/*/*/*/*//*//////////////////////////////////////////******/////*/*/*/*/*/*/*/*/*/*/*/*/*/*/*//*/*/**/***/*/****
@@ -1029,7 +1187,7 @@ ORDER BY p.periodo;
   private async dataGripTop5RutasPorIngresos(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const query = `
 
@@ -1061,14 +1219,14 @@ FROM ingresos
 ORDER BY ingresosTotales DESC
 LIMIT 5;
 
-`
+`;
     return await this.clienteRepository.query(query);
   }
 
   private async dataGripTop5RutasPorIngresosSA(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const { ids, placeholders } = await this.clienteHijos(idCliente);
     const query = `
@@ -1100,7 +1258,7 @@ FROM ingresos
 ORDER BY ingresosTotales DESC
 LIMIT 5;
 
-`
+`;
     return await this.clienteRepository.query(query, [...ids]);
   }
 
@@ -1109,7 +1267,7 @@ LIMIT 5;
   private async velocidadPromedioRuta(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const query = `
 
@@ -1163,14 +1321,14 @@ SELECT *
 FROM VelocidadRuta
 ORDER BY periodo, ruta;
 
-`
+`;
     return this.clienteRepository.query(query);
   }
 
   private async velocidadPromedioRutaSA(
     fechaInicio: string,
     fechaFin: string,
-    idCliente: number
+    idCliente: number,
   ) {
     const { ids, placeholders } = await this.clienteHijos(idCliente);
     const query = `
@@ -1225,8 +1383,13 @@ SELECT *
 FROM VelocidadRuta
 ORDER BY periodo, ruta;
 
-`
-    return this.clienteRepository.query(query, [...ids, ...ids, ...ids, ...ids]);
+`;
+    return this.clienteRepository.query(query, [
+      ...ids,
+      ...ids,
+      ...ids,
+      ...ids,
+    ]);
   }
 
   // ========================================
@@ -1261,8 +1424,18 @@ ORDER BY periodo, ruta;
           return {
             ticketPromedio: { ticketPromedio: 0, totalTransacciones: 0 },
             ingresosTotales: 0,
-            porcentajeMonederoVirtual: { totalDebitos: 0, debitosTarjeta: 0, debitosPagoElectronico: 0, porcentajeTarjeta: 0, porcentajePagoElectronico: 0 },
-            viajesAbiertos: { viajesAbiertos: 0, totalValidadores: 0, porcentajeViajesActivos: 0 },
+            porcentajeMonederoVirtual: {
+              totalDebitos: 0,
+              debitosTarjeta: 0,
+              debitosPagoElectronico: 0,
+              porcentajeTarjeta: 0,
+              porcentajePagoElectronico: 0,
+            },
+            viajesAbiertos: {
+              viajesAbiertos: 0,
+              totalValidadores: 0,
+              porcentajeViajesActivos: 0,
+            },
             top5Rutas: [],
             pasajerosPorRutaTipo: [],
             pasajerosValidados: 0,
@@ -1276,14 +1449,24 @@ ORDER BY periodo, ruta;
       }
 
       // Alertas de monitoreo (ÚltimaPosicion: inactividad ≥12 h, exceso de velocidad >90)
-      const alertas = await this.getDashboardAlertas(clienteFilter, clienteParams);
+      const alertas = await this.getDashboardAlertas(
+        clienteFilter,
+        clienteParams,
+      );
 
       // 1. Costo del ticket promedio (de TransaccionesDebito)
-      const ticketPromedioData = await this.getTicketPromedio(clienteFilter, clienteFilter2, clienteParams, fechaInicio, fechaFin, filtroNum);
-      
+      const ticketPromedioData = await this.getTicketPromedio(
+        clienteFilter,
+        clienteFilter2,
+        clienteParams,
+        fechaInicio,
+        fechaFin,
+        filtroNum,
+      );
+
       // Extraer ingresosTotales del ticketPromedio
       const ingresosTotales = Number(ticketPromedioData.ingresosTotales) || 0;
-      
+
       // Remover ingresosTotales del objeto ticketPromedio
       const ticketPromedio = {
         ticketPromedio: ticketPromedioData.ticketPromedio,
@@ -1291,33 +1474,85 @@ ORDER BY periodo, ruta;
       };
 
       // 2. Porcentaje de débitos con monedero virtual (EsQR = 1)
-      const porcentajeMonederoVirtual = await this.getPorcentajeMonederoVirtual(clienteFilter, clienteFilter2, clienteParams, fechaInicio, fechaFin, filtroNum);
+      const porcentajeMonederoVirtual = await this.getPorcentajeMonederoVirtual(
+        clienteFilter,
+        clienteFilter2,
+        clienteParams,
+        fechaInicio,
+        fechaFin,
+        filtroNum,
+      );
 
       // 3. Viajes abiertos en últimos 15 minutos vs posibles según número de validadores
-      const viajesAbiertos = await this.getViajesAbiertos(clienteFilter, clienteParams);
+      const viajesAbiertos = await this.getViajesAbiertos(
+        clienteFilter,
+        clienteParams,
+      );
 
       // 4. Top 5 rutas con más ingresos
-      const top5Rutas = await this.getTop5RutasIngresos(clienteFilter, clienteFilter2, clienteParams, fechaInicio, fechaFin, filtroNum);
+      const top5Rutas = await this.getTop5RutasIngresos(
+        clienteFilter,
+        clienteFilter2,
+        clienteParams,
+        fechaInicio,
+        fechaFin,
+        filtroNum,
+      );
 
       // 5. Pasajeros por ruta según tipo de pasajero (gráfica apilada)
-      const pasajerosPorRutaTipo = await this.getPasajerosPorRutaTipo(clienteFilter, clienteFilter2, clienteParams, fechaInicio, fechaFin, filtroNum);
+      const pasajerosPorRutaTipo = await this.getPasajerosPorRutaTipo(
+        clienteFilter,
+        clienteFilter2,
+        clienteParams,
+        fechaInicio,
+        fechaFin,
+        filtroNum,
+      );
 
       // 6. Pasajeros validados (pasajeros únicos que debitaron)
-      const pasajerosValidados = await this.getPasajerosValidados(clienteFilter, clienteFilter2, clienteParams, fechaInicio, fechaFin, filtroNum);
+      const pasajerosValidados = await this.getPasajerosValidados(
+        clienteFilter,
+        clienteFilter2,
+        clienteParams,
+        fechaInicio,
+        fechaFin,
+        filtroNum,
+      );
 
       // 7. Unidades en servicio (viajes activos)
-      const unidadesEnServicio = await this.getUnidadesEnServicio(clienteFilter, clienteParams);
+      const unidadesEnServicio = await this.getUnidadesEnServicio(
+        clienteFilter,
+        clienteParams,
+      );
 
       // 8. Validaciones exitosas y fallidas
-      const validaciones = await this.getValidaciones(clienteFilter, clienteFilter2, clienteParams, fechaInicio, fechaFin, filtroNum);
+      const validaciones = await this.getValidaciones(
+        clienteFilter,
+        clienteFilter2,
+        clienteParams,
+        fechaInicio,
+        fechaFin,
+        filtroNum,
+      );
 
       // 9. Gráfica Ascensos vs Boletos
-      const graficaAscensosVsBoletos = await this.getGraficaAscensosVsBoletos(clienteFilter, clienteFilter2, clienteParams, fechaInicio, fechaFin, filtroNum);
+      const graficaAscensosVsBoletos = await this.getGraficaAscensosVsBoletos(
+        clienteFilter,
+        clienteFilter2,
+        clienteParams,
+        fechaInicio,
+        fechaFin,
+        filtroNum,
+      );
 
       // Si el filtro es "hoy" (1), calcular también los ingresos de ayer (usa CURDATE() en MySQL)
       let ingresoTotalAyer: number | null = null;
       if (filtroNum === 1) {
-        ingresoTotalAyer = await this.getIngresoTotalAyer(clienteFilter, clienteFilter2, clienteParams);
+        ingresoTotalAyer = await this.getIngresoTotalAyer(
+          clienteFilter,
+          clienteFilter2,
+          clienteParams,
+        );
       }
 
       const resultado: any = {
@@ -1359,7 +1594,10 @@ ORDER BY periodo, ruta;
    * INACTIVIDAD: FechaHora con antigüedad ≥ 12 horas.
    * EXCESO_VELOCIDAD: Velocidad > 90 (km/h).
    */
-  private async getDashboardAlertas(clienteFilter: string, clienteParams: any[]) {
+  private async getDashboardAlertas(
+    clienteFilter: string,
+    clienteParams: any[],
+  ) {
     const ultimaPosicionSubquery = `
       INNER JOIN (
         SELECT NumeroSerieValidador AS ns, MAX(Id) AS maxId
@@ -1425,13 +1663,15 @@ ORDER BY periodo, ruta;
       this.clienteRepository.query(sqlVelocidad, clienteParams),
     ]);
 
-    const rows = [...rowsInactividad, ...rowsVelocidad].sort((a: any, b: any) => {
-      const t = String(a.tipoAlerta).localeCompare(String(b.tipoAlerta));
-      if (t !== 0) return t;
-      return String(a.numeroSerieValidador ?? '').localeCompare(
-        String(b.numeroSerieValidador ?? ''),
-      );
-    });
+    const rows = [...rowsInactividad, ...rowsVelocidad].sort(
+      (a: any, b: any) => {
+        const t = String(a.tipoAlerta).localeCompare(String(b.tipoAlerta));
+        if (t !== 0) return t;
+        return String(a.numeroSerieValidador ?? '').localeCompare(
+          String(b.numeroSerieValidador ?? ''),
+        );
+      },
+    );
 
     return rows.map((row: any) => ({
       tipoAlerta: row.tipoAlerta,
@@ -1439,7 +1679,8 @@ ORDER BY periodo, ruta;
       numeroSerieValidador: row.numeroSerieValidador,
       idPosicion: row.idPosicion != null ? Number(row.idPosicion) : null,
       fechaHoraUltimaPosicion: row.fechaHoraUltimaPosicion,
-      velocidadReportada: row.velocidadReportada != null ? Number(row.velocidadReportada) : null,
+      velocidadReportada:
+        row.velocidadReportada != null ? Number(row.velocidadReportada) : null,
       latitud: row.latitud != null ? Number(row.latitud) : null,
       longitud: row.longitud != null ? Number(row.longitud) : null,
       vehiculo: {
@@ -1469,14 +1710,26 @@ ORDER BY periodo, ruta;
       day: '2-digit',
     });
     const parts = formatter.formatToParts(ahora);
-    const year = parseInt(parts.find((p) => p.type === 'year')?.value ?? '0', 10);
-    const month = parseInt(parts.find((p) => p.type === 'month')?.value ?? '0', 10);
-    const date = parseInt(parts.find((p) => p.type === 'day')?.value ?? '0', 10);
+    const year = parseInt(
+      parts.find((p) => p.type === 'year')?.value ?? '0',
+      10,
+    );
+    const month = parseInt(
+      parts.find((p) => p.type === 'month')?.value ?? '0',
+      10,
+    );
+    const date = parseInt(
+      parts.find((p) => p.type === 'day')?.value ?? '0',
+      10,
+    );
     return { year, month, date };
   }
 
   // Calcular fechas según el filtro (usa zona México UTC-6)
-  private calcularFechasPorFiltro(filtro: number): { fechaInicio: string; fechaFin: string } {
+  private calcularFechasPorFiltro(filtro: number): {
+    fechaInicio: string;
+    fechaFin: string;
+  } {
     function pad(n: number) {
       return n < 10 ? '0' + n : n;
     }
@@ -1489,7 +1742,9 @@ ORDER BY periodo, ruta;
 
     switch (filtro) {
       case 2: // Últimos 7 días
-        const hace7Dias = new Date(Date.UTC(hoy.year, hoy.month - 1, hoy.date) - 7 * 24 * 60 * 60 * 1000);
+        const hace7Dias = new Date(
+          Date.UTC(hoy.year, hoy.month - 1, hoy.date) - 7 * 24 * 60 * 60 * 1000,
+        );
         fechaInicio = `${hace7Dias.getUTCFullYear()}-${pad(hace7Dias.getUTCMonth() + 1)}-${pad(hace7Dias.getUTCDate())}`;
         fechaFin = hoyStr;
         break;
@@ -1514,13 +1769,18 @@ ORDER BY periodo, ruta;
   }
 
   // Calcular fechas de ayer en zona México (UTC-6)
-  private calcularFechasAyer(): { fechaInicioAyer: string; fechaFinAyer: string } {
+  private calcularFechasAyer(): {
+    fechaInicioAyer: string;
+    fechaFinAyer: string;
+  } {
     function pad(n: number) {
       return n < 10 ? '0' + n : n;
     }
 
     const hoy = this.getFechaMexico();
-    const ayerDate = new Date(Date.UTC(hoy.year, hoy.month - 1, hoy.date) - 24 * 60 * 60 * 1000);
+    const ayerDate = new Date(
+      Date.UTC(hoy.year, hoy.month - 1, hoy.date) - 24 * 60 * 60 * 1000,
+    );
     const fechaInicioAyer = `${ayerDate.getUTCFullYear()}-${pad(ayerDate.getUTCMonth() + 1)}-${pad(ayerDate.getUTCDate())}`;
     const fechaFinAyer = fechaInicioAyer;
 
@@ -1533,9 +1793,14 @@ ORDER BY periodo, ruta;
     _clienteFilter2: string,
     clienteParams: any[],
   ) {
-    const [fechaRow] = await this.clienteRepository.query<{ hoy: string }[]>('SELECT CURDATE() AS hoy');
+    const [fechaRow] = await this.clienteRepository.query<{ hoy: string }[]>(
+      'SELECT CURDATE() AS hoy',
+    );
     const fechaSolicitada = fechaRow?.hoy ?? 'N/A';
-    console.log('[getIngresoTotalAyer] Fechas solicitadas: hoy =', fechaSolicitada);
+    console.log(
+      '[getIngresoTotalAyer] Fechas solicitadas: hoy =',
+      fechaSolicitada,
+    );
 
     const query = `
       SELECT COALESCE(SUM(htd.Monto), 0) AS ingresoTotalAyer
@@ -1552,14 +1817,17 @@ ORDER BY periodo, ruta;
     console.log('[getIngresoTotalAyer] Params:', params);
     const result = await this.clienteRepository.query(query, params);
     console.log('[getIngresoTotalAyer] Resultado de la consulta:', result);
-    console.log('[getIngresoTotalAyer] Ingreso total ayer:', Number(result[0]?.ingresoTotalAyer) || 0);
+    console.log(
+      '[getIngresoTotalAyer] Ingreso total ayer:',
+      Number(result[0]?.ingresoTotalAyer) || 0,
+    );
     return Number(result[0]?.ingresoTotalAyer) || 0;
   }
 
   // 1. Costo del ticket promedio
   private async getTicketPromedio(
-    clienteFilter: string, 
-    clienteFilter2: string, 
+    clienteFilter: string,
+    clienteFilter2: string,
     clienteParams: any[],
     fechaInicio: string,
     fechaFin: string,
@@ -1603,10 +1871,27 @@ ORDER BY periodo, ruta;
     `;
     const query = soloHoy ? querySolo : queryUnion;
     const params = soloHoy
-      ? (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin])
-      : (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams, fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin, fechaInicio, fechaFin]);
+      ? clienteParams.length > 0
+        ? [fechaInicio, fechaFin, ...clienteParams]
+        : [fechaInicio, fechaFin]
+      : clienteParams.length > 0
+        ? [
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+          ]
+        : [fechaInicio, fechaFin, fechaInicio, fechaFin];
     const result = await this.clienteRepository.query(query, params);
-    return result[0] || { ticketPromedio: 0, totalTransacciones: 0, ingresosTotales: 0 };
+    return (
+      result[0] || {
+        ticketPromedio: 0,
+        totalTransacciones: 0,
+        ingresosTotales: 0,
+      }
+    );
   }
 
   // 2. Porcentaje de débitos: Tarjeta (EsQR = 0) y Pago electrónico (EsQR = 1)
@@ -1676,19 +1961,30 @@ ORDER BY periodo, ruta;
 
     const query = soloHoy ? querySoloTransacciones : queryConUnion;
     const params = soloHoy
-      ? (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin])
-      : (clienteParams.length > 0
-          ? [fechaInicio, fechaFin, ...clienteParams, fechaInicio, fechaFin, ...clienteParams]
-          : [fechaInicio, fechaFin, fechaInicio, fechaFin]);
+      ? clienteParams.length > 0
+        ? [fechaInicio, fechaFin, ...clienteParams]
+        : [fechaInicio, fechaFin]
+      : clienteParams.length > 0
+        ? [
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+          ]
+        : [fechaInicio, fechaFin, fechaInicio, fechaFin];
 
     const result = await this.clienteRepository.query(query, params);
-    return result[0] || {
-      totalDebitos: 0,
-      debitosTarjeta: 0,
-      debitosPagoElectronico: 0,
-      porcentajeTarjeta: 0,
-      porcentajePagoElectronico: 0,
-    };
+    return (
+      result[0] || {
+        totalDebitos: 0,
+        debitosTarjeta: 0,
+        debitosPagoElectronico: 0,
+        porcentajeTarjeta: 0,
+        porcentajePagoElectronico: 0,
+      }
+    );
   }
 
   // 3. Viajes abiertos vs posibles según número de validadores
@@ -1701,7 +1997,10 @@ ORDER BY periodo, ruta;
       WHERE val.Estatus = 1
         ${clienteFilter}
     `;
-    const validadoresResult = await this.clienteRepository.query(validadoresQuery, clienteParams);
+    const validadoresResult = await this.clienteRepository.query(
+      validadoresQuery,
+      clienteParams,
+    );
     const totalValidadores = Number(validadoresResult[0]?.total) || 0;
 
     // Luego obtener los viajes abiertos (estatus = 1 y Fin IS NULL)
@@ -1713,15 +2012,19 @@ ORDER BY periodo, ruta;
         AND v.Fin IS NULL
         ${clienteFilter}
     `;
-    const viajesResult = await this.clienteRepository.query(viajesQuery, clienteParams);
+    const viajesResult = await this.clienteRepository.query(
+      viajesQuery,
+      clienteParams,
+    );
     const viajesAbiertos = Number(viajesResult[0]?.total) || 0;
 
     return {
       viajesAbiertos,
       totalValidadores,
-      porcentajeViajesActivos: totalValidadores > 0 
-        ? Number(((viajesAbiertos / totalValidadores) * 100).toFixed(2))
-        : 0,
+      porcentajeViajesActivos:
+        totalValidadores > 0
+          ? Number(((viajesAbiertos / totalValidadores) * 100).toFixed(2))
+          : 0,
     };
   }
 
@@ -1793,8 +2096,19 @@ ORDER BY periodo, ruta;
     `;
     const query = soloHoy ? querySolo : queryUnion;
     const params = soloHoy
-      ? (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin])
-      : (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams, fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin, fechaInicio, fechaFin]);
+      ? clienteParams.length > 0
+        ? [fechaInicio, fechaFin, ...clienteParams]
+        : [fechaInicio, fechaFin]
+      : clienteParams.length > 0
+        ? [
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+          ]
+        : [fechaInicio, fechaFin, fechaInicio, fechaFin];
     return await this.clienteRepository.query(query, params);
   }
 
@@ -1864,8 +2178,19 @@ ORDER BY periodo, ruta;
     `;
     const query = soloHoy ? querySolo : queryUnion;
     const params = soloHoy
-      ? (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin])
-      : (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams, fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin, fechaInicio, fechaFin]);
+      ? clienteParams.length > 0
+        ? [fechaInicio, fechaFin, ...clienteParams]
+        : [fechaInicio, fechaFin]
+      : clienteParams.length > 0
+        ? [
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+          ]
+        : [fechaInicio, fechaFin, fechaInicio, fechaFin];
     return await this.clienteRepository.query(query, params);
   }
 
@@ -1913,14 +2238,28 @@ ORDER BY periodo, ruta;
     `;
     const query = soloHoy ? querySolo : queryUnion;
     const params = soloHoy
-      ? (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin])
-      : (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams, fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin, fechaInicio, fechaFin]);
+      ? clienteParams.length > 0
+        ? [fechaInicio, fechaFin, ...clienteParams]
+        : [fechaInicio, fechaFin]
+      : clienteParams.length > 0
+        ? [
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+          ]
+        : [fechaInicio, fechaFin, fechaInicio, fechaFin];
     const result = await this.clienteRepository.query(query, params);
     return Number(result[0]?.pasajerosValidados) || 0;
   }
 
   // 7. Unidades en servicio (viajes activos con estatus = 1)
-  private async getUnidadesEnServicio(clienteFilter: string, clienteParams: any[]) {
+  private async getUnidadesEnServicio(
+    clienteFilter: string,
+    clienteParams: any[],
+  ) {
     const query = `
       SELECT COUNT(DISTINCT v.Id) AS unidadesEnServicio
       FROM Viajes v
@@ -1977,8 +2316,19 @@ ORDER BY periodo, ruta;
     `;
     const query = soloHoy ? querySolo : queryUnion;
     const params = soloHoy
-      ? (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin])
-      : (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams, fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin, fechaInicio, fechaFin]);
+      ? clienteParams.length > 0
+        ? [fechaInicio, fechaFin, ...clienteParams]
+        : [fechaInicio, fechaFin]
+      : clienteParams.length > 0
+        ? [
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+          ]
+        : [fechaInicio, fechaFin, fechaInicio, fechaFin];
     const result = await this.clienteRepository.query(query, params);
     return {
       exitosas: Number(result[0]?.exitosas) || 0,
@@ -2037,8 +2387,19 @@ ORDER BY periodo, ruta;
     `;
     const queryBoletos = soloHoy ? queryBoletosSolo : queryBoletosUnion;
     const paramsBoletos = soloHoy
-      ? (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin])
-      : (clienteParams.length > 0 ? [fechaInicio, fechaFin, ...clienteParams, fechaInicio, fechaFin, ...clienteParams] : [fechaInicio, fechaFin, fechaInicio, fechaFin]);
+      ? clienteParams.length > 0
+        ? [fechaInicio, fechaFin, ...clienteParams]
+        : [fechaInicio, fechaFin]
+      : clienteParams.length > 0
+        ? [
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+            fechaInicio,
+            fechaFin,
+            ...clienteParams,
+          ]
+        : [fechaInicio, fechaFin, fechaInicio, fechaFin];
 
     // Ascensos por viaje desde ConteoPasajeros (sin cambio por filtro)
     const queryAscensos = `
@@ -2054,9 +2415,10 @@ ORDER BY periodo, ruta;
       GROUP BY cp.IdViaje
     `;
 
-    const paramsAscensos = clienteParams.length > 0 
-      ? [fechaInicio, fechaFin, ...clienteParams]
-      : [fechaInicio, fechaFin];
+    const paramsAscensos =
+      clienteParams.length > 0
+        ? [fechaInicio, fechaFin, ...clienteParams]
+        : [fechaInicio, fechaFin];
 
     const [boletosResult, ascensosResult] = await Promise.all([
       this.clienteRepository.query(queryBoletos, paramsBoletos),
@@ -2076,7 +2438,7 @@ ORDER BY periodo, ruta;
 
     // Combinar ambos resultados
     const allViajes = new Set([...boletosMap.keys(), ...ascensosMap.keys()]);
-    const resultado = Array.from(allViajes).map(idViaje => ({
+    const resultado = Array.from(allViajes).map((idViaje) => ({
       idViaje,
       boletos: boletosMap.get(idViaje) || 0,
       ascensos: ascensosMap.get(idViaje) || 0,

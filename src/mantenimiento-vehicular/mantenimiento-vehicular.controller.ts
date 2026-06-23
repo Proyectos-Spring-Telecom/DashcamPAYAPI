@@ -43,12 +43,14 @@ export class MantenimientoVehicularController {
       storage: multer.memoryStorage(),
       limits: { fileSize: 10 * 1024 * 1024 }, // máximo 10 MB
       fileFilter: (req, file, cb) => {
-        const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf'];
+        const allowedTypes = [
+          'image/png',
+          'image/jpeg',
+          'image/jpg',
+          'application/pdf',
+        ];
         if (file && !allowedTypes.includes(file.mimetype)) {
-          return cb(
-            new Error('Solo se permiten PNG, JPG, JPEG o PDF'),
-            false,
-          );
+          return cb(new Error('Solo se permiten PNG, JPG, JPEG o PDF'), false);
         }
         cb(null, true);
       },
@@ -57,7 +59,8 @@ export class MantenimientoVehicularController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Crear un nuevo mantenimiento vehicular',
-    description: 'Crea un nuevo registro de mantenimiento vehicular con toda la información del servicio realizado. El campo notaServicio debe ser una imagen (archivo).',
+    description:
+      'Crea un nuevo registro de mantenimiento vehicular con toda la información del servicio realizado. El campo notaServicio debe ser una imagen (archivo).',
   })
   @ApiBody({
     type: CreateMantenimientoVehicularDto,
@@ -91,7 +94,8 @@ export class MantenimientoVehicularController {
   @Get(':page/:limit')
   @ApiOperation({
     summary: 'Obtener mantenimientos vehiculares paginados',
-    description: 'Obtiene un listado paginado de mantenimientos vehiculares con sus relaciones.',
+    description:
+      'Obtiene un listado paginado de mantenimientos vehiculares con sus relaciones.',
   })
   @ApiParam({
     name: 'page',
@@ -107,7 +111,8 @@ export class MantenimientoVehicularController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Listado paginado de mantenimientos vehiculares obtenido exitosamente',
+    description:
+      'Listado paginado de mantenimientos vehiculares obtenido exitosamente',
   })
   @ApiResponse({
     status: 401,
@@ -120,13 +125,19 @@ export class MantenimientoVehicularController {
   ): Promise<ApiResponseCommon> {
     const idCliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.mantenimientoVehicularService.findAll(page, limit, Number(idCliente), Number(rol));
+    return this.mantenimientoVehicularService.findAll(
+      page,
+      limit,
+      Number(idCliente),
+      Number(rol),
+    );
   }
 
   @Get(':id')
   @ApiOperation({
     summary: 'Obtener un mantenimiento vehicular por ID',
-    description: 'Obtiene los detalles completos de un mantenimiento vehicular específico por su ID, incluyendo todas sus relaciones.',
+    description:
+      'Obtiene los detalles completos de un mantenimiento vehicular específico por su ID, incluyendo todas sus relaciones.',
   })
   @ApiParam({
     name: 'id',
@@ -146,16 +157,24 @@ export class MantenimientoVehicularController {
     status: 401,
     description: 'No autorizado',
   })
-  findOne(@Param('id', ParseIntPipe) id: number, @Request() req): Promise<ApiResponseCommon> {
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ): Promise<ApiResponseCommon> {
     const idCliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.mantenimientoVehicularService.findOne(id, Number(idCliente), Number(rol));
+    return this.mantenimientoVehicularService.findOne(
+      id,
+      Number(idCliente),
+      Number(rol),
+    );
   }
 
   @Patch(':id')
   @ApiOperation({
     summary: 'Actualizar un mantenimiento vehicular',
-    description: 'Actualiza los datos de un mantenimiento vehicular existente. Solo se actualizan los campos proporcionados.',
+    description:
+      'Actualiza los datos de un mantenimiento vehicular existente. Solo se actualizan los campos proporcionados.',
   })
   @ApiParam({
     name: 'id',
@@ -199,7 +218,8 @@ export class MantenimientoVehicularController {
   @Patch(':id/desactivar')
   @ApiOperation({
     summary: 'Desactivar un mantenimiento vehicular',
-    description: 'Desactiva un mantenimiento vehicular cambiando su estatus a 0.',
+    description:
+      'Desactiva un mantenimiento vehicular cambiando su estatus a 0.',
   })
   @ApiParam({
     name: 'id',
@@ -230,7 +250,8 @@ export class MantenimientoVehicularController {
   @Patch(':id/activar')
   @ApiOperation({
     summary: 'Activar un mantenimiento vehicular',
-    description: 'Activa un mantenimiento vehicular cambiando su estatus a 1 si estaba previamente en 0.',
+    description:
+      'Activa un mantenimiento vehicular cambiando su estatus a 1 si estaba previamente en 0.',
   })
   @ApiParam({
     name: 'id',
@@ -301,6 +322,10 @@ export class MantenimientoVehicularController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.mantenimientoVehicularService.updateStatus(idUser, id, estatus);
+    return await this.mantenimientoVehicularService.updateStatus(
+      idUser,
+      id,
+      estatus,
+    );
   }
 }

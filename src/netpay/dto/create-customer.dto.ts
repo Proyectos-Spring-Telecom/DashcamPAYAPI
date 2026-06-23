@@ -55,10 +55,6 @@ export class CreateCustomerDto {
 
   @Allow()
   @IsOptional()
-  cvv2?: unknown;
-
-  @Allow()
-  @IsOptional()
   nombre?: unknown;
 
   @Allow()
@@ -91,7 +87,8 @@ export class CreateCustomerDto {
   referenceId?: string;
 
   @ApiPropertyOptional({
-    description: 'Token de tarjeta a asignar al cliente (se asignará después de crear el cliente)',
+    description:
+      'Token de tarjeta a asignar al cliente (se asignará después de crear el cliente)',
     example: 'tok_test_1234567890',
   })
   @IsString()
@@ -99,7 +96,8 @@ export class CreateCustomerDto {
   token?: string;
 
   @ApiPropertyOptional({
-    description: 'Identificador único del cliente en tu sistema. Si no se proporciona, se generará automáticamente un número aleatorio de 10 dígitos.',
+    description:
+      'Identificador único del cliente en tu sistema. Si no se proporciona, se generará automáticamente un número aleatorio de 10 dígitos.',
     example: '1234567890',
   })
   @IsString()
@@ -107,7 +105,8 @@ export class CreateCustomerDto {
   identifier?: string;
 
   @ApiPropertyOptional({
-    description: 'ID del pasajero al que se asociará el customerIdNetPay después de crear el customer',
+    description:
+      'ID del pasajero al que se asociará el customerIdNetPay después de crear el customer',
     example: 1,
     type: Number,
   })

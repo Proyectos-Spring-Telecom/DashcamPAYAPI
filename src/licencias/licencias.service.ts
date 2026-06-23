@@ -29,12 +29,16 @@ export class LicenciasService {
     private readonly clienteRepository: Repository<Clientes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
     private readonly s3Service: S3Service,
-  ) { }
+  ) {}
 
   // ========================================
   // 🔹 CREAR UNA LICENCIA
   // ========================================
-  async create(idUser: number, createLicenciaDto: CreateLicenciaDto, licenciaFile?: Express.Multer.File) {
+  async create(
+    idUser: number,
+    createLicenciaDto: CreateLicenciaDto,
+    licenciaFile?: Express.Multer.File,
+  ) {
     try {
       const numeroLicencia = await this.licenciasRepository.findOne({
         where: {
@@ -61,7 +65,10 @@ export class LicenciasService {
       // El campo 'licencia' del DTO es el archivo, así que usamos 'nombreLicencia' si viene, o la URL del archivo, o un valor por defecto
       const nuevaLicencia = await this.licenciasRepository.create({
         ...createLicenciaDto,
-        licencia: licenciaUrl || createLicenciaDto.nombreLicencia || `Licencia ${createLicenciaDto.numeroLicencia}`,
+        licencia:
+          licenciaUrl ||
+          createLicenciaDto.nombreLicencia ||
+          `Licencia ${createLicenciaDto.numeroLicencia}`,
       });
       const licenciaSave = await this.licenciasRepository.save(nuevaLicencia);
 
@@ -454,7 +461,7 @@ ORDER BY l.Id ASC
       }
 
       if (licencias.length === 0) {
-        throw new NotFoundException('Licencia no encontrada.')
+        throw new NotFoundException('Licencia no encontrada.');
       }
 
       //Forzamos lo id string a number

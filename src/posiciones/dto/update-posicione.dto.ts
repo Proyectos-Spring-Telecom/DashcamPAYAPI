@@ -72,5 +72,4 @@ export class UpdatePosicionesDto {
   @IsDate()
   @IsOptional()
   fechaHora?: Date;
-
 }

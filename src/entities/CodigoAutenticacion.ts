@@ -8,7 +8,7 @@ import {
   JoinColumn,
   CreateDateColumn,
 } from 'typeorm';
-import { Usuarios } from './Usuarios'; 
+import { Usuarios } from './Usuarios';
 
 @Entity('CodigoAutenticacion')
 export class CodigoAutenticacion {
@@ -21,10 +21,14 @@ export class CodigoAutenticacion {
   @Column({ name: 'Codigo', type: 'varchar', length: 4 })
   codigo: string;
 
-  @Column({ name: 'Tipo', type: 'tinyint', })
+  @Column({ name: 'Tipo', type: 'tinyint' })
   tipo: number;
 
-  @CreateDateColumn({ name: 'FechaCreacion', type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({
+    name: 'FechaCreacion',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   fechaCreacion: Date;
 
   @Column({ name: 'FechaExpiracion', type: 'datetime' })
@@ -38,5 +42,4 @@ export class CodigoAutenticacion {
 
   @Column({ name: 'Estatus', type: 'tinyint', default: () => 1 })
   estatus: number;
-
 }

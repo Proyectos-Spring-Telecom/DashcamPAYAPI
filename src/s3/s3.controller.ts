@@ -30,10 +30,7 @@ export class S3Controller {
       fileFilter: (req, file, cb) => {
         const allowedTypes = ['image/png', 'image/jpeg', 'application/pdf'];
         if (!allowedTypes.includes(file.mimetype)) {
-          return cb(
-            new Error('Solo se permiten PNG, JPG, JPEG o PDF'),
-            false,
-          );
+          return cb(new Error('Solo se permiten PNG, JPG, JPEG o PDF'), false);
         }
         cb(null, true);
       },

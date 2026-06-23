@@ -30,15 +30,12 @@ export class ValidadoresController {
     @Request() req,
   ) {
     const idUser = req.user.userId;
-    return this.ValidadoresService.createValidador(
-      createValidadorDto,
-      +idUser,
-    );
+    return this.ValidadoresService.createValidador(createValidadorDto, +idUser);
   }
 
   @Get('list')
   findAllListValidadores(@Request() req): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.ValidadoresService.findAllList(+cliente, +rol);
@@ -49,10 +46,13 @@ export class ValidadoresController {
     @Param('id', ParseIntPipe) id: number,
     @Request() req,
   ): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
-    const rol = req.user.rol;
-    return await this.ValidadoresService.findAllListValidadoresClientes(+id, +cliente);
+    const _rol = req.user.rol;
+    return await this.ValidadoresService.findAllListValidadoresClientes(
+      +id,
+      +cliente,
+    );
   }
 
   @Get(':page/:limit')
@@ -61,7 +61,7 @@ export class ValidadoresController {
     @Param('limit', ParseIntPipe) limit: number,
     @Request() req,
   ): Promise<ApiResponseCommon> {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.ValidadoresService.findAll(+cliente, +rol, page, limit);
@@ -69,13 +69,13 @@ export class ValidadoresController {
 
   @Get(':id')
   findOneValidador(@Param('id') id: string, @Request() req) {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.ValidadoresService.findOneValidador(+id, +cliente, +rol);
   }
 
-    @Patch('actualizar/estado/:id')
+  @Patch('actualizar/estado/:id')
   updateValidadorEstado(
     @Param('id') id: string,
     @Request() req,

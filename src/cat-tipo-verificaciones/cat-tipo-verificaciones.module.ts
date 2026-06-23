@@ -6,10 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatTipoVerificaciones } from 'src/entities/CatTipoVerificaciones';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([CatTipoVerificaciones]),
-    BitacoraModule,
-  ],
+  imports: [TypeOrmModule.forFeature([CatTipoVerificaciones]), BitacoraModule],
   controllers: [CatTipoVerificacionesController],
   providers: [CatTipoVerificacionesService],
   exports: [CatTipoVerificacionesService],

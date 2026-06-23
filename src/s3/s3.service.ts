@@ -77,7 +77,9 @@ export class S3Service {
       const publicUrl = `https://${this.bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 
       //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { data: `INSERT INTO ${folder} (...) VALUES (...) -> bucket:  ${this.bucket} url: ${publicUrl}` };
+      const querylogger = {
+        data: `INSERT INTO ${folder} (...) VALUES (...) -> bucket:  ${this.bucket} url: ${publicUrl}`,
+      };
       await this.bitacoraLogger.logToBitacora(
         `${folder}`,
         `Se subio archivo al bucket: ${this.bucket}`,
@@ -91,7 +93,9 @@ export class S3Service {
       return { url: publicUrl };
     } catch (error) {
       //-----Registro en la bitacora----- ERROR
-      const querylogger = { data: `INSERT INTO ${folder} (...) VALUES (...) -> bucket:  ${this.bucket}` };
+      const querylogger = {
+        data: `INSERT INTO ${folder} (...) VALUES (...) -> bucket:  ${this.bucket}`,
+      };
       await this.bitacoraLogger.logToBitacora(
         `${folder}`,
         `Se subio archivo al bucket: ${this.bucket}`,
@@ -131,7 +135,7 @@ export class S3Service {
         `https://${this.bucket}\\.s3\\.${process.env.AWS_REGION}\\.amazonaws\\.com/(.+)`,
       );
       const match = url.match(urlPattern);
-      
+
       if (!match || !match[1]) {
         console.warn(`No se pudo extraer la key de la URL: ${url}`);
         return;

@@ -9,7 +9,10 @@ import { Operadores } from 'src/entities/Operadores';
 import { Instalaciones } from 'src/entities/Instalaciones';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Turnos, Clientes, Operadores, Instalaciones]), BitacoraModule],
+  imports: [
+    TypeOrmModule.forFeature([Turnos, Clientes, Operadores, Instalaciones]),
+    BitacoraModule,
+  ],
   controllers: [TurnosController],
   providers: [TurnosService],
 })

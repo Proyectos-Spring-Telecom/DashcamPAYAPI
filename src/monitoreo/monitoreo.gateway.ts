@@ -5,7 +5,6 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
   ConnectedSocket,
-  MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
@@ -62,13 +61,15 @@ export class MonitoreoGateway
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
-      // Autenticación JWT desde query params o auth headers
+      // Autenticaci?n JWT desde query params o auth headers
       const token =
         client.handshake.auth?.token ||
         client.handshake.query?.token?.toString();
 
       if (!token) {
-        this.logger.warn(`Conexión rechazada: sin token - SocketId: ${client.id}`);
+        this.logger.warn(
+          `Conexi?n rechazada: sin token - SocketId: ${client.id}`,
+        );
         client.disconnect();
         return;
       }
@@ -83,23 +84,23 @@ export class MonitoreoGateway
       client.cliente = payload.cliente;
       client.rol = payload.rol;
 
-      // Buscar si el usuario ya tiene una sesión (activa o inactiva reciente)
-      // Prioridad: primero buscar activa, luego inactiva más reciente
+      // Buscar si el usuario ya tiene una sesi?n (activa o inactiva reciente)
+      // Prioridad: primero buscar activa, luego inactiva m?s reciente
       // Si existe, reutilizar ese registro SIN actualizar socketId
       // NOTA: Siempre reutiliza el mismo registro sin importar el tiempo transcurrido
       let existingUserSession = await this.connectedUsersRepository.findOne({
-        where: { 
+        where: {
           idUsuario: payload.id,
           estatus: 1,
         },
         order: { lastActive: 'DESC' },
       });
 
-      // Si no hay sesión activa, buscar la más reciente (inactiva) del mismo usuario
-      // Esto incluye sesiones de hace días/semanas - siempre reutiliza el mismo registro
+      // Si no hay sesi?n activa, buscar la m?s reciente (inactiva) del mismo usuario
+      // Esto incluye sesiones de hace d?as/semanas - siempre reutiliza el mismo registro
       if (!existingUserSession) {
         existingUserSession = await this.connectedUsersRepository.findOne({
-          where: { 
+          where: {
             idUsuario: payload.id,
           },
           order: { lastActive: 'DESC' },
@@ -107,7 +108,7 @@ export class MonitoreoGateway
       }
 
       if (existingUserSession) {
-        // Usuario ya tiene sesión (activa o inactiva): reutilizar el mismo registro
+        // Usuario ya tiene sesi?n (activa o inactiva): reutilizar el mismo registro
         // Reactivar si estaba inactiva y actualizar lastActive
         // NO actualizar socketId para mantener el mismo registro
         await this.connectedUsersRepository.update(
@@ -119,12 +120,14 @@ export class MonitoreoGateway
           },
         );
         this.logger.log(
-          `Sesión reutilizada: SesiónId: ${existingUserSession.id} | SocketId BD: ${existingUserSession.socketId} | SocketId conexión: ${client.id} | Usuario: ${payload.id}`,
+          `Sesi?n reutilizada: Sesi?nId: ${existingUserSession.id} | SocketId BD: ${existingUserSession.socketId} | SocketId conexi?n: ${client.id} | Usuario: ${payload.id}`,
         );
 
-        // Limpiar sesión anterior de memoria si existe con el socketId anterior
+        // Limpiar sesi?n anterior de memoria si existe con el socketId anterior
         if (this.activeSessions.has(existingUserSession.socketId)) {
-          const oldInterval = this.lastActiveIntervals.get(existingUserSession.socketId);
+          const oldInterval = this.lastActiveIntervals.get(
+            existingUserSession.socketId,
+          );
           if (oldInterval) {
             clearInterval(oldInterval);
             this.lastActiveIntervals.delete(existingUserSession.socketId);
@@ -132,13 +135,14 @@ export class MonitoreoGateway
           this.activeSessions.delete(existingUserSession.socketId);
         }
       } else {
-        // Verificar si ya existe sesión con ese SocketId específico
-        const existingSocketSession = await this.connectedUsersRepository.findOne({
-          where: { socketId: client.id },
-        });
+        // Verificar si ya existe sesi?n con ese SocketId espec?fico
+        const existingSocketSession =
+          await this.connectedUsersRepository.findOne({
+            where: { socketId: client.id },
+          });
 
         if (existingSocketSession) {
-          // Actualizar sesión existente con ese SocketId
+          // Actualizar sesi?n existente con ese SocketId
           await this.connectedUsersRepository.update(
             { socketId: client.id },
             {
@@ -147,10 +151,10 @@ export class MonitoreoGateway
             },
           );
           this.logger.log(
-            `Sesión actualizada (mismo SocketId): SocketId: ${client.id} | Usuario: ${payload.id}`,
+            `Sesi?n actualizada (mismo SocketId): SocketId: ${client.id} | Usuario: ${payload.id}`,
           );
         } else {
-          // Crear nueva sesión solo si no existe ninguna para este usuario
+          // Crear nueva sesi?n solo si no existe ninguna para este usuario
           const newSession = this.connectedUsersRepository.create({
             idUsuario: payload.id,
             socketId: client.id,
@@ -158,7 +162,7 @@ export class MonitoreoGateway
           });
           await this.connectedUsersRepository.save(newSession);
           this.logger.log(
-            `Nueva sesión creada: SocketId: ${client.id} | Usuario: ${payload.id}`,
+            `Nueva sesi?n creada: SocketId: ${client.id} | Usuario: ${payload.id}`,
           );
         }
       }
@@ -169,10 +173,10 @@ export class MonitoreoGateway
       // Unirse a rooms por cada cliente (incluyendo el propio)
       const rooms = ids.map((id) => `cliente:${id}`);
       rooms.forEach((room) => {
-        client.join(room);
+        void client.join(room);
       });
 
-      // Guardar sesión en memoria
+      // Guardar sesi?n en memoria
       this.activeSessions.set(client.id, {
         userId: payload.id,
         cliente: payload.cliente,
@@ -183,7 +187,7 @@ export class MonitoreoGateway
 
       // Configurar intervalo para actualizar LastActive cada 30 segundos
       const interval = setInterval(() => {
-        this.updateLastActive(client.id);
+        void this.updateLastActive(client.id);
       }, 30000); // 30 segundos
       this.lastActiveIntervals.set(client.id, interval);
 
@@ -191,7 +195,7 @@ export class MonitoreoGateway
         `Cliente conectado: SocketId: ${client.id} | Usuario: ${payload.id} | Cliente: ${payload.cliente} | Rooms: ${rooms.join(', ')}`,
       );
 
-      // Notificar conexión exitosa
+      // Notificar conexi?n exitosa
       client.emit('connected', {
         message: 'Conectado al sistema de monitoreo',
         userId: payload.id,
@@ -199,7 +203,9 @@ export class MonitoreoGateway
         rooms: rooms,
       });
     } catch (error) {
-      this.logger.error(`Error en conexión: ${error.message} | SocketId: ${client.id}`);
+      this.logger.error(
+        `Error en conexi?n: ${error.message} | SocketId: ${client.id}`,
+      );
       client.disconnect();
     }
   }
@@ -213,17 +219,17 @@ export class MonitoreoGateway
         this.lastActiveIntervals.delete(client.id);
       }
 
-      // Buscar la sesión activa del usuario (no por socketId porque puede haber cambiado)
+      // Buscar la sesi?n activa del usuario (no por socketId porque puede haber cambiado)
       if (client.userId) {
         const userSession = await this.connectedUsersRepository.findOne({
-          where: { 
+          where: {
             idUsuario: client.userId,
             estatus: 1,
           },
         });
 
         if (userSession) {
-          // Marcar sesión como desconectada (soft delete) usando el Id del registro
+          // Marcar sesi?n como desconectada (soft delete) usando el Id del registro
           await this.connectedUsersRepository.update(
             { id: userSession.id },
             {
@@ -231,7 +237,9 @@ export class MonitoreoGateway
               lastActive: new Date(),
             },
           );
-          this.logger.log(`Cliente desconectado: SesiónId: ${userSession.id} | SocketId conexión: ${client.id} | Usuario: ${client.userId}`);
+          this.logger.log(
+            `Cliente desconectado: Sesi?nId: ${userSession.id} | SocketId conexi?n: ${client.id} | Usuario: ${client.userId}`,
+          );
         } else {
           // Si no encuentra por usuario, intentar por socketId (fallback)
           await this.connectedUsersRepository.update(
@@ -241,7 +249,9 @@ export class MonitoreoGateway
               lastActive: new Date(),
             },
           );
-          this.logger.log(`Cliente desconectado (fallback por socketId): SocketId: ${client.id}`);
+          this.logger.log(
+            `Cliente desconectado (fallback por socketId): SocketId: ${client.id}`,
+          );
         }
       } else {
         // Si no hay userId, buscar por socketId
@@ -252,28 +262,32 @@ export class MonitoreoGateway
             lastActive: new Date(),
           },
         );
-        this.logger.log(`Cliente desconectado (sin userId): SocketId: ${client.id}`);
+        this.logger.log(
+          `Cliente desconectado (sin userId): SocketId: ${client.id}`,
+        );
       }
 
       // Eliminar de memoria
       this.activeSessions.delete(client.id);
     } catch (error) {
-      this.logger.error(`Error al desconectar: ${error.message} | SocketId: ${client.id}`);
+      this.logger.error(
+        `Error al desconectar: ${error.message} | SocketId: ${client.id}`,
+      );
     }
   }
 
   /**
-   * Actualiza LastActive de una sesión en BD
+   * Actualiza LastActive de una sesi?n en BD
    * Busca por socketId en memoria para obtener userId, luego busca en BD por userId
    */
   private async updateLastActive(socketId: string): Promise<void> {
     try {
-      // Obtener userId desde la sesión en memoria
+      // Obtener userId desde la sesi?n en memoria
       const session = this.activeSessions.get(socketId);
       if (session && session.userId) {
-        // Buscar sesión activa del usuario en BD
+        // Buscar sesi?n activa del usuario en BD
         const userSession = await this.connectedUsersRepository.findOne({
-          where: { 
+          where: {
             idUsuario: session.userId,
             estatus: 1,
           },
@@ -287,14 +301,16 @@ export class MonitoreoGateway
           );
         }
       } else {
-        // Fallback: buscar por socketId si no hay sesión en memoria
+        // Fallback: buscar por socketId si no hay sesi?n en memoria
         await this.connectedUsersRepository.update(
           { socketId },
           { lastActive: new Date() },
         );
       }
     } catch (error) {
-      this.logger.error(`Error al actualizar LastActive: ${error.message} | SocketId: ${socketId}`);
+      this.logger.error(
+        `Error al actualizar LastActive: ${error.message} | SocketId: ${socketId}`,
+      );
     }
   }
 
@@ -315,13 +331,15 @@ export class MonitoreoGateway
       const results = await this.clienteRepository.query(query, ids);
       return results.map((row: any) => row.SocketId);
     } catch (error) {
-      this.logger.error(`Error al obtener usuarios conectados: ${error.message}`);
+      this.logger.error(
+        `Error al obtener usuarios conectados: ${error.message}`,
+      );
       return [];
     }
   }
 
   /**
-   * Emite actualización de posición a los clientes conectados del cliente correspondiente
+   * Emite actualizaci?n de posici?n a los clientes conectados del cliente correspondiente
    */
   emitPositionUpdate(positionData: {
     numeroSerieValidador: string;
@@ -338,34 +356,38 @@ export class MonitoreoGateway
     // Emitir solo a los clientes del cliente correspondiente usando rooms
     const room = `cliente:${positionData.idCliente}`;
     this.server.to(room).emit('position:update', positionData);
-    this.logger.debug(`Posición emitida a room: ${room} | Validador: ${positionData.numeroSerieValidador}`);
+    this.logger.debug(
+      `Posici?n emitida a room: ${room} | Validador: ${positionData.numeroSerieValidador}`,
+    );
   }
 
   /**
-   * Emite actualización completa de unidad de monitoreo
+   * Emite actualizaci?n completa de unidad de monitoreo
    * unidadData debe tener el mismo formato que devuelve obtenerUnidades
    */
   emitUnidadUpdate(unidadData: any, idCliente: number): void {
     const room = `cliente:${idCliente}`;
     this.server.to(room).emit('unidad:update', unidadData);
-    this.logger.debug(`Unidad actualizada emitida a room: ${room} | Vehículo: ${unidadData?.id}`);
+    this.logger.debug(
+      `Unidad actualizada emitida a room: ${room} | Veh?culo: ${unidadData?.id}`,
+    );
   }
 
   /**
-   * Handler para suscripción manual a eventos específicos
+   * Handler para suscripci?n manual a eventos espec?ficos
    */
   @SubscribeMessage('subscribe:unidades')
   handleSubscribeUnidades(@ConnectedSocket() client: AuthenticatedSocket) {
     if (!client.cliente) {
       return { error: 'No autenticado' };
     }
-    // El cliente ya está en los rooms necesarios desde handleConnection
+    // El cliente ya est? en los rooms necesarios desde handleConnection
     this.logger.debug(`Cliente suscrito a unidades: SocketId: ${client.id}`);
     return { message: 'Suscrito a actualizaciones de unidades' };
   }
 
   /**
-   * Función para obtener los clientes hijos (igual que en MonitoreoService)
+   * Funci?n para obtener los clientes hijos (igual que en MonitoreoService)
    */
   private async clienteHijos(cliente: number) {
     const clientesFiltrado = await this.clienteRepository.query(
@@ -373,7 +395,7 @@ export class MonitoreoGateway
       [cliente],
     );
 
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
+    const idsFiltrados = clientesFiltrado[0]; // El primer ?ndice contiene los resultados
     const ids = idsFiltrados
       .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
       .filter(Boolean);
@@ -381,7 +403,7 @@ export class MonitoreoGateway
       return { ids: [cliente], placeholders: '?' }; // Al menos el cliente mismo
     }
 
-    // Construir el query dinámico con los IDs
+    // Construir el query din?mico con los IDs
     const placeholders = ids.map(() => '?').join(', ');
     return { ids, placeholders };
   }

@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { Variantes } from './Variantes';
 import { Zonas } from './Zonas';
-import { applySchema } from "src/common/apply-schema.decorator";
+import { applySchema } from 'src/common/apply-schema.decorator';
 
 @applySchema
 @Index('FK_Rutas_Zonas', ['idZona'], {})
@@ -52,10 +52,10 @@ export class Rutas {
   @Column('bigint', { name: 'IdZona' })
   idZona: number;
 
-  @Column("bigint", { name: "IdZonaFin", nullable: true })
+  @Column('bigint', { name: 'IdZonaFin', nullable: true })
   idZonaFin: number | null;
 
-  @Column("bigint", { name: "IdRutaIda", nullable: true })
+  @Column('bigint', { name: 'IdRutaIda', nullable: true })
   idRutaIda: number | null;
 
   @OneToMany(() => Variantes, (variantes) => variantes.idRuta2)
@@ -69,6 +69,6 @@ export class Rutas {
   idZona2: Zonas;
 
   @ManyToOne(() => Zonas, { nullable: true })
-  @JoinColumn([{ name: "IdZonaFin", referencedColumnName: "id" }])
+  @JoinColumn([{ name: 'IdZonaFin', referencedColumnName: 'id' }])
   idZonaFin2: Zonas | null;
 }

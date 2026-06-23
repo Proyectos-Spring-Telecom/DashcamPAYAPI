@@ -12,7 +12,13 @@ import {
 import { ViajesService } from './viajes.service';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+} from '@nestjs/swagger';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 
@@ -21,15 +27,20 @@ import { ApiResponseCommon } from 'src/common/ApiResponse';
 @UseGuards(JwtAuthGuard)
 @Controller('viajes')
 export class ViajesController {
-  constructor(private readonly viajesService: ViajesService) { }
+  constructor(private readonly viajesService: ViajesService) {}
 
   @Post()
   create(@Body() createViajeDto: CreateViajeDto, @Request() req) {
     const idUser = req.user.userId;
     const cliente = req.user.cliente;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     const idOperador = req.user.idOperador;
-    return this.viajesService.create(+idUser, +cliente, +idOperador, createViajeDto);
+    return this.viajesService.create(
+      +idUser,
+      +cliente,
+      +idOperador,
+      createViajeDto,
+    );
   }
 
   @Patch(':id')
@@ -40,23 +51,31 @@ export class ViajesController {
   ) {
     const idUser = req.user.userId;
     const cliente = req.user.cliente;
-    const rol = req.user.rol;
+    const _rol = req.user.rol;
     const idOperador = req.user.idOperador;
-    return this.viajesService.update(+idUser, +cliente, +idOperador, +id, updateViajeDto);
+    return this.viajesService.update(
+      +idUser,
+      +cliente,
+      +idOperador,
+      +id,
+      updateViajeDto,
+    );
   }
 
   @Get('list')
   findAllList(@Request() req) {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
-    const rol = req.user.rol;
-    return this.viajesService.findAllList(+cliente, +cliente,);
+    const _rol = req.user.rol;
+    return this.viajesService.findAllList(+cliente, +cliente);
   }
 
   @Get('viajes-ultima-semana/:numeroSerieValidador')
   @ApiOperation({
-    summary: 'Obtener viajes de la última semana por número de serie del validador',
-    description: 'Obtiene los viajes de la última semana asociados a un validador, incluyendo información del turno, variante, instalación y la última posición del validador.',
+    summary:
+      'Obtener viajes de la última semana por número de serie del validador',
+    description:
+      'Obtiene los viajes de la última semana asociados a un validador, incluyendo información del turno, variante, instalación y la última posición del validador.',
   })
   @ApiParam({
     name: 'numeroSerieValidador',
@@ -88,9 +107,9 @@ export class ViajesController {
   findAll(
     @Param('page', ParseIntPipe) page: number,
     @Param('limit', ParseIntPipe) limit: number,
-    @Request() req
+    @Request() req,
   ) {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.viajesService.findAll(+cliente, +rol, page, limit);
@@ -98,10 +117,9 @@ export class ViajesController {
 
   @Get(':id')
   findOne(@Param('id') id: string, @Request() req) {
-    const idUser = req.user.userId;
+    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.viajesService.findOne(+id, +cliente, +rol,);
+    return this.viajesService.findOne(+id, +cliente, +rol);
   }
-
 }

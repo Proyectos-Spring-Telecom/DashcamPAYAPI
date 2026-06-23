@@ -70,10 +70,10 @@ export class TransaccionesService {
 
     @InjectRepository(HistoricoTransaccionesDebito)
     private readonly historicoTransaccionesDebitoRepository: Repository<HistoricoTransaccionesDebito>,
-    
+
     @InjectRepository(HistoricoTransaccionesRecarga)
     private readonly historicoTransaccionesRecargaRepository: Repository<HistoricoTransaccionesRecarga>,
-   
+
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
     @InjectRepository(CatTiposPasajeros)
@@ -106,7 +106,7 @@ export class TransaccionesService {
     private readonly monederosService: MonederosService,
     private readonly pasajeroService: PasajerosService,
     private readonly netpayService: NetpayService,
-  ) { }
+  ) {}
 
   /**
    * Transforma el valor de EsQR (0/1) a texto descriptivo
@@ -133,31 +133,52 @@ export class TransaccionesService {
     variante: Variantes | null,
     latitud: number,
     longitud: number,
-    tarifaInfo?: { tarifaBase?: number; costoAdicional?: number; distanciaBaseKm?: number; incrementoCadaMetros?: number; tipoTarifa?: number } | null,
+    tarifaInfo?: {
+      tarifaBase?: number;
+      costoAdicional?: number;
+      distanciaBaseKm?: number;
+      incrementoCadaMetros?: number;
+      tipoTarifa?: number;
+    } | null,
   ): number {
     if (!variante?.recorridoDetallado) {
-      console.log('[TRANSACCIONES] No se puede calcular distancia: variante sin recorridoDetallado');
+      console.log(
+        '[TRANSACCIONES] No se puede calcular distancia: variante sin recorridoDetallado',
+      );
       return 0;
     }
 
     try {
-      const recorrido = this.parsearRecorridoDetallado(variante.recorridoDetallado);
+      const recorrido = this.parsearRecorridoDetallado(
+        variante.recorridoDetallado,
+      );
       if (!recorrido || recorrido.length === 0) {
-        console.log('[TRANSACCIONES] No se puede calcular distancia: recorrido vacío o inválido');
+        console.log(
+          '[TRANSACCIONES] No se puede calcular distancia: recorrido vacío o inválido',
+        );
         return 0;
       }
 
       // Encontrar el punto más cercano del recorrido al punto de transacción
       const puntoTransaccion = { lat: latitud, lng: longitud };
-      const puntoMasCercanoIndex = this.encontrarPuntoMasCercano(recorrido, puntoTransaccion);
-      
+      const puntoMasCercanoIndex = this.encontrarPuntoMasCercano(
+        recorrido,
+        puntoTransaccion,
+      );
+
       let puntoMasCercano: { lat: number; lng: number } | null = null;
       let distanciaAlPuntoMasCercano = Infinity;
-      
-      if (puntoMasCercanoIndex !== -1 && puntoMasCercanoIndex < recorrido.length) {
+
+      if (
+        puntoMasCercanoIndex !== -1 &&
+        puntoMasCercanoIndex < recorrido.length
+      ) {
         puntoMasCercano = recorrido[puntoMasCercanoIndex];
         if (puntoMasCercano) {
-          distanciaAlPuntoMasCercano = haversine(puntoMasCercano, puntoTransaccion);
+          distanciaAlPuntoMasCercano = haversine(
+            puntoMasCercano,
+            puntoTransaccion,
+          );
         }
       }
 
@@ -172,7 +193,9 @@ export class TransaccionesService {
         recorrido,
         recorrido.length - 1, // Hasta el último punto
       );
-      const tamañoTotalRecorridoKm = parseFloat((tamañoTotalRecorrido / 1000).toFixed(2));
+      const tamañoTotalRecorridoKm = parseFloat(
+        (tamañoTotalRecorrido / 1000).toFixed(2),
+      );
 
       // Calcular distancia desde el punto de transacción hasta el punto 1 del recorrido
       // Esto incluye: distancia al punto más cercano + distancia desde ese punto hasta el punto 1
@@ -180,60 +203,96 @@ export class TransaccionesService {
 
       if (puntoMasCercanoIndex !== -1 && puntoMasCercano) {
         // Distancia desde punto de transacción al punto más cercano
-        const distanciaAlPuntoMasCercano = haversine(puntoTransaccion, puntoMasCercano);
-        
+        const distanciaAlPuntoMasCercano = haversine(
+          puntoTransaccion,
+          puntoMasCercano,
+        );
+
         // Si el punto más cercano es el punto 1, solo usamos la distancia directa
         if (puntoMasCercanoIndex === 0) {
           distanciaDesdeTransaccionHastaPunto1 = distanciaAlPuntoMasCercano;
         } else {
           // Calcular distancia desde el punto más cercano hasta el punto 1 (sumando punto por punto hacia atrás)
-          const distanciaDesdePuntoMasCercanoHastaPunto1 = this.calcularDistanciaAcumuladaRecorrido(
-            recorrido,
-            puntoMasCercanoIndex,
-          );
-          
+          const distanciaDesdePuntoMasCercanoHastaPunto1 =
+            this.calcularDistanciaAcumuladaRecorrido(
+              recorrido,
+              puntoMasCercanoIndex,
+            );
+
           // La distancia total es: distancia al punto más cercano + distancia desde ese punto hasta el punto 1
-          distanciaDesdeTransaccionHastaPunto1 = distanciaAlPuntoMasCercano + distanciaDesdePuntoMasCercanoHastaPunto1;
+          distanciaDesdeTransaccionHastaPunto1 =
+            distanciaAlPuntoMasCercano +
+            distanciaDesdePuntoMasCercanoHastaPunto1;
         }
       } else {
         // Si no se encuentra punto cercano, calcular distancia directa al punto 1
-        distanciaDesdeTransaccionHastaPunto1 = haversine(puntoTransaccion, recorrido[0]);
+        distanciaDesdeTransaccionHastaPunto1 = haversine(
+          puntoTransaccion,
+          recorrido[0],
+        );
       }
 
-      const distanciaEnKm = parseFloat((distanciaDesdeTransaccionHastaPunto1 / 1000).toFixed(2));
-      
+      const distanciaEnKm = parseFloat(
+        (distanciaDesdeTransaccionHastaPunto1 / 1000).toFixed(2),
+      );
+
       // Imprimir en consola el cálculo detallado
-      console.log('[TRANSACCIONES] ===== CÁLCULO DE DISTANCIA INICIAL KM =====');
+      console.log(
+        '[TRANSACCIONES] ===== CÁLCULO DE DISTANCIA INICIAL KM =====',
+      );
       console.log(`[TRANSACCIONES] Variante ID: ${variante.id}`);
-      console.log(`[TRANSACCIONES] Total de puntos en recorrido: ${recorrido.length}`);
-      console.log(`[TRANSACCIONES] Tamaño total del recorridoDetallado: ${tamañoTotalRecorridoKm} km (${tamañoTotalRecorrido.toFixed(2)} metros)`);
-      console.log(`[TRANSACCIONES] Punto de transacción: Lat ${latitud}, Lng ${longitud}`);
-      console.log(`[TRANSACCIONES] Punto 1 del recorrido: Lat ${recorrido[0].lat}, Lng ${recorrido[0].lng}`);
-      console.log(`[TRANSACCIONES] Último punto del recorrido: Lat ${recorrido[recorrido.length - 1].lat}, Lng ${recorrido[recorrido.length - 1].lng}`);
-      
+      console.log(
+        `[TRANSACCIONES] Total de puntos en recorrido: ${recorrido.length}`,
+      );
+      console.log(
+        `[TRANSACCIONES] Tamaño total del recorridoDetallado: ${tamañoTotalRecorridoKm} km (${tamañoTotalRecorrido.toFixed(2)} metros)`,
+      );
+      console.log(
+        `[TRANSACCIONES] Punto de transacción: Lat ${latitud}, Lng ${longitud}`,
+      );
+      console.log(
+        `[TRANSACCIONES] Punto 1 del recorrido: Lat ${recorrido[0].lat}, Lng ${recorrido[0].lng}`,
+      );
+      console.log(
+        `[TRANSACCIONES] Último punto del recorrido: Lat ${recorrido[recorrido.length - 1].lat}, Lng ${recorrido[recorrido.length - 1].lng}`,
+      );
+
       if (puntoMasCercanoIndex !== -1 && puntoMasCercano) {
         console.log(`[TRANSACCIONES] --- PUNTO MÁS CERCANO DEL RECORRIDO ---`);
-        console.log(`[TRANSACCIONES] Índice del punto más cercano: ${puntoMasCercanoIndex + 1} (de ${recorrido.length})`);
-        console.log(`[TRANSACCIONES] Coordenadas del punto más cercano: Lat ${puntoMasCercano.lat}, Lng ${puntoMasCercano.lng}`);
-        console.log(`[TRANSACCIONES] Distancia desde punto de transacción al punto más cercano: ${(distanciaAlPuntoMasCercano / 1000).toFixed(2)} km (${distanciaAlPuntoMasCercano.toFixed(2)} metros)`);
-        
+        console.log(
+          `[TRANSACCIONES] Índice del punto más cercano: ${puntoMasCercanoIndex + 1} (de ${recorrido.length})`,
+        );
+        console.log(
+          `[TRANSACCIONES] Coordenadas del punto más cercano: Lat ${puntoMasCercano.lat}, Lng ${puntoMasCercano.lng}`,
+        );
+        console.log(
+          `[TRANSACCIONES] Distancia desde punto de transacción al punto más cercano: ${(distanciaAlPuntoMasCercano / 1000).toFixed(2)} km (${distanciaAlPuntoMasCercano.toFixed(2)} metros)`,
+        );
+
         if (puntoMasCercanoIndex === 0) {
-          console.log(`[TRANSACCIONES] El punto más cercano ES el punto 1, usando distancia directa`);
+          console.log(
+            `[TRANSACCIONES] El punto más cercano ES el punto 1, usando distancia directa`,
+          );
         } else {
           // Calcular distancia desde el punto más cercano hasta el punto 1
-          const distanciaDesdePuntoMasCercanoHastaPunto1 = this.calcularDistanciaAcumuladaRecorrido(
-            recorrido,
-            puntoMasCercanoIndex,
+          const distanciaDesdePuntoMasCercanoHastaPunto1 =
+            this.calcularDistanciaAcumuladaRecorrido(
+              recorrido,
+              puntoMasCercanoIndex,
+            );
+          console.log(
+            `[TRANSACCIONES] Distancia desde punto más cercano hasta punto 1 (sumando punto por punto): ${(distanciaDesdePuntoMasCercanoHastaPunto1 / 1000).toFixed(2)} km`,
           );
-          console.log(`[TRANSACCIONES] Distancia desde punto más cercano hasta punto 1 (sumando punto por punto): ${(distanciaDesdePuntoMasCercanoHastaPunto1 / 1000).toFixed(2)} km`);
-          
+
           // Imprimir detalle punto por punto desde punto más cercano hasta punto 1
-          console.log('[TRANSACCIONES] --- Detalle punto por punto (desde punto más cercano hasta punto 1) ---');
+          console.log(
+            '[TRANSACCIONES] --- Detalle punto por punto (desde punto más cercano hasta punto 1) ---',
+          );
           let distanciaAcumuladaHaciaPunto1 = 0;
           for (let i = puntoMasCercanoIndex; i > 0; i--) {
             const puntoActual = recorrido[i];
             const puntoAnterior = recorrido[i - 1];
-            
+
             if (
               typeof puntoActual.lat === 'number' &&
               typeof puntoActual.lng === 'number' &&
@@ -242,24 +301,32 @@ export class TransaccionesService {
             ) {
               const distanciaSegmento = haversine(puntoActual, puntoAnterior);
               distanciaAcumuladaHaciaPunto1 += distanciaSegmento;
-              console.log(`[TRANSACCIONES] Punto ${i + 1} -> Punto ${i}: ${(distanciaSegmento / 1000).toFixed(2)} km | Acumulado hacia punto 1: ${(distanciaAcumuladaHaciaPunto1 / 1000).toFixed(2)} km`);
+              console.log(
+                `[TRANSACCIONES] Punto ${i + 1} -> Punto ${i}: ${(distanciaSegmento / 1000).toFixed(2)} km | Acumulado hacia punto 1: ${(distanciaAcumuladaHaciaPunto1 / 1000).toFixed(2)} km`,
+              );
             }
           }
         }
       } else {
-        console.log(`[TRANSACCIONES] No se encontró un punto cercano válido, usando distancia directa al punto 1`);
+        console.log(
+          `[TRANSACCIONES] No se encontró un punto cercano válido, usando distancia directa al punto 1`,
+        );
       }
-      
+
       console.log(`[TRANSACCIONES] --- RESULTADO FINAL ---`);
-      console.log(`[TRANSACCIONES] Distancia desde punto de transacción hasta punto 1: ${distanciaEnKm} km`);
-      
+      console.log(
+        `[TRANSACCIONES] Distancia desde punto de transacción hasta punto 1: ${distanciaEnKm} km`,
+      );
+
       // Imprimir detalle punto por punto del recorrido completo para mostrar el tamaño total
-      console.log('[TRANSACCIONES] --- Detalle punto por punto del recorrido completo (tamaño total) ---');
+      console.log(
+        '[TRANSACCIONES] --- Detalle punto por punto del recorrido completo (tamaño total) ---',
+      );
       let distanciaAcumuladaRecorridoCompleto = 0;
       for (let i = 0; i < recorrido.length - 1; i++) {
         const puntoActual = recorrido[i];
         const puntoSiguiente = recorrido[i + 1];
-        
+
         if (
           typeof puntoActual.lat === 'number' &&
           typeof puntoActual.lng === 'number' &&
@@ -268,11 +335,15 @@ export class TransaccionesService {
         ) {
           const distanciaSegmento = haversine(puntoActual, puntoSiguiente);
           distanciaAcumuladaRecorridoCompleto += distanciaSegmento;
-          console.log(`[TRANSACCIONES] Punto ${i + 1} -> Punto ${i + 2}: ${(distanciaSegmento / 1000).toFixed(2)} km | Acumulado total: ${(distanciaAcumuladaRecorridoCompleto / 1000).toFixed(2)} km`);
+          console.log(
+            `[TRANSACCIONES] Punto ${i + 1} -> Punto ${i + 2}: ${(distanciaSegmento / 1000).toFixed(2)} km | Acumulado total: ${(distanciaAcumuladaRecorridoCompleto / 1000).toFixed(2)} km`,
+          );
         }
       }
-      console.log(`[TRANSACCIONES] Tamaño total del recorridoDetallado (verificado): ${(distanciaAcumuladaRecorridoCompleto / 1000).toFixed(2)} km`);
-      
+      console.log(
+        `[TRANSACCIONES] Tamaño total del recorridoDetallado (verificado): ${(distanciaAcumuladaRecorridoCompleto / 1000).toFixed(2)} km`,
+      );
+
       // Calcular y mostrar información de tarifa y extra potencial
       if (tarifaInfo) {
         const tarifaBase = tarifaInfo.tarifaBase || 0;
@@ -280,55 +351,104 @@ export class TransaccionesService {
         const distanciaBaseKm = tarifaInfo.distanciaBaseKm || 0;
         const incrementoCadaMetros = tarifaInfo.incrementoCadaMetros || 0;
         const tipoTarifa = tarifaInfo.tipoTarifa;
-        
-        console.log('[TRANSACCIONES] --- INFORMACIÓN DE TARIFA Y COSTO POTENCIAL ---');
+
+        console.log(
+          '[TRANSACCIONES] --- INFORMACIÓN DE TARIFA Y COSTO POTENCIAL ---',
+        );
         console.log(`[TRANSACCIONES] Tarifa base: $${tarifaBase.toFixed(2)}`);
         // INCREMENTAL = 2 según el usuario
         const esTarifaIncremental = tipoTarifa === 2; // Valor 2 corresponde a INCREMENTAL
-        const nombreTipoTarifa = tipoTarifa === 1 ? 'FIJA' : tipoTarifa === 2 ? 'INCREMENTAL' : 'DESCONOCIDO';
-        console.log(`[TRANSACCIONES] Tipo de tarifa: ${tipoTarifa} (${nombreTipoTarifa})`);
-        console.log(`[TRANSACCIONES] Distancia base incluida: ${distanciaBaseKm} km`);
-        
+        const nombreTipoTarifa =
+          tipoTarifa === 1
+            ? 'FIJA'
+            : tipoTarifa === 2
+              ? 'INCREMENTAL'
+              : 'DESCONOCIDO';
+        console.log(
+          `[TRANSACCIONES] Tipo de tarifa: ${tipoTarifa} (${nombreTipoTarifa})`,
+        );
+        console.log(
+          `[TRANSACCIONES] Distancia base incluida: ${distanciaBaseKm} km`,
+        );
+
         // Solo calcular el extra potencial si la tarifa es INCREMENTAL (valor 2) y tiene configuración de costo adicional
-        if (esTarifaIncremental && costoAdicional > 0 && incrementoCadaMetros > 0) {
+        if (
+          esTarifaIncremental &&
+          costoAdicional > 0 &&
+          incrementoCadaMetros > 0
+        ) {
           const distanciaTotalMetros = distanciaAcumuladaRecorridoCompleto;
           const distanciaBaseMetros = distanciaBaseKm * 1000;
-          
+
           // Calcular cuántos incrementos se aplicarían si hace el recorrido completo
           let extraPotencial = 0;
           if (distanciaTotalMetros > distanciaBaseMetros) {
-            const distanciaExcedente = distanciaTotalMetros - distanciaBaseMetros;
-            const numeroIncrementos = Math.ceil(distanciaExcedente / incrementoCadaMetros);
+            const distanciaExcedente =
+              distanciaTotalMetros - distanciaBaseMetros;
+            const numeroIncrementos = Math.ceil(
+              distanciaExcedente / incrementoCadaMetros,
+            );
             extraPotencial = numeroIncrementos * costoAdicional;
-            
-            console.log(`[TRANSACCIONES] Distancia total del recorrido: ${(distanciaTotalMetros / 1000).toFixed(2)} km (${distanciaTotalMetros.toFixed(2)} metros)`);
-            console.log(`[TRANSACCIONES] Distancia excedente sobre la base: ${(distanciaExcedente / 1000).toFixed(2)} km (${distanciaExcedente.toFixed(2)} metros)`);
-            console.log(`[TRANSACCIONES] Incremento cada: ${incrementoCadaMetros} metros`);
-            console.log(`[TRANSACCIONES] Costo adicional por incremento: $${costoAdicional.toFixed(2)}`);
-            console.log(`[TRANSACCIONES] Número de incrementos necesarios: ${numeroIncrementos}`);
-            console.log(`[TRANSACCIONES] Extra potencial si hace el recorrido completo: $${extraPotencial.toFixed(2)}`);
-            console.log(`[TRANSACCIONES] Costo total potencial (tarifa base + extra): $${(tarifaBase + extraPotencial).toFixed(2)}`);
+
+            console.log(
+              `[TRANSACCIONES] Distancia total del recorrido: ${(distanciaTotalMetros / 1000).toFixed(2)} km (${distanciaTotalMetros.toFixed(2)} metros)`,
+            );
+            console.log(
+              `[TRANSACCIONES] Distancia excedente sobre la base: ${(distanciaExcedente / 1000).toFixed(2)} km (${distanciaExcedente.toFixed(2)} metros)`,
+            );
+            console.log(
+              `[TRANSACCIONES] Incremento cada: ${incrementoCadaMetros} metros`,
+            );
+            console.log(
+              `[TRANSACCIONES] Costo adicional por incremento: $${costoAdicional.toFixed(2)}`,
+            );
+            console.log(
+              `[TRANSACCIONES] Número de incrementos necesarios: ${numeroIncrementos}`,
+            );
+            console.log(
+              `[TRANSACCIONES] Extra potencial si hace el recorrido completo: $${extraPotencial.toFixed(2)}`,
+            );
+            console.log(
+              `[TRANSACCIONES] Costo total potencial (tarifa base + extra): $${(tarifaBase + extraPotencial).toFixed(2)}`,
+            );
           } else {
-            console.log(`[TRANSACCIONES] La distancia del recorrido (${(distanciaTotalMetros / 1000).toFixed(2)} km) está dentro de la distancia base (${distanciaBaseKm} km)`);
-            console.log(`[TRANSACCIONES] No se aplicaría costo adicional. Costo total: $${tarifaBase.toFixed(2)}`);
+            console.log(
+              `[TRANSACCIONES] La distancia del recorrido (${(distanciaTotalMetros / 1000).toFixed(2)} km) está dentro de la distancia base (${distanciaBaseKm} km)`,
+            );
+            console.log(
+              `[TRANSACCIONES] No se aplicaría costo adicional. Costo total: $${tarifaBase.toFixed(2)}`,
+            );
           }
         } else {
           if (!esTarifaIncremental) {
-            console.log(`[TRANSACCIONES] Tipo de tarifa no es INCREMENTAL (tipo: ${tipoTarifa}), no se calcula extra por distancia`);
+            console.log(
+              `[TRANSACCIONES] Tipo de tarifa no es INCREMENTAL (tipo: ${tipoTarifa}), no se calcula extra por distancia`,
+            );
           } else {
-            console.log(`[TRANSACCIONES] No hay configuración de costo adicional (costoAdicional: ${costoAdicional}, incrementoCadaMetros: ${incrementoCadaMetros})`);
+            console.log(
+              `[TRANSACCIONES] No hay configuración de costo adicional (costoAdicional: ${costoAdicional}, incrementoCadaMetros: ${incrementoCadaMetros})`,
+            );
           }
-          console.log(`[TRANSACCIONES] Costo total: $${tarifaBase.toFixed(2)} (solo tarifa base)`);
+          console.log(
+            `[TRANSACCIONES] Costo total: $${tarifaBase.toFixed(2)} (solo tarifa base)`,
+          );
         }
       } else {
-        console.log('[TRANSACCIONES] No se proporcionó información de tarifa para calcular el extra potencial');
+        console.log(
+          '[TRANSACCIONES] No se proporcionó información de tarifa para calcular el extra potencial',
+        );
       }
-      
-      console.log('[TRANSACCIONES] ===========================================');
-      
+
+      console.log(
+        '[TRANSACCIONES] ===========================================',
+      );
+
       return isNaN(distanciaEnKm) || distanciaEnKm < 0 ? 0 : distanciaEnKm;
     } catch (error) {
-      console.error('[TRANSACCIONES] Error al calcular distancia inicial:', error);
+      console.error(
+        '[TRANSACCIONES] Error al calcular distancia inicial:',
+        error,
+      );
       return 0;
     }
   }
@@ -344,7 +464,13 @@ export class TransaccionesService {
    */
   private calcularCobroMaximo(
     variante: Variantes | null,
-    tarifaInfo?: { tarifaBase?: number; costoAdicional?: number; distanciaBaseKm?: number; incrementoCadaMetros?: number; tipoTarifa?: number } | null,
+    tarifaInfo?: {
+      tarifaBase?: number;
+      costoAdicional?: number;
+      distanciaBaseKm?: number;
+      incrementoCadaMetros?: number;
+      tipoTarifa?: number;
+    } | null,
     latitudInicial?: number,
     longitudInicial?: number,
   ): number | null {
@@ -369,7 +495,9 @@ export class TransaccionesService {
     }
 
     try {
-      const recorrido = this.parsearRecorridoDetallado(variante.recorridoDetallado);
+      const recorrido = this.parsearRecorridoDetallado(
+        variante.recorridoDetallado,
+      );
       if (!recorrido || recorrido.length === 0) {
         return tarifaBase;
       }
@@ -382,14 +510,23 @@ export class TransaccionesService {
         const ultimoPunto = recorrido[recorrido.length - 1];
 
         // Encontrar el punto más cercano del recorrido al punto inicial
-        const puntoMasCercanoIndex = this.encontrarPuntoMasCercano(recorrido, puntoInicial);
-        
-        if (puntoMasCercanoIndex !== -1 && puntoMasCercanoIndex < recorrido.length) {
+        const puntoMasCercanoIndex = this.encontrarPuntoMasCercano(
+          recorrido,
+          puntoInicial,
+        );
+
+        if (
+          puntoMasCercanoIndex !== -1 &&
+          puntoMasCercanoIndex < recorrido.length
+        ) {
           const puntoMasCercano = recorrido[puntoMasCercanoIndex];
-          
+
           // Distancia desde punto inicial hasta el punto más cercano
-          const distanciaAlPuntoMasCercano = haversine(puntoInicial, puntoMasCercano);
-          
+          const distanciaAlPuntoMasCercano = haversine(
+            puntoInicial,
+            puntoMasCercano,
+          );
+
           // Distancia desde el punto más cercano hasta el último punto del recorrido
           // Calcular distancia acumulada desde el punto más cercano hasta el último punto
           let distanciaDesdePuntoMasCercanoHastaUltimo = 0;
@@ -404,28 +541,55 @@ export class TransaccionesService {
                 typeof puntoSiguiente.lat === 'number' &&
                 typeof puntoSiguiente.lng === 'number'
               ) {
-                distanciaDesdePuntoMasCercanoHastaUltimo += haversine(puntoActual, puntoSiguiente);
+                distanciaDesdePuntoMasCercanoHastaUltimo += haversine(
+                  puntoActual,
+                  puntoSiguiente,
+                );
               }
             }
           }
-          
-          // Distancia total restante = distancia al punto más cercano + distancia desde ese punto hasta el último
-          distanciaRestanteMetros = distanciaAlPuntoMasCercano + distanciaDesdePuntoMasCercanoHastaUltimo;
 
-          console.log(`[TRANSACCIONES] ===== CÁLCULO DE COBRO MÁXIMO (desde punto inicial hasta último punto) =====`);
-          console.log(`[TRANSACCIONES] Punto inicial: (${latitudInicial}, ${longitudInicial})`);
-          console.log(`[TRANSACCIONES] Último punto del recorrido: (${ultimoPunto.lat}, ${ultimoPunto.lng})`);
-          console.log(`[TRANSACCIONES] Punto más cercano al inicial (índice ${puntoMasCercanoIndex + 1}): (${puntoMasCercano.lat}, ${puntoMasCercano.lng})`);
-          console.log(`[TRANSACCIONES] Distancia desde punto inicial hasta punto más cercano: ${(distanciaAlPuntoMasCercano / 1000).toFixed(4)} km`);
-          console.log(`[TRANSACCIONES] Distancia desde punto más cercano hasta último punto: ${(distanciaDesdePuntoMasCercanoHastaUltimo / 1000).toFixed(4)} km`);
-          console.log(`[TRANSACCIONES] DISTANCIA RESTANTE TOTAL: ${(distanciaRestanteMetros / 1000).toFixed(4)} km (${distanciaRestanteMetros.toFixed(2)} metros)`);
+          // Distancia total restante = distancia al punto más cercano + distancia desde ese punto hasta el último
+          distanciaRestanteMetros =
+            distanciaAlPuntoMasCercano +
+            distanciaDesdePuntoMasCercanoHastaUltimo;
+
+          console.log(
+            `[TRANSACCIONES] ===== CÁLCULO DE COBRO MÁXIMO (desde punto inicial hasta último punto) =====`,
+          );
+          console.log(
+            `[TRANSACCIONES] Punto inicial: (${latitudInicial}, ${longitudInicial})`,
+          );
+          console.log(
+            `[TRANSACCIONES] Último punto del recorrido: (${ultimoPunto.lat}, ${ultimoPunto.lng})`,
+          );
+          console.log(
+            `[TRANSACCIONES] Punto más cercano al inicial (índice ${puntoMasCercanoIndex + 1}): (${puntoMasCercano.lat}, ${puntoMasCercano.lng})`,
+          );
+          console.log(
+            `[TRANSACCIONES] Distancia desde punto inicial hasta punto más cercano: ${(distanciaAlPuntoMasCercano / 1000).toFixed(4)} km`,
+          );
+          console.log(
+            `[TRANSACCIONES] Distancia desde punto más cercano hasta último punto: ${(distanciaDesdePuntoMasCercanoHastaUltimo / 1000).toFixed(4)} km`,
+          );
+          console.log(
+            `[TRANSACCIONES] DISTANCIA RESTANTE TOTAL: ${(distanciaRestanteMetros / 1000).toFixed(4)} km (${distanciaRestanteMetros.toFixed(2)} metros)`,
+          );
         } else {
           // Si no se encuentra punto cercano, calcular distancia directa al último punto
           distanciaRestanteMetros = haversine(puntoInicial, ultimoPunto);
-          console.log(`[TRANSACCIONES] ===== CÁLCULO DE COBRO MÁXIMO (distancia directa) =====`);
-          console.log(`[TRANSACCIONES] Punto inicial: (${latitudInicial}, ${longitudInicial})`);
-          console.log(`[TRANSACCIONES] Último punto del recorrido: (${ultimoPunto.lat}, ${ultimoPunto.lng})`);
-          console.log(`[TRANSACCIONES] DISTANCIA RESTANTE TOTAL (directa): ${(distanciaRestanteMetros / 1000).toFixed(4)} km (${distanciaRestanteMetros.toFixed(2)} metros)`);
+          console.log(
+            `[TRANSACCIONES] ===== CÁLCULO DE COBRO MÁXIMO (distancia directa) =====`,
+          );
+          console.log(
+            `[TRANSACCIONES] Punto inicial: (${latitudInicial}, ${longitudInicial})`,
+          );
+          console.log(
+            `[TRANSACCIONES] Último punto del recorrido: (${ultimoPunto.lat}, ${ultimoPunto.lng})`,
+          );
+          console.log(
+            `[TRANSACCIONES] DISTANCIA RESTANTE TOTAL (directa): ${(distanciaRestanteMetros / 1000).toFixed(4)} km (${distanciaRestanteMetros.toFixed(2)} metros)`,
+          );
         }
       } else {
         // Si no se proporcionan coordenadas iniciales, usar la distancia total del recorrido (comportamiento anterior)
@@ -433,34 +597,60 @@ export class TransaccionesService {
           recorrido,
           recorrido.length - 1,
         );
-        console.log(`[TRANSACCIONES] ===== CÁLCULO DE COBRO MÁXIMO (sin punto inicial, usando recorrido completo) =====`);
-        console.log(`[TRANSACCIONES] DISTANCIA TOTAL DEL RECORRIDO: ${(distanciaRestanteMetros / 1000).toFixed(4)} km (${distanciaRestanteMetros.toFixed(2)} metros)`);
+        console.log(
+          `[TRANSACCIONES] ===== CÁLCULO DE COBRO MÁXIMO (sin punto inicial, usando recorrido completo) =====`,
+        );
+        console.log(
+          `[TRANSACCIONES] DISTANCIA TOTAL DEL RECORRIDO: ${(distanciaRestanteMetros / 1000).toFixed(4)} km (${distanciaRestanteMetros.toFixed(2)} metros)`,
+        );
       }
 
       const distanciaBaseMetros = distanciaBaseKm * 1000;
 
       // Si la distancia restante está dentro de la distancia base, el cobro máximo es solo la tarifa base
       if (distanciaRestanteMetros <= distanciaBaseMetros) {
-        console.log(`[TRANSACCIONES] La distancia restante (${(distanciaRestanteMetros / 1000).toFixed(4)} km) está dentro de la distancia base (${distanciaBaseKm} km)`);
-        console.log(`[TRANSACCIONES] Cobro máximo: $${tarifaBase.toFixed(2)} (solo tarifa base)`);
-        console.log('[TRANSACCIONES] ===================================================');
+        console.log(
+          `[TRANSACCIONES] La distancia restante (${(distanciaRestanteMetros / 1000).toFixed(4)} km) está dentro de la distancia base (${distanciaBaseKm} km)`,
+        );
+        console.log(
+          `[TRANSACCIONES] Cobro máximo: $${tarifaBase.toFixed(2)} (solo tarifa base)`,
+        );
+        console.log(
+          '[TRANSACCIONES] ===================================================',
+        );
         return tarifaBase;
       }
 
       // Calcular cuántos incrementos se aplicarían con la distancia restante
       const distanciaExcedente = distanciaRestanteMetros - distanciaBaseMetros;
-      const numeroIncrementos = Math.ceil(distanciaExcedente / incrementoCadaMetros);
+      const numeroIncrementos = Math.ceil(
+        distanciaExcedente / incrementoCadaMetros,
+      );
       const extraMaximo = numeroIncrementos * costoAdicional;
       const cobroMaximo = tarifaBase + extraMaximo;
 
-      console.log(`[TRANSACCIONES] Distancia base: ${distanciaBaseKm} km (${distanciaBaseMetros} metros)`);
-      console.log(`[TRANSACCIONES] Distancia excedente: ${(distanciaExcedente / 1000).toFixed(4)} km (${distanciaExcedente.toFixed(2)} metros)`);
-      console.log(`[TRANSACCIONES] Incremento cada: ${incrementoCadaMetros} metros`);
-      console.log(`[TRANSACCIONES] Costo adicional por incremento: $${costoAdicional.toFixed(2)}`);
-      console.log(`[TRANSACCIONES] Número de incrementos: ${numeroIncrementos}`);
+      console.log(
+        `[TRANSACCIONES] Distancia base: ${distanciaBaseKm} km (${distanciaBaseMetros} metros)`,
+      );
+      console.log(
+        `[TRANSACCIONES] Distancia excedente: ${(distanciaExcedente / 1000).toFixed(4)} km (${distanciaExcedente.toFixed(2)} metros)`,
+      );
+      console.log(
+        `[TRANSACCIONES] Incremento cada: ${incrementoCadaMetros} metros`,
+      );
+      console.log(
+        `[TRANSACCIONES] Costo adicional por incremento: $${costoAdicional.toFixed(2)}`,
+      );
+      console.log(
+        `[TRANSACCIONES] Número de incrementos: ${numeroIncrementos}`,
+      );
       console.log(`[TRANSACCIONES] Extra máximo: $${extraMaximo.toFixed(2)}`);
-      console.log(`[TRANSACCIONES] Cobro máximo calculado: $${cobroMaximo.toFixed(2)} (tarifa base: $${tarifaBase.toFixed(2)} + extra: $${extraMaximo.toFixed(2)})`);
-      console.log('[TRANSACCIONES] ===================================================');
+      console.log(
+        `[TRANSACCIONES] Cobro máximo calculado: $${cobroMaximo.toFixed(2)} (tarifa base: $${tarifaBase.toFixed(2)} + extra: $${extraMaximo.toFixed(2)})`,
+      );
+      console.log(
+        '[TRANSACCIONES] ===================================================',
+      );
 
       return parseFloat(cobroMaximo.toFixed(2));
     } catch (error) {
@@ -485,7 +675,7 @@ export class TransaccionesService {
       if (typeof recorridoDetallado === 'string') {
         return JSON.parse(recorridoDetallado);
       }
-      
+
       return recorridoDetallado as Array<{ lat: number; lng: number }>;
     } catch {
       return null;
@@ -512,12 +702,20 @@ export class TransaccionesService {
     if (puntoInicioRaw.coordenadas) {
       lat = puntoInicioRaw.coordenadas.lat;
       lng = puntoInicioRaw.coordenadas.lng;
-    } else if (puntoInicioRaw.lat !== undefined && puntoInicioRaw.lng !== undefined) {
+    } else if (
+      puntoInicioRaw.lat !== undefined &&
+      puntoInicioRaw.lng !== undefined
+    ) {
       lat = puntoInicioRaw.lat;
       lng = puntoInicioRaw.lng;
     }
 
-    if (typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng)) {
+    if (
+      typeof lat === 'number' &&
+      typeof lng === 'number' &&
+      !isNaN(lat) &&
+      !isNaN(lng)
+    ) {
       return { lat, lng };
     }
 
@@ -539,7 +737,7 @@ export class TransaccionesService {
 
     for (let i = 0; i < recorrido.length; i++) {
       const punto = recorrido[i];
-      
+
       if (typeof punto.lat !== 'number' || typeof punto.lng !== 'number') {
         continue;
       }
@@ -565,19 +763,23 @@ export class TransaccionesService {
     variante: Variantes,
     primerPuntoRecorrido: { lat: number; lng: number },
   ): number {
-    if (!variante.puntoInicio || 
-        typeof primerPuntoRecorrido.lat !== 'number' || 
-        typeof primerPuntoRecorrido.lng !== 'number') {
+    if (
+      !variante.puntoInicio ||
+      typeof primerPuntoRecorrido.lat !== 'number' ||
+      typeof primerPuntoRecorrido.lng !== 'number'
+    ) {
       return 0;
     }
 
-    const coordenadasPuntoInicio = this.extraerCoordenadasPuntoInicio(variante.puntoInicio);
+    const coordenadasPuntoInicio = this.extraerCoordenadasPuntoInicio(
+      variante.puntoInicio,
+    );
     if (!coordenadasPuntoInicio) {
       return 0;
     }
 
     const distancia = haversine(coordenadasPuntoInicio, primerPuntoRecorrido);
-    
+
     // Si la distancia es menor a 10 metros, consideramos que son el mismo punto
     return distancia > 10 ? distancia : 0;
   }
@@ -625,32 +827,46 @@ export class TransaccionesService {
     try {
       // Validar que idMetodoPago sea obligatorio
       if (!createTransaccioneRecargaDto.idMetodoPago) {
-        throw new BadRequestException('El campo idMetodoPago es obligatorio para crear una recarga.');
+        throw new BadRequestException(
+          'El campo idMetodoPago es obligatorio para crear una recarga.',
+        );
       }
 
       // ✅ Si el método de pago es Tarjeta (3 o 4), primero procesar el pago con Netpay
       let pagoNetpayResponse: any = null;
       if (
-        createTransaccioneRecargaDto.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
-        createTransaccioneRecargaDto.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO
+        createTransaccioneRecargaDto.idMetodoPago ===
+          EnumMetodoPago.TARJETA_CREDITO ||
+        createTransaccioneRecargaDto.idMetodoPago ===
+          EnumMetodoPago.TARJETA_DEBITO
       ) {
         console.log('[TRANSACCIONES] Procesando pago con tarjeta en Netpay...');
-        
+
         // Validar que se hayan proporcionado todos los datos necesarios
         if (!createTransaccioneRecargaDto.tokenCardNetPay) {
-          throw new BadRequestException('El tokenCardNetPay es obligatorio cuando el método de pago es Tarjeta');
+          throw new BadRequestException(
+            'El tokenCardNetPay es obligatorio cuando el método de pago es Tarjeta',
+          );
         }
         if (!createTransaccioneRecargaDto.referenceIdNetPay) {
-          throw new BadRequestException('El referenceIdNetPay es obligatorio cuando el método de pago es Tarjeta');
+          throw new BadRequestException(
+            'El referenceIdNetPay es obligatorio cuando el método de pago es Tarjeta',
+          );
         }
         if (!createTransaccioneRecargaDto.sessionId) {
-          throw new BadRequestException('El sessionId es obligatorio cuando el método de pago es Tarjeta');
+          throw new BadRequestException(
+            'El sessionId es obligatorio cuando el método de pago es Tarjeta',
+          );
         }
         if (!createTransaccioneRecargaDto.deviceFingerPrint) {
-          throw new BadRequestException('El deviceFingerPrint es obligatorio cuando el método de pago es Tarjeta');
+          throw new BadRequestException(
+            'El deviceFingerPrint es obligatorio cuando el método de pago es Tarjeta',
+          );
         }
         if (!createTransaccioneRecargaDto.idDireccion) {
-          throw new BadRequestException('El idDireccion es obligatorio cuando el método de pago es Tarjeta');
+          throw new BadRequestException(
+            'El idDireccion es obligatorio cuando el método de pago es Tarjeta',
+          );
         }
 
         // Obtener la dirección y datos de tarjeta desde la BD para construir el billing
@@ -679,7 +895,7 @@ export class TransaccionesService {
         const billing = {
           firstName: datosTarjeta.nombre || '',
           lastName: datosTarjeta.apellidoMaterno ?? undefined,
-          email:  'accept@netpay.com.mx',
+          email: 'accept@netpay.com.mx',
           phone: datosTarjeta.telefono || '',
           address: {
             city: direccion.ciudad || '',
@@ -715,31 +931,43 @@ export class TransaccionesService {
           },
         };
         console.log('PAYMENT PAYLOAD (objeto):', paymentPayload);
-        console.log('PAYMENT PAYLOAD (JSON):', JSON.stringify(paymentPayload, null, 2));
+        console.log(
+          'PAYMENT PAYLOAD (JSON):',
+          JSON.stringify(paymentPayload, null, 2),
+        );
         try {
           // Procesar el pago con Netpay
-          pagoNetpayResponse = await this.netpayService.processPaymentWithSavedCard(paymentPayload);
-          console.log('[TRANSACCIONES] Pago procesado exitosamente en Netpay:', pagoNetpayResponse);
+          pagoNetpayResponse =
+            await this.netpayService.processPaymentWithSavedCard(
+              paymentPayload,
+            );
+          console.log(
+            '[TRANSACCIONES] Pago procesado exitosamente en Netpay:',
+            pagoNetpayResponse,
+          );
 
           // Verificar si el pago fue exitoso
           // Solo se realiza la recarga si el status es 'success'
           if (!pagoNetpayResponse) {
             throw new BadRequestException('No se recibió respuesta de Netpay');
           }
-          
+
           const status = pagoNetpayResponse.status;
-          
+
           // Solo proceder con la recarga si el status es 'success'
           if (status !== 'success') {
             throw new BadRequestException(
               `El pago con tarjeta no fue exitoso. Status: ${status}. ` +
-              `Mensaje: ${pagoNetpayResponse?.message || 'Sin mensaje'}. ` +
-              `La recarga no se realizará.`,
+                `Mensaje: ${pagoNetpayResponse?.message || 'Sin mensaje'}. ` +
+                `La recarga no se realizará.`,
             );
           }
         } catch (error) {
-          console.error('[TRANSACCIONES] Error al procesar pago con Netpay:', error);
-          
+          console.error(
+            '[TRANSACCIONES] Error al procesar pago con Netpay:',
+            error,
+          );
+
           // Registrar en bitácora el error de pago
           await this.bitacoraLogger.logToBitacora(
             'Transacciones',
@@ -771,8 +999,6 @@ export class TransaccionesService {
         Number(monedero.data.saldo) +
         Number(createTransaccioneRecargaDto.monto);
 
-
-
       //actualizamos el saldo del monedero
       await this.monederosService.updateMonederoSaldo(
         createTransaccioneRecargaDto.numeroSerieMonedero,
@@ -796,16 +1022,19 @@ export class TransaccionesService {
 
       // Si el método de pago es Tarjeta (3 o 4), guardar los datos de Netpay
       if (
-        createTransaccioneRecargaDto.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
-        createTransaccioneRecargaDto.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO
+        createTransaccioneRecargaDto.idMetodoPago ===
+          EnumMetodoPago.TARJETA_CREDITO ||
+        createTransaccioneRecargaDto.idMetodoPago ===
+          EnumMetodoPago.TARJETA_DEBITO
       ) {
-        newTransaccion.tokenCardNetPay = createTransaccioneRecargaDto.tokenCardNetPay || null;
+        newTransaccion.tokenCardNetPay =
+          createTransaccioneRecargaDto.tokenCardNetPay || null;
         // ✅ Guardar el transactionTokenId de la respuesta de Netpay (viene en la respuesta, no en el request)
-        newTransaccion.transactionTokenIdNetPay = pagoNetpayResponse?.transactionTokenId || null;
-        newTransaccion.referenceIdNetPay = createTransaccioneRecargaDto.referenceIdNetPay || null;
+        newTransaccion.transactionTokenIdNetPay =
+          pagoNetpayResponse?.transactionTokenId || null;
+        newTransaccion.referenceIdNetPay =
+          createTransaccioneRecargaDto.referenceIdNetPay || null;
       }
-
-
 
       const transaccionSave =
         await this.transaccionesrecargaRepository.save(newTransaccion);
@@ -894,32 +1123,40 @@ export class TransaccionesService {
 
       // ===== NUEVA LÓGICA: Detectar y cerrar transacciones abiertas con esMultiple = true =====
       // Buscar transacciones abiertas (controlTransaccion = 1) con esMultiple = true para este monedero
-      const transaccionesAbiertasMultiple = await this.transaccionesdebitoRepository.find({
-        where: {
-          numeroSerieMonedero: monedero.numeroSerie,
-          controlTransaccion: EnumControlTransacciones.ABIERTA,
-          esMultiple: 1, // esMultiple = true
-          latitudFinal: IsNull(),
-          longitudFinal: IsNull(),
-        },
-        order: {
-          id: 'ASC', // Ordenar por ID ascendente para procesar consecutivamente
-        },
-      });
+      const transaccionesAbiertasMultiple =
+        await this.transaccionesdebitoRepository.find({
+          where: {
+            numeroSerieMonedero: monedero.numeroSerie,
+            controlTransaccion: EnumControlTransacciones.ABIERTA,
+            esMultiple: 1, // esMultiple = true
+            latitudFinal: IsNull(),
+            longitudFinal: IsNull(),
+          },
+          order: {
+            id: 'ASC', // Ordenar por ID ascendente para procesar consecutivamente
+          },
+        });
 
       let qrActualizado = false; // Flag para saber si se actualizó el QR
 
       // Si hay transacciones abiertas con esMultiple = true, cerrarlas
-      if (transaccionesAbiertasMultiple && transaccionesAbiertasMultiple.length > 0) {
-        console.log(`[POST_DEBITO] Se encontraron ${transaccionesAbiertasMultiple.length} transacción(es) abierta(s) con esMultiple = true`);
-        
+      if (
+        transaccionesAbiertasMultiple &&
+        transaccionesAbiertasMultiple.length > 0
+      ) {
+        console.log(
+          `[POST_DEBITO] Se encontraron ${transaccionesAbiertasMultiple.length} transacción(es) abierta(s) con esMultiple = true`,
+        );
+
         // Usar las coordenadas iniciales de la nueva transacción como coordenadas finales
         const latitudFinal = createTransaccioneDebitoDto.latitud;
         const longitudFinal = createTransaccioneDebitoDto.longitud;
 
         // Procesar cada transacción abierta
         for (const transaccionAbierta of transaccionesAbiertasMultiple) {
-          console.log(`[POST_DEBITO] Procesando transacción abierta ID: ${transaccionAbierta.id}`);
+          console.log(
+            `[POST_DEBITO] Procesando transacción abierta ID: ${transaccionAbierta.id}`,
+          );
 
           // Obtener variante y tarifa de la transacción existente usando idViaje
           let varianteUpdate: Variantes | null = null;
@@ -955,7 +1192,10 @@ export class TransaccionesService {
           }
 
           // Calcular distancia desde punto inicial hasta punto final usando haversine
-          if (transaccionAbierta.latitudInicial && transaccionAbierta.longitudInicial) {
+          if (
+            transaccionAbierta.latitudInicial &&
+            transaccionAbierta.longitudInicial
+          ) {
             const puntoInicial = {
               latitude: transaccionAbierta.latitudInicial,
               longitude: transaccionAbierta.longitudInicial,
@@ -973,39 +1213,66 @@ export class TransaccionesService {
             const tarifaBase = Number(transaccionAbierta.monto) || 0;
             let montoCalculado = tarifaBase;
 
-              // Tarifa por estaciones (TipoTarifa=3): calcular por número de estaciones recorridas
-              if (tarifaInfoUpdate && Number(tarifaInfoUpdate.TipoTarifa) === EnumTipoTarifa.ESTACIONES) {
-                const estaciones = this.obtenerEstacionesDeVariante(varianteUpdate);
-                const idxInicio = this.encontrarIndiceEstacionMasCercana(
-                  estaciones,
-                  Number(transaccionAbierta.latitudInicial),
-                  Number(transaccionAbierta.longitudInicial),
-                );
-                const idxFin = this.encontrarIndiceEstacionMasCercana(
-                  estaciones,
-                  Number(latitudFinal),
-                  Number(longitudFinal),
-                );
+            // Tarifa por estaciones (TipoTarifa=3): calcular por número de estaciones recorridas
+            if (
+              tarifaInfoUpdate &&
+              Number(tarifaInfoUpdate.TipoTarifa) === EnumTipoTarifa.ESTACIONES
+            ) {
+              const estaciones =
+                this.obtenerEstacionesDeVariante(varianteUpdate);
+              const idxInicio = this.encontrarIndiceEstacionMasCercana(
+                estaciones,
+                Number(transaccionAbierta.latitudInicial),
+                Number(transaccionAbierta.longitudInicial),
+              );
+              const idxFin = this.encontrarIndiceEstacionMasCercana(
+                estaciones,
+                Number(latitudFinal),
+                Number(longitudFinal),
+              );
 
-                const costoPorEstacion = tarifaInfoUpdate.CostoPorEstacion ? Number(tarifaInfoUpdate.CostoPorEstacion) : 0;
-                const cantidadBase = tarifaInfoUpdate.CantidadEstacionesBase ? Number(tarifaInfoUpdate.CantidadEstacionesBase) : 0;
-                const estacionesRecorridas = (idxInicio !== -1 && idxFin !== -1) ? Math.abs(idxFin - idxInicio) : 0;
-                const extras = Math.max(0, estacionesRecorridas - Math.max(0, cantidadBase));
-                montoCalculado = parseFloat((tarifaBase + (extras * Math.max(0, costoPorEstacion))).toFixed(2));
-              }
-              // Si es tarifa INCREMENTAL (tipoTarifa === 2) y hay configuración de costo adicional
-              else if (tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa === 2) {
-              const costoAdicional = tarifaInfoUpdate.CostoAdicional ? Number(tarifaInfoUpdate.CostoAdicional) : 0;
-              const distanciaBaseKm = tarifaInfoUpdate.DistanciaBaseKm ? Number(tarifaInfoUpdate.DistanciaBaseKm) : 0;
-              const incrementoCadaMetros = tarifaInfoUpdate.IncrementoCadaMetros ? Number(tarifaInfoUpdate.IncrementoCadaMetros) : 0;
+              const costoPorEstacion = tarifaInfoUpdate.CostoPorEstacion
+                ? Number(tarifaInfoUpdate.CostoPorEstacion)
+                : 0;
+              const cantidadBase = tarifaInfoUpdate.CantidadEstacionesBase
+                ? Number(tarifaInfoUpdate.CantidadEstacionesBase)
+                : 0;
+              const estacionesRecorridas =
+                idxInicio !== -1 && idxFin !== -1
+                  ? Math.abs(idxFin - idxInicio)
+                  : 0;
+              const extras = Math.max(
+                0,
+                estacionesRecorridas - Math.max(0, cantidadBase),
+              );
+              montoCalculado = parseFloat(
+                (tarifaBase + extras * Math.max(0, costoPorEstacion)).toFixed(
+                  2,
+                ),
+              );
+            }
+            // Si es tarifa INCREMENTAL (tipoTarifa === 2) y hay configuración de costo adicional
+            else if (tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa === 2) {
+              const costoAdicional = tarifaInfoUpdate.CostoAdicional
+                ? Number(tarifaInfoUpdate.CostoAdicional)
+                : 0;
+              const distanciaBaseKm = tarifaInfoUpdate.DistanciaBaseKm
+                ? Number(tarifaInfoUpdate.DistanciaBaseKm)
+                : 0;
+              const incrementoCadaMetros = tarifaInfoUpdate.IncrementoCadaMetros
+                ? Number(tarifaInfoUpdate.IncrementoCadaMetros)
+                : 0;
 
               if (costoAdicional > 0 && incrementoCadaMetros > 0) {
                 const distanciaBaseMetros = distanciaBaseKm * 1000;
 
                 // Si la distancia recorrida excede la distancia base, calcular el extra
                 if (distanciaMetros > distanciaBaseMetros) {
-                  const distanciaExcedente = distanciaMetros - distanciaBaseMetros;
-                  const numeroIncrementos = Math.ceil(distanciaExcedente / incrementoCadaMetros);
+                  const distanciaExcedente =
+                    distanciaMetros - distanciaBaseMetros;
+                  const numeroIncrementos = Math.ceil(
+                    distanciaExcedente / incrementoCadaMetros,
+                  );
                   const extraPorDistancia = numeroIncrementos * costoAdicional;
                   montoCalculado = tarifaBase + extraPorDistancia;
                 }
@@ -1023,25 +1290,36 @@ export class TransaccionesService {
             // Aplicar descuentos (igual que en el PATCH)
             let montoConDescuento = montoCalculado;
 
-              // PASO 1: Aplicar descuento por tipo de pasajero SOLO cuando la tarifa es ABIERTA o ESTACIONES
-            const tipoTarifaUpdate = tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa ? Number(tarifaInfoUpdate.TipoTarifa) : null;
-            
-              if (
-                (tipoTarifaUpdate === EnumTipoTarifa.ABIERTA || tipoTarifaUpdate === EnumTipoTarifa.ESTACIONES) &&
-                monedero.idTipoPasajero
-              ) {
-              const tipoPasajero = await this.CatTiposPasajerosRepository.findOne({
-                where: { id: monedero.idTipoPasajero },
-                relations: ['CatTipoDescuento'],
-              });
+            // PASO 1: Aplicar descuento por tipo de pasajero SOLO cuando la tarifa es ABIERTA o ESTACIONES
+            const tipoTarifaUpdate =
+              tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa
+                ? Number(tarifaInfoUpdate.TipoTarifa)
+                : null;
 
-              if (tipoPasajero && tipoPasajero.cantidad && tipoPasajero.cantidad > 0 && tipoPasajero.idCatTipoDescuento) {
+            if (
+              (tipoTarifaUpdate === EnumTipoTarifa.ABIERTA ||
+                tipoTarifaUpdate === EnumTipoTarifa.ESTACIONES) &&
+              monedero.idTipoPasajero
+            ) {
+              const tipoPasajero =
+                await this.CatTiposPasajerosRepository.findOne({
+                  where: { id: monedero.idTipoPasajero },
+                  relations: ['CatTipoDescuento'],
+                });
+
+              if (
+                tipoPasajero &&
+                tipoPasajero.cantidad &&
+                tipoPasajero.cantidad > 0 &&
+                tipoPasajero.idCatTipoDescuento
+              ) {
                 const tipoDescuento = Number(tipoPasajero.idCatTipoDescuento);
                 const cantidad = Number(tipoPasajero.cantidad);
 
                 // idCatTipoDescuento: 1 = PORCENTAJE, 2 = MONETARIO
                 if (tipoDescuento === 1) {
-                  const descuentoPorcentual = (montoConDescuento * cantidad) / 100;
+                  const descuentoPorcentual =
+                    (montoConDescuento * cantidad) / 100;
                   montoConDescuento = montoConDescuento - descuentoPorcentual;
                 } else if (tipoDescuento === 2) {
                   montoConDescuento = montoConDescuento - cantidad;
@@ -1054,15 +1332,30 @@ export class TransaccionesService {
             }
 
             // PASO 2: Aplicar descuento de transbordo
-            if (transaccionAbierta.descuentoTransbordo !== null && transaccionAbierta.descuentoTransbordo !== undefined && transaccionAbierta.tipoDescuentoTransbordo !== null) {
-              const descuentoTransbordo = Number(transaccionAbierta.descuentoTransbordo);
-              const tipoDescuentoTransbordo = Number(transaccionAbierta.tipoDescuentoTransbordo);
-              
+            if (
+              transaccionAbierta.descuentoTransbordo !== null &&
+              transaccionAbierta.descuentoTransbordo !== undefined &&
+              transaccionAbierta.tipoDescuentoTransbordo !== null
+            ) {
+              const descuentoTransbordo = Number(
+                transaccionAbierta.descuentoTransbordo,
+              );
+              const tipoDescuentoTransbordo = Number(
+                transaccionAbierta.tipoDescuentoTransbordo,
+              );
+
               if (descuentoTransbordo > 0) {
-                if (tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.MONETARIO) {
+                if (
+                  tipoDescuentoTransbordo ===
+                  EnumTipoDescuentoTransbordo.MONETARIO
+                ) {
                   montoConDescuento = montoConDescuento - descuentoTransbordo;
-                } else if (tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.PORCENTAJE) {
-                  const descuentoPorcentual = (montoConDescuento * descuentoTransbordo) / 100;
+                } else if (
+                  tipoDescuentoTransbordo ===
+                  EnumTipoDescuentoTransbordo.PORCENTAJE
+                ) {
+                  const descuentoPorcentual =
+                    (montoConDescuento * descuentoTransbordo) / 100;
                   montoConDescuento = montoConDescuento - descuentoPorcentual;
                 }
 
@@ -1077,7 +1370,9 @@ export class TransaccionesService {
             const montoFinal = saldoActual - montoConDescuento;
 
             if (montoFinal < 0) {
-              throw new BadRequestException(`Saldo insuficiente para cerrar transacción abierta ID: ${transaccionAbierta.id}`);
+              throw new BadRequestException(
+                `Saldo insuficiente para cerrar transacción abierta ID: ${transaccionAbierta.id}`,
+              );
             }
 
             // Actualizar saldo del monedero
@@ -1094,30 +1389,41 @@ export class TransaccionesService {
             const ahora = new Date();
             const desfaseMs = -6 * 60 * 60 * 1000;
             const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-            const fechaHoraFinal = fechaDesfasada.toISOString().slice(0, 19).replace('T', ' ');
+            const fechaHoraFinal = fechaDesfasada
+              .toISOString()
+              .slice(0, 19)
+              .replace('T', ' ');
 
             // Actualizar la transacción: cerrarla (controlTransaccion = 0)
-            await this.transaccionesdebitoRepository.update(transaccionAbierta.id, {
-              idTipoTransaccion: EnumTipoTransaccion.DEBITO,
-              monto: montoConDescuento,
-              controlTransaccion: EnumControlTransacciones.PAGADO,
-              latitudFinal: latitudFinal,
-              longitudFinal: longitudFinal,
-              fechaHoraFinal: fechaHoraFinal,
-              distanciaRecorrida: parseFloat(distanciaKm.toFixed(2)),
-            });
+            await this.transaccionesdebitoRepository.update(
+              transaccionAbierta.id,
+              {
+                idTipoTransaccion: EnumTipoTransaccion.DEBITO,
+                monto: montoConDescuento,
+                controlTransaccion: EnumControlTransacciones.PAGADO,
+                latitudFinal: latitudFinal,
+                longitudFinal: longitudFinal,
+                fechaHoraFinal: fechaHoraFinal,
+                distanciaRecorrida: parseFloat(distanciaKm.toFixed(2)),
+              },
+            );
 
             // Obtener la transacción actualizada para guardarla en histórico
-            const transaccionActualizada = await this.transaccionesdebitoRepository.findOne({
-              where: { id: transaccionAbierta.id },
-            });
+            const transaccionActualizada =
+              await this.transaccionesdebitoRepository.findOne({
+                where: { id: transaccionAbierta.id },
+              });
 
             if (transaccionActualizada) {
               const { id: _, ...transaccionBody } = transaccionActualizada;
-              await this.historicoTransaccionesDebitoRepository.save(transaccionBody);
+              await this.historicoTransaccionesDebitoRepository.save(
+                transaccionBody,
+              );
             }
 
-            console.log(`[POST_DEBITO] Transacción abierta ID: ${transaccionAbierta.id} cerrada correctamente. Monto: $${montoConDescuento.toFixed(2)}`);
+            console.log(
+              `[POST_DEBITO] Transacción abierta ID: ${transaccionAbierta.id} cerrada correctamente. Monto: $${montoConDescuento.toFixed(2)}`,
+            );
           }
         }
 
@@ -1138,24 +1444,26 @@ export class TransaccionesService {
               estatus: 0, // INACTIVO
             });
             qrActualizado = true;
-            console.log(`[POST_DEBITO] QR ID: ${qrActivo.id} actualizado a estatus 0 (INACTIVO)`);
+            console.log(
+              `[POST_DEBITO] QR ID: ${qrActivo.id} actualizado a estatus 0 (INACTIVO)`,
+            );
           }
         }
       }
 
       // 2.1?? Validar que no exista una transacción abierta (controlTransaccion = 1) para este monedero
-      const transaccionAbierta = await this.transaccionesdebitoRepository.findOne({
-        where: {
-          numeroSerieMonedero: monedero.numeroSerie,
-          controlTransaccion: EnumControlTransacciones.ABIERTA,
-          latitudFinal: IsNull(),
-          longitudFinal: IsNull(),
-        },
-        order: {
-          id: 'DESC', // Obtener la más reciente
-        },
-      });
-
+      const transaccionAbierta =
+        await this.transaccionesdebitoRepository.findOne({
+          where: {
+            numeroSerieMonedero: monedero.numeroSerie,
+            controlTransaccion: EnumControlTransacciones.ABIERTA,
+            latitudFinal: IsNull(),
+            longitudFinal: IsNull(),
+          },
+          order: {
+            id: 'DESC', // Obtener la más reciente
+          },
+        });
 
       // 2.3?? Consulta de informaci?n de instalaci?n, validador, turno, viaje, variante y tarifa usando idViaje
       let infoValidadorViaje: any = null;
@@ -1169,7 +1477,9 @@ export class TransaccionesService {
         });
 
         if (!viaje) {
-          throw new NotFoundException(`El viaje con ID ${createTransaccioneDebitoDto.idViaje} no existe`);
+          throw new NotFoundException(
+            `El viaje con ID ${createTransaccioneDebitoDto.idViaje} no existe`,
+          );
         }
 
         // Guardar la variante para calcular la distancia
@@ -1189,7 +1499,9 @@ export class TransaccionesService {
         });
 
         if (!turno) {
-          throw new NotFoundException(`El turno con ID ${viaje.idTurno} no existe`);
+          throw new NotFoundException(
+            `El turno con ID ${viaje.idTurno} no existe`,
+          );
         }
 
         // Obtener la instalaci?n con el validador
@@ -1199,7 +1511,9 @@ export class TransaccionesService {
         });
 
         if (!instalacion) {
-          throw new NotFoundException(`La instalaci?n con ID ${turno.idInstalacion} no existe`);
+          throw new NotFoundException(
+            `La instalaci?n con ID ${turno.idInstalacion} no existe`,
+          );
         }
 
         // Obtener la tarifa de la variante
@@ -1208,23 +1522,25 @@ export class TransaccionesService {
         });
 
         // Construir el objeto con la misma estructura que el query anterior
-        infoValidadorViaje = [{
-          id: instalacion.id,
-          NumeroSerie: instalacion.validadores?.numeroSerie || null,
-          Estatus: turno.estatus,
-          turno: turno.id,
-          inicioTurno: turno.inicio,
-          idViaje: viaje.id,
-          idVariante: viaje.idVariante,
-          nombreVariante: viaje.idVariante2?.nombre || null,
-          TarifaBase: tarifa?.tarifaBase || null,
-          CostoAdicional: tarifa?.costoAdicional || null,
-          DistanciaBaseKm: tarifa?.distanciaBaseKm || null,
-          IncrementoCadaMetros: tarifa?.incrementoCadaMetros || null,
-          TipoTarifa: tarifa?.tipoTarifa || null,
-          CostoPorEstacion: tarifa?.costoPorEstacion || null,
-          CantidadEstacionesBase: tarifa?.cantidadEstacionesBase || null,
-        }];
+        infoValidadorViaje = [
+          {
+            id: instalacion.id,
+            NumeroSerie: instalacion.validadores?.numeroSerie || null,
+            Estatus: turno.estatus,
+            turno: turno.id,
+            inicioTurno: turno.inicio,
+            idViaje: viaje.id,
+            idVariante: viaje.idVariante,
+            nombreVariante: viaje.idVariante2?.nombre || null,
+            TarifaBase: tarifa?.tarifaBase || null,
+            CostoAdicional: tarifa?.costoAdicional || null,
+            DistanciaBaseKm: tarifa?.distanciaBaseKm || null,
+            IncrementoCadaMetros: tarifa?.incrementoCadaMetros || null,
+            TipoTarifa: tarifa?.tipoTarifa || null,
+            CostoPorEstacion: tarifa?.costoPorEstacion || null,
+            CantidadEstacionesBase: tarifa?.cantidadEstacionesBase || null,
+          },
+        ];
       } else {
         // Si no se proporciona idViaje, mantener la l?gica anterior con el query SQL
         infoValidadorViaje = await this.transaccionesdebitoRepository.query(
@@ -1262,7 +1578,11 @@ export class TransaccionesService {
         );
 
         // Obtener la variante para calcular la distancia
-        if (infoValidadorViaje && infoValidadorViaje.length > 0 && infoValidadorViaje[0].idVariante) {
+        if (
+          infoValidadorViaje &&
+          infoValidadorViaje.length > 0 &&
+          infoValidadorViaje[0].idVariante
+        ) {
           variante = await this.variantesRepository.findOne({
             where: { id: infoValidadorViaje[0].idVariante },
           });
@@ -1270,8 +1590,14 @@ export class TransaccionesService {
       }
 
       // 2.4?? Validar que tenemos informaci?n de tarifa
-      if (!infoValidadorViaje || infoValidadorViaje.length === 0 || !infoValidadorViaje[0].TipoTarifa) {
-        throw new BadRequestException('No se pudo obtener la informaci?n de tarifa del viaje');
+      if (
+        !infoValidadorViaje ||
+        infoValidadorViaje.length === 0 ||
+        !infoValidadorViaje[0].TipoTarifa
+      ) {
+        throw new BadRequestException(
+          'No se pudo obtener la informaci?n de tarifa del viaje',
+        );
       }
 
       const tarifaInfo = infoValidadorViaje[0];
@@ -1280,7 +1606,9 @@ export class TransaccionesService {
       const idViaje = tarifaInfo.idViaje ? Number(tarifaInfo.idViaje) : null;
 
       console.log('[TRANSACCIONES] ===== INFORMACIÓN DE TARIFA =====');
-      console.log(`[TRANSACCIONES] Tipo de tarifa: ${tipoTarifa} (${tipoTarifa === 1 ? 'FIJA' : tipoTarifa === 2 ? 'ABIERTA' : 'OTRO'})`);
+      console.log(
+        `[TRANSACCIONES] Tipo de tarifa: ${tipoTarifa} (${tipoTarifa === 1 ? 'FIJA' : tipoTarifa === 2 ? 'ABIERTA' : 'OTRO'})`,
+      );
       console.log(`[TRANSACCIONES] Tarifa base: $${tarifaBase.toFixed(2)}`);
       console.log('[TRANSACCIONES] ==========================================');
 
@@ -1288,69 +1616,95 @@ export class TransaccionesService {
 
       // ===== NUEVA LÓGICA: Manejo de tarifas ABIERTAS con monedero físico (esQR = false) =====
       // Si la tarifa es ABIERTA y el pago es con monedero físico (esQR = false)
-      if (tipoTarifa === EnumTipoTarifa.ABIERTA && !createTransaccioneDebitoDto.esQR) {
-        console.log('[POST_DEBITO] Tarifa ABIERTA con monedero físico (esQR = false) detectada');
-        
+      if (
+        tipoTarifa === EnumTipoTarifa.ABIERTA &&
+        !createTransaccioneDebitoDto.esQR
+      ) {
+        console.log(
+          '[POST_DEBITO] Tarifa ABIERTA con monedero físico (esQR = false) detectada',
+        );
+
         // Buscar la última transacción abierta con esQR = 0 (false) para este monedero
-        const ultimaTransaccionAbiertaFisica = await this.transaccionesdebitoRepository.findOne({
-          where: {
-            numeroSerieMonedero: monedero.numeroSerie,
-            controlTransaccion: EnumControlTransacciones.ABIERTA,
-            esQR: 0, // esQR = false (monedero físico)
-            latitudFinal: IsNull(),
-            longitudFinal: IsNull(),
-          },
-          order: {
-            id: 'DESC', // Más reciente primero
-          },
-        });
+        const ultimaTransaccionAbiertaFisica =
+          await this.transaccionesdebitoRepository.findOne({
+            where: {
+              numeroSerieMonedero: monedero.numeroSerie,
+              controlTransaccion: EnumControlTransacciones.ABIERTA,
+              esQR: 0, // esQR = false (monedero físico)
+              latitudFinal: IsNull(),
+              longitudFinal: IsNull(),
+            },
+            order: {
+              id: 'DESC', // Más reciente primero
+            },
+          });
 
         if (ultimaTransaccionAbiertaFisica) {
           // Calcular el tiempo transcurrido desde fechaHoraInicio
           const ahora = new Date();
           const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
           const fechaHoraActual = new Date(ahora.getTime() + desfaseMs);
-          
-          const fechaHoraInicioTransaccion = ultimaTransaccionAbiertaFisica.fechaHoraInicio 
-            ? new Date(ultimaTransaccionAbiertaFisica.fechaHoraInicio)
-            : new Date(ultimaTransaccionAbiertaFisica.fhRegistro);
-          
-          const tiempoTranscurridoMs = fechaHoraActual.getTime() - fechaHoraInicioTransaccion.getTime();
+
+          const fechaHoraInicioTransaccion =
+            ultimaTransaccionAbiertaFisica.fechaHoraInicio
+              ? new Date(ultimaTransaccionAbiertaFisica.fechaHoraInicio)
+              : new Date(ultimaTransaccionAbiertaFisica.fhRegistro);
+
+          const tiempoTranscurridoMs =
+            fechaHoraActual.getTime() - fechaHoraInicioTransaccion.getTime();
           const tiempoTranscurridoMinutos = tiempoTranscurridoMs / (1000 * 60); // Convertir a minutos
 
-          console.log(`[POST_DEBITO] Última transacción abierta física encontrada ID: ${ultimaTransaccionAbiertaFisica.id}`);
-          console.log(`[POST_DEBITO] Fecha/Hora inicio: ${fechaHoraInicioTransaccion.toISOString()}`);
-          console.log(`[POST_DEBITO] Fecha/Hora actual: ${fechaHoraActual.toISOString()}`);
-          console.log(`[POST_DEBITO] Tiempo transcurrido: ${tiempoTranscurridoMinutos.toFixed(2)} minutos`);
+          console.log(
+            `[POST_DEBITO] Última transacción abierta física encontrada ID: ${ultimaTransaccionAbiertaFisica.id}`,
+          );
+          console.log(
+            `[POST_DEBITO] Fecha/Hora inicio: ${fechaHoraInicioTransaccion.toISOString()}`,
+          );
+          console.log(
+            `[POST_DEBITO] Fecha/Hora actual: ${fechaHoraActual.toISOString()}`,
+          );
+          console.log(
+            `[POST_DEBITO] Tiempo transcurrido: ${tiempoTranscurridoMinutos.toFixed(2)} minutos`,
+          );
 
           // Si ya pasó más de 1 minuto, cerrar todas las transacciones abiertas con esQR = false
           if (tiempoTranscurridoMinutos >= 1) {
-            console.log(`[POST_DEBITO] Tiempo >= 1 minuto. Cerrando todas las transacciones abiertas con esQR = false`);
-            
-            // Buscar TODAS las transacciones abiertas con esQR = 0 (false) para este monedero
-            const todasTransaccionesAbiertasFisicas = await this.transaccionesdebitoRepository.find({
-              where: {
-                numeroSerieMonedero: monedero.numeroSerie,
-                controlTransaccion: EnumControlTransacciones.ABIERTA,
-                esQR: 0, // esQR = false (monedero físico)
-                latitudFinal: IsNull(),
-                longitudFinal: IsNull(),
-              },
-              order: {
-                id: 'ASC', // Ordenar por ID ascendente para procesar consecutivamente
-              },
-            });
+            console.log(
+              `[POST_DEBITO] Tiempo >= 1 minuto. Cerrando todas las transacciones abiertas con esQR = false`,
+            );
 
-            if (todasTransaccionesAbiertasFisicas && todasTransaccionesAbiertasFisicas.length > 0) {
-              console.log(`[POST_DEBITO] Se encontraron ${todasTransaccionesAbiertasFisicas.length} transacción(es) abierta(s) con esQR = false para cerrar`);
-              
+            // Buscar TODAS las transacciones abiertas con esQR = 0 (false) para este monedero
+            const todasTransaccionesAbiertasFisicas =
+              await this.transaccionesdebitoRepository.find({
+                where: {
+                  numeroSerieMonedero: monedero.numeroSerie,
+                  controlTransaccion: EnumControlTransacciones.ABIERTA,
+                  esQR: 0, // esQR = false (monedero físico)
+                  latitudFinal: IsNull(),
+                  longitudFinal: IsNull(),
+                },
+                order: {
+                  id: 'ASC', // Ordenar por ID ascendente para procesar consecutivamente
+                },
+              });
+
+            if (
+              todasTransaccionesAbiertasFisicas &&
+              todasTransaccionesAbiertasFisicas.length > 0
+            ) {
+              console.log(
+                `[POST_DEBITO] Se encontraron ${todasTransaccionesAbiertasFisicas.length} transacción(es) abierta(s) con esQR = false para cerrar`,
+              );
+
               // Usar las coordenadas iniciales de la nueva transacción como coordenadas finales
               const latitudFinal = createTransaccioneDebitoDto.latitud;
               const longitudFinal = createTransaccioneDebitoDto.longitud;
 
               // Procesar cada transacción abierta
               for (const transaccionAbiertaFisica of todasTransaccionesAbiertasFisicas) {
-                console.log(`[POST_DEBITO] Procesando transacción abierta física ID: ${transaccionAbiertaFisica.id}`);
+                console.log(
+                  `[POST_DEBITO] Procesando transacción abierta física ID: ${transaccionAbiertaFisica.id}`,
+                );
 
                 // Obtener variante y tarifa de la transacción existente usando idViaje
                 let varianteUpdate: Variantes | null = null;
@@ -1386,7 +1740,10 @@ export class TransaccionesService {
                 }
 
                 // Calcular distancia desde punto inicial hasta punto final usando haversine
-                if (transaccionAbiertaFisica.latitudInicial && transaccionAbiertaFisica.longitudInicial) {
+                if (
+                  transaccionAbiertaFisica.latitudInicial &&
+                  transaccionAbiertaFisica.longitudInicial
+                ) {
                   const puntoInicial = {
                     latitude: transaccionAbiertaFisica.latitudInicial,
                     longitude: transaccionAbiertaFisica.longitudInicial,
@@ -1401,12 +1758,18 @@ export class TransaccionesService {
                   const distanciaKm = distanciaMetros / 1000; // Convertir a kilómetros
 
                   // Calcular monto basado en la distancia
-                  const tarifaBaseUpdate = Number(transaccionAbiertaFisica.monto) || 0;
+                  const tarifaBaseUpdate =
+                    Number(transaccionAbiertaFisica.monto) || 0;
                   let montoCalculado = tarifaBaseUpdate;
 
                   // Tarifa por estaciones (TipoTarifa=3): calcular por número de estaciones recorridas
-                  if (tarifaInfoUpdate && Number(tarifaInfoUpdate.TipoTarifa) === EnumTipoTarifa.ESTACIONES) {
-                    const estaciones = this.obtenerEstacionesDeVariante(varianteUpdate);
+                  if (
+                    tarifaInfoUpdate &&
+                    Number(tarifaInfoUpdate.TipoTarifa) ===
+                      EnumTipoTarifa.ESTACIONES
+                  ) {
+                    const estaciones =
+                      this.obtenerEstacionesDeVariante(varianteUpdate);
                     const idxInicio = this.encontrarIndiceEstacionMasCercana(
                       estaciones,
                       Number(transaccionAbiertaFisica.latitudInicial),
@@ -1418,26 +1781,55 @@ export class TransaccionesService {
                       Number(longitudFinal),
                     );
 
-                    const costoPorEstacion = tarifaInfoUpdate.CostoPorEstacion ? Number(tarifaInfoUpdate.CostoPorEstacion) : 0;
-                    const cantidadBase = tarifaInfoUpdate.CantidadEstacionesBase ? Number(tarifaInfoUpdate.CantidadEstacionesBase) : 0;
-                    const estacionesRecorridas = (idxInicio !== -1 && idxFin !== -1) ? Math.abs(idxFin - idxInicio) : 0;
-                    const extras = Math.max(0, estacionesRecorridas - Math.max(0, cantidadBase));
-                    montoCalculado = parseFloat((tarifaBaseUpdate + (extras * Math.max(0, costoPorEstacion))).toFixed(2));
+                    const costoPorEstacion = tarifaInfoUpdate.CostoPorEstacion
+                      ? Number(tarifaInfoUpdate.CostoPorEstacion)
+                      : 0;
+                    const cantidadBase = tarifaInfoUpdate.CantidadEstacionesBase
+                      ? Number(tarifaInfoUpdate.CantidadEstacionesBase)
+                      : 0;
+                    const estacionesRecorridas =
+                      idxInicio !== -1 && idxFin !== -1
+                        ? Math.abs(idxFin - idxInicio)
+                        : 0;
+                    const extras = Math.max(
+                      0,
+                      estacionesRecorridas - Math.max(0, cantidadBase),
+                    );
+                    montoCalculado = parseFloat(
+                      (
+                        tarifaBaseUpdate +
+                        extras * Math.max(0, costoPorEstacion)
+                      ).toFixed(2),
+                    );
                   }
                   // Si es tarifa INCREMENTAL (tipoTarifa === 2) y hay configuración de costo adicional
-                  else if (tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa === 2) {
-                    const costoAdicional = tarifaInfoUpdate.CostoAdicional ? Number(tarifaInfoUpdate.CostoAdicional) : 0;
-                    const distanciaBaseKm = tarifaInfoUpdate.DistanciaBaseKm ? Number(tarifaInfoUpdate.DistanciaBaseKm) : 0;
-                    const incrementoCadaMetros = tarifaInfoUpdate.IncrementoCadaMetros ? Number(tarifaInfoUpdate.IncrementoCadaMetros) : 0;
+                  else if (
+                    tarifaInfoUpdate &&
+                    tarifaInfoUpdate.TipoTarifa === 2
+                  ) {
+                    const costoAdicional = tarifaInfoUpdate.CostoAdicional
+                      ? Number(tarifaInfoUpdate.CostoAdicional)
+                      : 0;
+                    const distanciaBaseKm = tarifaInfoUpdate.DistanciaBaseKm
+                      ? Number(tarifaInfoUpdate.DistanciaBaseKm)
+                      : 0;
+                    const incrementoCadaMetros =
+                      tarifaInfoUpdate.IncrementoCadaMetros
+                        ? Number(tarifaInfoUpdate.IncrementoCadaMetros)
+                        : 0;
 
                     if (costoAdicional > 0 && incrementoCadaMetros > 0) {
                       const distanciaBaseMetros = distanciaBaseKm * 1000;
 
                       // Si la distancia recorrida excede la distancia base, calcular el extra
                       if (distanciaMetros > distanciaBaseMetros) {
-                        const distanciaExcedente = distanciaMetros - distanciaBaseMetros;
-                        const numeroIncrementos = Math.ceil(distanciaExcedente / incrementoCadaMetros);
-                        const extraPorDistancia = numeroIncrementos * costoAdicional;
+                        const distanciaExcedente =
+                          distanciaMetros - distanciaBaseMetros;
+                        const numeroIncrementos = Math.ceil(
+                          distanciaExcedente / incrementoCadaMetros,
+                        );
+                        const extraPorDistancia =
+                          numeroIncrementos * costoAdicional;
                         montoCalculado = tarifaBaseUpdate + extraPorDistancia;
                       }
                     }
@@ -1445,7 +1837,9 @@ export class TransaccionesService {
 
                   // Validar que el monto calculado no exceda el cobro máximo
                   if (transaccionAbiertaFisica.cobroMaximo) {
-                    const cobroMaximoNum = Number(transaccionAbiertaFisica.cobroMaximo);
+                    const cobroMaximoNum = Number(
+                      transaccionAbiertaFisica.cobroMaximo,
+                    );
                     if (montoCalculado > cobroMaximoNum) {
                       montoCalculado = cobroMaximoNum;
                     }
@@ -1455,25 +1849,39 @@ export class TransaccionesService {
                   let montoConDescuento = montoCalculado;
 
                   // PASO 1: Aplicar descuento por tipo de pasajero SOLO cuando la tarifa es ABIERTA o ESTACIONES
-                  const tipoTarifaUpdate = tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa ? Number(tarifaInfoUpdate.TipoTarifa) : null;
-                  
+                  const tipoTarifaUpdate =
+                    tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa
+                      ? Number(tarifaInfoUpdate.TipoTarifa)
+                      : null;
+
                   if (
-                    (tipoTarifaUpdate === EnumTipoTarifa.ABIERTA || tipoTarifaUpdate === EnumTipoTarifa.ESTACIONES) &&
+                    (tipoTarifaUpdate === EnumTipoTarifa.ABIERTA ||
+                      tipoTarifaUpdate === EnumTipoTarifa.ESTACIONES) &&
                     monedero.idTipoPasajero
                   ) {
-                    const tipoPasajero = await this.CatTiposPasajerosRepository.findOne({
-                      where: { id: monedero.idTipoPasajero },
-                      relations: ['CatTipoDescuento'],
-                    });
+                    const tipoPasajero =
+                      await this.CatTiposPasajerosRepository.findOne({
+                        where: { id: monedero.idTipoPasajero },
+                        relations: ['CatTipoDescuento'],
+                      });
 
-                    if (tipoPasajero && tipoPasajero.cantidad && tipoPasajero.cantidad > 0 && tipoPasajero.idCatTipoDescuento) {
-                      const tipoDescuento = Number(tipoPasajero.idCatTipoDescuento);
+                    if (
+                      tipoPasajero &&
+                      tipoPasajero.cantidad &&
+                      tipoPasajero.cantidad > 0 &&
+                      tipoPasajero.idCatTipoDescuento
+                    ) {
+                      const tipoDescuento = Number(
+                        tipoPasajero.idCatTipoDescuento,
+                      );
                       const cantidad = Number(tipoPasajero.cantidad);
 
                       // idCatTipoDescuento: 1 = PORCENTAJE, 2 = MONETARIO
                       if (tipoDescuento === 1) {
-                        const descuentoPorcentual = (montoConDescuento * cantidad) / 100;
-                        montoConDescuento = montoConDescuento - descuentoPorcentual;
+                        const descuentoPorcentual =
+                          (montoConDescuento * cantidad) / 100;
+                        montoConDescuento =
+                          montoConDescuento - descuentoPorcentual;
                       } else if (tipoDescuento === 2) {
                         montoConDescuento = montoConDescuento - cantidad;
                       }
@@ -1485,16 +1893,34 @@ export class TransaccionesService {
                   }
 
                   // PASO 2: Aplicar descuento de transbordo
-                  if (transaccionAbiertaFisica.descuentoTransbordo !== null && transaccionAbiertaFisica.descuentoTransbordo !== undefined && transaccionAbiertaFisica.tipoDescuentoTransbordo !== null) {
-                    const descuentoTransbordo = Number(transaccionAbiertaFisica.descuentoTransbordo);
-                    const tipoDescuentoTransbordo = Number(transaccionAbiertaFisica.tipoDescuentoTransbordo);
-                    
+                  if (
+                    transaccionAbiertaFisica.descuentoTransbordo !== null &&
+                    transaccionAbiertaFisica.descuentoTransbordo !==
+                      undefined &&
+                    transaccionAbiertaFisica.tipoDescuentoTransbordo !== null
+                  ) {
+                    const descuentoTransbordo = Number(
+                      transaccionAbiertaFisica.descuentoTransbordo,
+                    );
+                    const tipoDescuentoTransbordo = Number(
+                      transaccionAbiertaFisica.tipoDescuentoTransbordo,
+                    );
+
                     if (descuentoTransbordo > 0) {
-                      if (tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.MONETARIO) {
-                        montoConDescuento = montoConDescuento - descuentoTransbordo;
-                      } else if (tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.PORCENTAJE) {
-                        const descuentoPorcentual = (montoConDescuento * descuentoTransbordo) / 100;
-                        montoConDescuento = montoConDescuento - descuentoPorcentual;
+                      if (
+                        tipoDescuentoTransbordo ===
+                        EnumTipoDescuentoTransbordo.MONETARIO
+                      ) {
+                        montoConDescuento =
+                          montoConDescuento - descuentoTransbordo;
+                      } else if (
+                        tipoDescuentoTransbordo ===
+                        EnumTipoDescuentoTransbordo.PORCENTAJE
+                      ) {
+                        const descuentoPorcentual =
+                          (montoConDescuento * descuentoTransbordo) / 100;
+                        montoConDescuento =
+                          montoConDescuento - descuentoPorcentual;
                       }
 
                       if (montoConDescuento < 0) {
@@ -1508,7 +1934,9 @@ export class TransaccionesService {
                   const montoFinal = saldoActual - montoConDescuento;
 
                   if (montoFinal < 0) {
-                    throw new BadRequestException(`Saldo insuficiente para cerrar transacción abierta física ID: ${transaccionAbiertaFisica.id}`);
+                    throw new BadRequestException(
+                      `Saldo insuficiente para cerrar transacción abierta física ID: ${transaccionAbiertaFisica.id}`,
+                    );
                   }
 
                   // Actualizar saldo del monedero
@@ -1522,30 +1950,42 @@ export class TransaccionesService {
                   monedero.saldo = montoFinal;
 
                   // Obtener fecha actual con desfase de -6 horas
-                  const fechaHoraFinal = fechaHoraActual.toISOString().slice(0, 19).replace('T', ' ');
+                  const fechaHoraFinal = fechaHoraActual
+                    .toISOString()
+                    .slice(0, 19)
+                    .replace('T', ' ');
 
                   // Actualizar la transacción: cerrarla (controlTransaccion = 0)
-                  await this.transaccionesdebitoRepository.update(transaccionAbiertaFisica.id, {
-                    idTipoTransaccion: EnumTipoTransaccion.DEBITO,
-                    monto: montoConDescuento,
-                    controlTransaccion: EnumControlTransacciones.PAGADO,
-                    latitudFinal: latitudFinal,
-                    longitudFinal: longitudFinal,
-                    fechaHoraFinal: fechaHoraFinal,
-                    distanciaRecorrida: parseFloat(distanciaKm.toFixed(2)),
-                  });
+                  await this.transaccionesdebitoRepository.update(
+                    transaccionAbiertaFisica.id,
+                    {
+                      idTipoTransaccion: EnumTipoTransaccion.DEBITO,
+                      monto: montoConDescuento,
+                      controlTransaccion: EnumControlTransacciones.PAGADO,
+                      latitudFinal: latitudFinal,
+                      longitudFinal: longitudFinal,
+                      fechaHoraFinal: fechaHoraFinal,
+                      distanciaRecorrida: parseFloat(distanciaKm.toFixed(2)),
+                    },
+                  );
 
                   // Obtener la transacción actualizada para guardarla en histórico
-                  const transaccionActualizada = await this.transaccionesdebitoRepository.findOne({
-                    where: { id: transaccionAbiertaFisica.id },
-                  });
+                  const transaccionActualizada =
+                    await this.transaccionesdebitoRepository.findOne({
+                      where: { id: transaccionAbiertaFisica.id },
+                    });
 
                   if (transaccionActualizada) {
-                    const { id: _, ...transaccionBody } = transaccionActualizada;
-                    await this.historicoTransaccionesDebitoRepository.save(transaccionBody);
+                    const { id: _, ...transaccionBody } =
+                      transaccionActualizada;
+                    await this.historicoTransaccionesDebitoRepository.save(
+                      transaccionBody,
+                    );
                   }
 
-                  console.log(`[POST_DEBITO] Transacción abierta física ID: ${transaccionAbiertaFisica.id} cerrada correctamente. Monto: $${montoConDescuento.toFixed(2)}`);
+                  console.log(
+                    `[POST_DEBITO] Transacción abierta física ID: ${transaccionAbiertaFisica.id} cerrada correctamente. Monto: $${montoConDescuento.toFixed(2)}`,
+                  );
                 }
               }
 
@@ -1566,17 +2006,23 @@ export class TransaccionesService {
                     estatus: 0, // INACTIVO
                   });
                   qrActualizado = true;
-                  console.log(`[POST_DEBITO] QR ID: ${qrActivo.id} actualizado a estatus 0 (INACTIVO)`);
+                  console.log(
+                    `[POST_DEBITO] QR ID: ${qrActivo.id} actualizado a estatus 0 (INACTIVO)`,
+                  );
                 }
               }
             }
           } else {
             // Si el tiempo es < 1 minuto, continuar normalmente (se creará una nueva transacción abierta)
-            console.log(`[POST_DEBITO] Tiempo < 1 minuto (${tiempoTranscurridoMinutos.toFixed(2)} minutos). Continuando con creación de nueva transacción abierta`);
+            console.log(
+              `[POST_DEBITO] Tiempo < 1 minuto (${tiempoTranscurridoMinutos.toFixed(2)} minutos). Continuando con creación de nueva transacción abierta`,
+            );
           }
         } else {
           // No hay transacciones abiertas físicas previas, continuar normalmente
-          console.log(`[POST_DEBITO] No se encontraron transacciones abiertas físicas previas. Continuando con creación de nueva transacción`);
+          console.log(
+            `[POST_DEBITO] No se encontraron transacciones abiertas físicas previas. Continuando con creación de nueva transacción`,
+          );
         }
       }
 
@@ -1597,17 +2043,22 @@ export class TransaccionesService {
       }
 
       console.log('[TRANSACCIONES] ===== CONTROL DE TRANSACCIÓN =====');
-      console.log(`[TRANSACCIONES] Control transacción: ${controlTransaccion === EnumControlTransacciones.PAGADO ? 'PAGADO (0)' : 'ABIERTA (1)'}`);
+      console.log(
+        `[TRANSACCIONES] Control transacción: ${controlTransaccion === EnumControlTransacciones.PAGADO ? 'PAGADO (0)' : 'ABIERTA (1)'}`,
+      );
       console.log('[TRANSACCIONES] ========================================');
 
       // 2.6?? Calculamos el monto seg?n el tipo de tarifa
       // Si TipoTarifa = 1 (Fija), usar TarifaBase
       // Si TipoTarifa = 2 (Abierta), tambi?n usar TarifaBase (o se puede extender la l?gica)
       let montoCalculado = tarifaBase;
-      
+
       if (tipoTarifa === EnumTipoTarifa.FIJA) {
         montoCalculado = tarifaBase;
-      } else if (tipoTarifa === EnumTipoTarifa.ABIERTA || esTarifaPorEstaciones) {
+      } else if (
+        tipoTarifa === EnumTipoTarifa.ABIERTA ||
+        esTarifaPorEstaciones
+      ) {
         // Para tarifa abierta, usar TarifaBase (puede extenderse con l?gica adicional)
         montoCalculado = tarifaBase;
       }
@@ -1617,63 +2068,77 @@ export class TransaccionesService {
       let numeroTransbordo: number | null = null;
       let costoTransbordo: number | null = null; // Guardar el costo del transbordo para almacenarlo en la transacción
       let tipoDescuentoTransbordo: number | null = null; // Guardar el tipo de descuento del transbordo
-      
+
       // Buscar el transbordo que pertenezca al cliente y esté activo
-      const transbordoPermitido = await this.transbordosPermitidosRepository.findOne({
-        where: { 
-          idCliente: Number(monedero.idCliente),
-          estatus: 1,
-        },
-        relations: ['tipoDescuento'],
-      });
+      const transbordoPermitido =
+        await this.transbordosPermitidosRepository.findOne({
+          where: {
+            idCliente: Number(monedero.idCliente),
+            estatus: 1,
+          },
+          relations: ['tipoDescuento'],
+        });
       // Solo aplicamos la l?gica de transbordos si existe configuraci?n para el cliente
-      if (transbordoPermitido && transbordoPermitido.tiempo && transbordoPermitido.numeroTransbordos) {
+      if (
+        transbordoPermitido &&
+        transbordoPermitido.tiempo &&
+        transbordoPermitido.numeroTransbordos
+      ) {
         // Calculamos la fecha l?mite hacia atr?s (tiempo en minutos)
         // Aplicar desfase de -6 horas para la zona horaria
         const ahora = new Date();
         const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
         const fechaHoraTransaccion = new Date(ahora.getTime() + desfaseMs);
         const tiempoEnMs = transbordoPermitido.tiempo * 60 * 1000; // Convertir minutos a milisegundos
-        const fechaLimite = new Date(fechaHoraTransaccion.getTime() - tiempoEnMs);
+        const fechaLimite = new Date(
+          fechaHoraTransaccion.getTime() - tiempoEnMs,
+        );
 
         // Buscar la última transacción finalizada (controlTransaccion = 0 = PAGADO) del monedero
-        const ultimaTransaccionFinalizada = await this.transaccionesdebitoRepository.findOne({
-          where: {
-            numeroSerieMonedero: monedero.numeroSerie,
-            controlTransaccion: EnumControlTransacciones.PAGADO,
-          },
-          order: {
-            id: 'DESC', // La más reciente
-          },
-        });
+        const ultimaTransaccionFinalizada =
+          await this.transaccionesdebitoRepository.findOne({
+            where: {
+              numeroSerieMonedero: monedero.numeroSerie,
+              controlTransaccion: EnumControlTransacciones.PAGADO,
+            },
+            order: {
+              id: 'DESC', // La más reciente
+            },
+          });
 
         if (!ultimaTransaccionFinalizada) {
           // No hay transacciones finalizadas, es la primera (cobro inicial)
           numeroTransbordo = 0;
-          console.log(`[TRANSBORDO] Paso 1: No hay transacciones finalizadas -> numeroTransbordo = 0`);
+          console.log(
+            `[TRANSBORDO] Paso 1: No hay transacciones finalizadas -> numeroTransbordo = 0`,
+          );
         } else {
           // Verificar si la última transacción está dentro del rango de tiempo permitido
           // Usamos fechaHoraInicio porque el tiempo de transbordo se cuenta desde el inicio
           const fechaUltimaTransaccion = new Date(
-            ultimaTransaccionFinalizada.fechaHoraInicio || ultimaTransaccionFinalizada.fhRegistro
+            ultimaTransaccionFinalizada.fechaHoraInicio ||
+              ultimaTransaccionFinalizada.fhRegistro,
           );
 
           // Si la última transacción está fuera del rango de tiempo, reiniciamos a 0
           if (fechaUltimaTransaccion < fechaLimite) {
             numeroTransbordo = 0;
-            console.log(`[TRANSBORDO] Paso 2: Última transacción (ID: ${ultimaTransaccionFinalizada.id}) fuera del rango de tiempo -> numeroTransbordo = 0`);
+            console.log(
+              `[TRANSBORDO] Paso 2: Última transacción (ID: ${ultimaTransaccionFinalizada.id}) fuera del rango de tiempo -> numeroTransbordo = 0`,
+            );
           } else {
             // La última transacción está dentro del rango de tiempo
             // Buscar todas las transacciones finalizadas del monedero
-            const transaccionesEnRango = await this.transaccionesdebitoRepository.find({
-              where: {
-                numeroSerieMonedero: monedero.numeroSerie,
-                controlTransaccion: EnumControlTransacciones.PAGADO,
-              },
-              order: {
-                fechaHoraInicio: 'ASC',
-              },
-            });
+            const transaccionesEnRango =
+              await this.transaccionesdebitoRepository.find({
+                where: {
+                  numeroSerieMonedero: monedero.numeroSerie,
+                  controlTransaccion: EnumControlTransacciones.PAGADO,
+                },
+                order: {
+                  fechaHoraInicio: 'ASC',
+                },
+              });
 
             // Filtrar las transacciones que están en el rango de tiempo usando fechaHoraInicio
             const transaccionesFiltradas = transaccionesEnRango.filter((t) => {
@@ -1683,24 +2148,30 @@ export class TransaccionesService {
               return fecha >= fechaLimite && fecha < fechaHoraTransaccion;
             });
 
-            console.log(`[TRANSBORDO] Paso 3: Transacciones en rango: ${transaccionesFiltradas.length} (IDs: ${transaccionesFiltradas.map(t => `${t.id}(${t.numeroTransbordo})`).join(', ')})`);
+            console.log(
+              `[TRANSBORDO] Paso 3: Transacciones en rango: ${transaccionesFiltradas.length} (IDs: ${transaccionesFiltradas.map((t) => `${t.id}(${t.numeroTransbordo})`).join(', ')})`,
+            );
 
             // Buscar el cobro inicial (numeroTransbordo = 0) MÁS RECIENTE dentro del rango
             // Ordenar por fecha descendente para encontrar el más reciente
             const cobrosIniciales = transaccionesFiltradas
               .filter((t) => t.numeroTransbordo === 0)
               .sort((a, b) => {
-                const fechaA = new Date(a.fechaHoraInicio || a.fhRegistro).getTime();
-                const fechaB = new Date(b.fechaHoraInicio || b.fhRegistro).getTime();
+                const fechaA = new Date(
+                  a.fechaHoraInicio || a.fhRegistro,
+                ).getTime();
+                const fechaB = new Date(
+                  b.fechaHoraInicio || b.fhRegistro,
+                ).getTime();
                 return fechaB - fechaA; // Más reciente primero
               });
-            
+
             const cobroInicial = cobrosIniciales[0]; // El más reciente
 
             if (cobroInicial) {
               // Calcular si el tiempo desde el cobro inicial ya pasó usando fechaHoraInicio
               const fechaCobroInicial = new Date(
-                cobroInicial.fechaHoraInicio || cobroInicial.fhRegistro
+                cobroInicial.fechaHoraInicio || cobroInicial.fhRegistro,
               );
               const fechaExpiracionCobroInicial = new Date(
                 fechaCobroInicial.getTime() + tiempoEnMs,
@@ -1709,63 +2180,89 @@ export class TransaccionesService {
               // Si el tiempo desde el cobro inicial ya pasó, reiniciamos el contador a 0
               if (fechaHoraTransaccion > fechaExpiracionCobroInicial) {
                 numeroTransbordo = 0;
-                console.log(`[TRANSBORDO] Paso 4: Tiempo del cobro inicial expiró -> numeroTransbordo = 0`);
+                console.log(
+                  `[TRANSBORDO] Paso 4: Tiempo del cobro inicial expiró -> numeroTransbordo = 0`,
+                );
               } else {
                 // El cobro inicial todavía está vigente
                 // Contar solo las transacciones desde el cobro inicial más reciente hasta ahora
-                const transaccionesDesdeCobroInicial = transaccionesFiltradas.filter((t) => {
-                  const fechaTransaccion = new Date(t.fechaHoraInicio || t.fhRegistro);
-                  return fechaTransaccion >= fechaCobroInicial && fechaTransaccion < fechaHoraTransaccion;
-                });
+                const transaccionesDesdeCobroInicial =
+                  transaccionesFiltradas.filter((t) => {
+                    const fechaTransaccion = new Date(
+                      t.fechaHoraInicio || t.fhRegistro,
+                    );
+                    return (
+                      fechaTransaccion >= fechaCobroInicial &&
+                      fechaTransaccion < fechaHoraTransaccion
+                    );
+                  });
 
                 // Obtener los números de transbordo de las transacciones desde el cobro inicial
                 const numerosTransbordo = transaccionesDesdeCobroInicial
                   .map((t) => t.numeroTransbordo)
-                  .filter((n) => n !== null && n !== undefined) as number[];
+                  .filter((n) => n !== null && n !== undefined);
 
-                console.log(`[TRANSBORDO] Paso 4: Transacciones desde cobro inicial (ID: ${cobroInicial.id}): ${transaccionesDesdeCobroInicial.length}, Números: [${numerosTransbordo.join(', ')}]`);
+                console.log(
+                  `[TRANSBORDO] Paso 4: Transacciones desde cobro inicial (ID: ${cobroInicial.id}): ${transaccionesDesdeCobroInicial.length}, Números: [${numerosTransbordo.join(', ')}]`,
+                );
 
                 if (numerosTransbordo.length > 0) {
                   const maxNumeroTransbordo = Math.max(...numerosTransbordo);
                   const siguienteTransbordo = maxNumeroTransbordo + 1;
 
                   // Si el siguiente número excede el máximo, reiniciamos a 0 (nuevo cobro inicial que reinicia el tiempo)
-                  if (siguienteTransbordo > transbordoPermitido.numeroTransbordos) {
+                  if (
+                    siguienteTransbordo > transbordoPermitido.numeroTransbordos
+                  ) {
                     numeroTransbordo = 0;
-                    console.log(`[TRANSBORDO] Paso 5: Máximo alcanzado (${siguienteTransbordo} > ${transbordoPermitido.numeroTransbordos}) -> numeroTransbordo = 0 (reinicio - nuevo cobro inicial)`);
+                    console.log(
+                      `[TRANSBORDO] Paso 5: Máximo alcanzado (${siguienteTransbordo} > ${transbordoPermitido.numeroTransbordos}) -> numeroTransbordo = 0 (reinicio - nuevo cobro inicial)`,
+                    );
                   } else {
                     numeroTransbordo = siguienteTransbordo;
-                    console.log(`[TRANSBORDO] Paso 5: Máximo encontrado: ${maxNumeroTransbordo}, Siguiente: ${siguienteTransbordo} -> numeroTransbordo = ${numeroTransbordo}`);
+                    console.log(
+                      `[TRANSBORDO] Paso 5: Máximo encontrado: ${maxNumeroTransbordo}, Siguiente: ${siguienteTransbordo} -> numeroTransbordo = ${numeroTransbordo}`,
+                    );
                   }
                 } else {
                   // Solo existe el cobro inicial, el siguiente es 1
                   numeroTransbordo = 1;
-                  console.log(`[TRANSBORDO] Paso 5: Solo existe cobro inicial -> numeroTransbordo = 1`);
+                  console.log(
+                    `[TRANSBORDO] Paso 5: Solo existe cobro inicial -> numeroTransbordo = 1`,
+                  );
                 }
               }
             } else {
               // No hay cobro inicial en el rango, empezamos en 0
               numeroTransbordo = 0;
-              console.log(`[TRANSBORDO] Paso 4: No se encontró cobro inicial en rango -> numeroTransbordo = 0`);
+              console.log(
+                `[TRANSBORDO] Paso 4: No se encontró cobro inicial en rango -> numeroTransbordo = 0`,
+              );
             }
           }
         }
-        
 
         // Buscamos el costo del transbordo en DetalleTransbordos (solo guardamos el valor, no aplicamos el descuento todavía)
         // Si numeroTransbordo es 0, el descuentoTransbordo debe ser 0
         if (numeroTransbordo === 0) {
           costoTransbordo = 0; // Cuando el transbordo es 0, no hay descuento
-          tipoDescuentoTransbordo = transbordoPermitido.idTipoDescuento ? Number(transbordoPermitido.idTipoDescuento) : null;
-        } else if (numeroTransbordo !== null && transbordoPermitido.id && transbordoPermitido.idTipoDescuento) {
+          tipoDescuentoTransbordo = transbordoPermitido.idTipoDescuento
+            ? Number(transbordoPermitido.idTipoDescuento)
+            : null;
+        } else if (
+          numeroTransbordo !== null &&
+          transbordoPermitido.id &&
+          transbordoPermitido.idTipoDescuento
+        ) {
           tipoDescuentoTransbordo = Number(transbordoPermitido.idTipoDescuento);
-          
-          const detalleTransbordo = await this.detalleTransbordosRepository.findOne({
-            where: {
-              idTransbordo: transbordoPermitido.id,
-              nroTransbordo: numeroTransbordo,
-            },
-          });
+
+          const detalleTransbordo =
+            await this.detalleTransbordosRepository.findOne({
+              where: {
+                idTransbordo: transbordoPermitido.id,
+                nroTransbordo: numeroTransbordo,
+              },
+            });
 
           // Si encontramos el detalle, guardamos el costo (aplicaremos el descuento después del descuento por tipo de pasajero)
           if (detalleTransbordo && detalleTransbordo.costo !== null) {
@@ -1785,25 +2282,40 @@ export class TransaccionesService {
           relations: ['CatTipoDescuento'],
         });
 
-        if (tipoPasajero && tipoPasajero.cantidad && tipoPasajero.cantidad > 0 && tipoPasajero.idCatTipoDescuento) {
+        if (
+          tipoPasajero &&
+          tipoPasajero.cantidad &&
+          tipoPasajero.cantidad > 0 &&
+          tipoPasajero.idCatTipoDescuento
+        ) {
           const tipoDescuento = Number(tipoPasajero.idCatTipoDescuento);
           const cantidad = Number(tipoPasajero.cantidad);
 
-          console.log('[TRANSACCIONES] ===== PASO 1: DESCUENTO POR TIPO DE PASAJERO (FIJA) =====');
-          console.log(`[TRANSACCIONES] Tipo de descuento: ${tipoDescuento} (1=Porcentaje, 2=Monetario)`);
+          console.log(
+            '[TRANSACCIONES] ===== PASO 1: DESCUENTO POR TIPO DE PASAJERO (FIJA) =====',
+          );
+          console.log(
+            `[TRANSACCIONES] Tipo de descuento: ${tipoDescuento} (1=Porcentaje, 2=Monetario)`,
+          );
           console.log(`[TRANSACCIONES] Cantidad: ${cantidad}`);
-          console.log(`[TRANSACCIONES] Monto antes de descuento por tipo de pasajero: $${montoConDescuento.toFixed(2)}`);
+          console.log(
+            `[TRANSACCIONES] Monto antes de descuento por tipo de pasajero: $${montoConDescuento.toFixed(2)}`,
+          );
 
           // idCatTipoDescuento: 1 = PORCENTAJE, 2 = MONETARIO
           if (tipoDescuento === 1) {
             // Tipo 1: PORCENTAJE - cantidad es el porcentaje a descontar
             const descuentoPorcentual = (montoConDescuento * cantidad) / 100;
             montoConDescuento = montoConDescuento - descuentoPorcentual;
-            console.log(`[TRANSACCIONES] Descuento en PORCENTAJE: ${cantidad}% = $${descuentoPorcentual.toFixed(2)}`);
+            console.log(
+              `[TRANSACCIONES] Descuento en PORCENTAJE: ${cantidad}% = $${descuentoPorcentual.toFixed(2)}`,
+            );
           } else if (tipoDescuento === 2) {
             // Tipo 2: MONETARIO - cantidad es el monto a restar directamente
             montoConDescuento = montoConDescuento - cantidad;
-            console.log(`[TRANSACCIONES] Descuento en PESOS: $${cantidad.toFixed(2)}`);
+            console.log(
+              `[TRANSACCIONES] Descuento en PESOS: $${cantidad.toFixed(2)}`,
+            );
           }
 
           // Asegurar que el monto no sea negativo
@@ -1811,32 +2323,58 @@ export class TransaccionesService {
             montoConDescuento = 0;
           }
 
-          console.log(`[TRANSACCIONES] Monto después de descuento por tipo de pasajero: $${montoConDescuento.toFixed(2)}`);
-          console.log('[TRANSACCIONES] =============================================');
+          console.log(
+            `[TRANSACCIONES] Monto después de descuento por tipo de pasajero: $${montoConDescuento.toFixed(2)}`,
+          );
+          console.log(
+            '[TRANSACCIONES] =============================================',
+          );
         } else {
-          console.log('[TRANSACCIONES] No se aplica descuento por tipo de pasajero (cantidad <= 0 o no existe)');
+          console.log(
+            '[TRANSACCIONES] No se aplica descuento por tipo de pasajero (cantidad <= 0 o no existe)',
+          );
         }
       } else if (tipoTarifa !== EnumTipoTarifa.FIJA) {
-        console.log('[TRANSACCIONES] Tipo de tarifa no es FIJA, el descuento por tipo de pasajero se aplicará en el PATCH');
+        console.log(
+          '[TRANSACCIONES] Tipo de tarifa no es FIJA, el descuento por tipo de pasajero se aplicará en el PATCH',
+        );
       }
 
       // PASO 2: Aplicar descuento por transbordo sobre el monto ya descontado por tipo de pasajero
-      if (costoTransbordo !== null && costoTransbordo !== undefined && tipoDescuentoTransbordo !== null && costoTransbordo > 0) {
-        console.log('[TRANSACCIONES] ===== PASO 2: DESCUENTO POR TRANSBORDO =====');
-        console.log(`[TRANSACCIONES] Costo transbordo: $${costoTransbordo.toFixed(2)}, Tipo: ${tipoDescuentoTransbordo} (1=Pesos, 2=Porcentaje)`);
-        console.log(`[TRANSACCIONES] Monto antes de descuento por transbordo: $${montoConDescuento.toFixed(2)}`);
+      if (
+        costoTransbordo !== null &&
+        costoTransbordo !== undefined &&
+        tipoDescuentoTransbordo !== null &&
+        costoTransbordo > 0
+      ) {
+        console.log(
+          '[TRANSACCIONES] ===== PASO 2: DESCUENTO POR TRANSBORDO =====',
+        );
+        console.log(
+          `[TRANSACCIONES] Costo transbordo: $${costoTransbordo.toFixed(2)}, Tipo: ${tipoDescuentoTransbordo} (1=Pesos, 2=Porcentaje)`,
+        );
+        console.log(
+          `[TRANSACCIONES] Monto antes de descuento por transbordo: $${montoConDescuento.toFixed(2)}`,
+        );
 
         // Evaluar el tipo de descuento: 1 = PESOS (resta directa), 2 = PORCENTAJE
         if (tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.MONETARIO) {
           // Tipo 1: PESOS - resta directa sobre el monto ya descontado por tipo de pasajero
           montoConDescuento = montoConDescuento - costoTransbordo;
-          console.log(`[TRANSACCIONES] Descuento en PESOS: $${costoTransbordo.toFixed(2)}`);
-        } else if (tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.PORCENTAJE) {
+          console.log(
+            `[TRANSACCIONES] Descuento en PESOS: $${costoTransbordo.toFixed(2)}`,
+          );
+        } else if (
+          tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.PORCENTAJE
+        ) {
           // Tipo 2: PORCENTAJE - calcular porcentaje del monto ya descontado por tipo de pasajero
           // costoTransbordo contiene el porcentaje (ej: 10 = 10%)
-          const descuentoPorcentual = (montoConDescuento * costoTransbordo) / 100;
+          const descuentoPorcentual =
+            (montoConDescuento * costoTransbordo) / 100;
           montoConDescuento = montoConDescuento - descuentoPorcentual;
-          console.log(`[TRANSACCIONES] Descuento en PORCENTAJE: ${costoTransbordo}% = $${descuentoPorcentual.toFixed(2)}`);
+          console.log(
+            `[TRANSACCIONES] Descuento en PORCENTAJE: ${costoTransbordo}% = $${descuentoPorcentual.toFixed(2)}`,
+          );
         }
 
         // Asegurar que el monto no sea negativo
@@ -1844,17 +2382,23 @@ export class TransaccionesService {
           montoConDescuento = 0;
         }
 
-        console.log(`[TRANSACCIONES] Monto después de descuento por transbordo: $${montoConDescuento.toFixed(2)}`);
-        console.log('[TRANSACCIONES] =============================================');
+        console.log(
+          `[TRANSACCIONES] Monto después de descuento por transbordo: $${montoConDescuento.toFixed(2)}`,
+        );
+        console.log(
+          '[TRANSACCIONES] =============================================',
+        );
       }
-
 
       // Determinar cantidad de pasajes a procesar
       let cantidadPasajes = 1;
       if (createTransaccioneDebitoDto.esMultiple) {
-        if (!createTransaccioneDebitoDto.cantidadPasajes || createTransaccioneDebitoDto.cantidadPasajes < 1) {
+        if (
+          !createTransaccioneDebitoDto.cantidadPasajes ||
+          createTransaccioneDebitoDto.cantidadPasajes < 1
+        ) {
           throw new BadRequestException(
-            'Si esMultiple es true, cantidadPasajes es obligatorio y debe ser mayor a 0'
+            'Si esMultiple es true, cantidadPasajes es obligatorio y debe ser mayor a 0',
           );
         }
         cantidadPasajes = createTransaccioneDebitoDto.cantidadPasajes;
@@ -1865,35 +2409,56 @@ export class TransaccionesService {
       const ahora = new Date();
       const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
       const fechaHoraInicio = new Date(ahora.getTime() + desfaseMs);
-      
+
       // Calcular distancia inicial desde el punto inicial de la variante
       const distanciaInicialKm = this.calcularDistanciaInicialKm(
         variante,
         createTransaccioneDebitoDto.latitud,
         createTransaccioneDebitoDto.longitud,
         {
-          tarifaBase: tarifaInfo.TarifaBase ? Number(tarifaInfo.TarifaBase) : undefined,
-          costoAdicional: tarifaInfo.CostoAdicional ? Number(tarifaInfo.CostoAdicional) : undefined,
-          distanciaBaseKm: tarifaInfo.DistanciaBaseKm ? Number(tarifaInfo.DistanciaBaseKm) : undefined,
-          incrementoCadaMetros: tarifaInfo.IncrementoCadaMetros ? Number(tarifaInfo.IncrementoCadaMetros) : undefined,
-          tipoTarifa: tarifaInfo.TipoTarifa ? Number(tarifaInfo.TipoTarifa) : undefined,
+          tarifaBase: tarifaInfo.TarifaBase
+            ? Number(tarifaInfo.TarifaBase)
+            : undefined,
+          costoAdicional: tarifaInfo.CostoAdicional
+            ? Number(tarifaInfo.CostoAdicional)
+            : undefined,
+          distanciaBaseKm: tarifaInfo.DistanciaBaseKm
+            ? Number(tarifaInfo.DistanciaBaseKm)
+            : undefined,
+          incrementoCadaMetros: tarifaInfo.IncrementoCadaMetros
+            ? Number(tarifaInfo.IncrementoCadaMetros)
+            : undefined,
+          tipoTarifa: tarifaInfo.TipoTarifa
+            ? Number(tarifaInfo.TipoTarifa)
+            : undefined,
         },
       );
-      
+
       // Asegurar que el valor sea un n?mero v?lido
-      const distanciaInicialKmFinal = (typeof distanciaInicialKm === 'number' && !isNaN(distanciaInicialKm)) 
-        ? parseFloat(distanciaInicialKm.toFixed(2)) 
-        : 0;
-      
+      const distanciaInicialKmFinal =
+        typeof distanciaInicialKm === 'number' && !isNaN(distanciaInicialKm)
+          ? parseFloat(distanciaInicialKm.toFixed(2))
+          : 0;
+
       // Calcular cobro máximo (necesario para validación de tarifas ABIERTA)
       const cobroMaximo = this.calcularCobroMaximo(
         variante,
         {
-          tarifaBase: tarifaInfo.TarifaBase ? Number(tarifaInfo.TarifaBase) : undefined,
-          costoAdicional: tarifaInfo.CostoAdicional ? Number(tarifaInfo.CostoAdicional) : undefined,
-          distanciaBaseKm: tarifaInfo.DistanciaBaseKm ? Number(tarifaInfo.DistanciaBaseKm) : undefined,
-          incrementoCadaMetros: tarifaInfo.IncrementoCadaMetros ? Number(tarifaInfo.IncrementoCadaMetros) : undefined,
-          tipoTarifa: tarifaInfo.TipoTarifa ? Number(tarifaInfo.TipoTarifa) : undefined,
+          tarifaBase: tarifaInfo.TarifaBase
+            ? Number(tarifaInfo.TarifaBase)
+            : undefined,
+          costoAdicional: tarifaInfo.CostoAdicional
+            ? Number(tarifaInfo.CostoAdicional)
+            : undefined,
+          distanciaBaseKm: tarifaInfo.DistanciaBaseKm
+            ? Number(tarifaInfo.DistanciaBaseKm)
+            : undefined,
+          incrementoCadaMetros: tarifaInfo.IncrementoCadaMetros
+            ? Number(tarifaInfo.IncrementoCadaMetros)
+            : undefined,
+          tipoTarifa: tarifaInfo.TipoTarifa
+            ? Number(tarifaInfo.TipoTarifa)
+            : undefined,
         },
         createTransaccioneDebitoDto.latitud,
         createTransaccioneDebitoDto.longitud,
@@ -1903,16 +2468,31 @@ export class TransaccionesService {
       // Máximo teórico: TarifaBase + (TotalEstaciones - CantidadEstacionesBase) * CostoPorEstacion
       let cobroMaximoEstaciones: number | null = null;
       if (esTarifaPorEstaciones) {
-        const costoPorEstacion = tarifaInfo.CostoPorEstacion ? Number(tarifaInfo.CostoPorEstacion) : 0;
-        const cantidadEstacionesBase = tarifaInfo.CantidadEstacionesBase ? Number(tarifaInfo.CantidadEstacionesBase) : 0;
+        const costoPorEstacion = tarifaInfo.CostoPorEstacion
+          ? Number(tarifaInfo.CostoPorEstacion)
+          : 0;
+        const cantidadEstacionesBase = tarifaInfo.CantidadEstacionesBase
+          ? Number(tarifaInfo.CantidadEstacionesBase)
+          : 0;
 
         // Para tipo 3, el recorridoDetallado se interpreta como lista de estaciones (puntos con nombre)
-        const estaciones = this.parsearRecorridoDetallado(variante?.recorridoDetallado ?? null)
-          ?.filter((p: any) => p && typeof p.nombre === 'string' && p.nombre.trim() !== '');
-        const totalEstaciones = Array.isArray(estaciones) ? estaciones.length : 0;
+        const estaciones = this.parsearRecorridoDetallado(
+          variante?.recorridoDetallado ?? null,
+        )?.filter(
+          (p: any) =>
+            p && typeof p.nombre === 'string' && p.nombre.trim() !== '',
+        );
+        const totalEstaciones = Array.isArray(estaciones)
+          ? estaciones.length
+          : 0;
 
-        const extrasMax = Math.max(0, totalEstaciones - Math.max(0, cantidadEstacionesBase));
-        cobroMaximoEstaciones = parseFloat((tarifaBase + (extrasMax * Math.max(0, costoPorEstacion))).toFixed(2));
+        const extrasMax = Math.max(
+          0,
+          totalEstaciones - Math.max(0, cantidadEstacionesBase),
+        );
+        cobroMaximoEstaciones = parseFloat(
+          (tarifaBase + extrasMax * Math.max(0, costoPorEstacion)).toFixed(2),
+        );
       }
 
       // Calcular monto total a validar según el tipo de tarifa
@@ -1925,30 +2505,50 @@ export class TransaccionesService {
         // Para tarifas ABIERTA, validar usando el monto máximo a cobrar
         montoTotalAValidar = (cobroMaximo || 0) * cantidadPasajes;
       } else if (esTarifaPorEstaciones) {
-        montoTotalAValidar = ((cobroMaximoEstaciones || 0) * cantidadPasajes);
+        montoTotalAValidar = (cobroMaximoEstaciones || 0) * cantidadPasajes;
       } else {
         // Por defecto, usar montoConDescuento
         montoTotalAValidar = montoConDescuento * cantidadPasajes;
       }
 
-      let montoFinal = Number(monedero.saldo) - montoTotalAValidar;
+      const montoFinal = Number(monedero.saldo) - montoTotalAValidar;
 
       console.log('[TRANSACCIONES] ===== VALIDACIÓN DE SALDO =====');
-      console.log(`[TRANSACCIONES] Saldo actual: $${Number(monedero.saldo).toFixed(2)}`);
-      console.log(`[TRANSACCIONES] Tipo de tarifa: ${tipoTarifa === EnumTipoTarifa.FIJA ? 'FIJA' : tipoTarifa === EnumTipoTarifa.ABIERTA ? 'ABIERTA' : 'OTRO'}`);
+      console.log(
+        `[TRANSACCIONES] Saldo actual: $${Number(monedero.saldo).toFixed(2)}`,
+      );
+      console.log(
+        `[TRANSACCIONES] Tipo de tarifa: ${tipoTarifa === EnumTipoTarifa.FIJA ? 'FIJA' : tipoTarifa === EnumTipoTarifa.ABIERTA ? 'ABIERTA' : 'OTRO'}`,
+      );
       console.log(`[TRANSACCIONES] Cantidad de pasajes: ${cantidadPasajes}`);
       if (tipoTarifa === EnumTipoTarifa.FIJA) {
-        console.log(`[TRANSACCIONES] Monto por pasaje (con descuentos): $${montoConDescuento.toFixed(2)}`);
-        console.log(`[TRANSACCIONES] Monto total a validar: $${montoTotalAValidar.toFixed(2)}`);
+        console.log(
+          `[TRANSACCIONES] Monto por pasaje (con descuentos): $${montoConDescuento.toFixed(2)}`,
+        );
+        console.log(
+          `[TRANSACCIONES] Monto total a validar: $${montoTotalAValidar.toFixed(2)}`,
+        );
       } else if (tipoTarifa === EnumTipoTarifa.ABIERTA) {
-        console.log(`[TRANSACCIONES] Cobro máximo por pasaje: $${(cobroMaximo || 0).toFixed(2)}`);
-        console.log(`[TRANSACCIONES] Monto total a validar (cobro máximo × pasajes): $${montoTotalAValidar.toFixed(2)}`);
+        console.log(
+          `[TRANSACCIONES] Cobro máximo por pasaje: $${(cobroMaximo || 0).toFixed(2)}`,
+        );
+        console.log(
+          `[TRANSACCIONES] Monto total a validar (cobro máximo × pasajes): $${montoTotalAValidar.toFixed(2)}`,
+        );
       } else if (esTarifaPorEstaciones) {
-        console.log(`[TRANSACCIONES] Cobro máximo por pasaje (estaciones): $${(cobroMaximoEstaciones || 0).toFixed(2)}`);
-        console.log(`[TRANSACCIONES] Monto total a validar (cobro máximo × pasajes): $${montoTotalAValidar.toFixed(2)}`);
+        console.log(
+          `[TRANSACCIONES] Cobro máximo por pasaje (estaciones): $${(cobroMaximoEstaciones || 0).toFixed(2)}`,
+        );
+        console.log(
+          `[TRANSACCIONES] Monto total a validar (cobro máximo × pasajes): $${montoTotalAValidar.toFixed(2)}`,
+        );
       }
-      console.log(`[TRANSACCIONES] Saldo después de validación: $${montoFinal.toFixed(2)}`);
-      console.log('[TRANSACCIONES] =============================================');
+      console.log(
+        `[TRANSACCIONES] Saldo después de validación: $${montoFinal.toFixed(2)}`,
+      );
+      console.log(
+        '[TRANSACCIONES] =============================================',
+      );
 
       // 4?? Validaci?n de saldo - Aplica para ambos tipos de tarifa
       // Para tarifa FIJA: valida con montoConDescuento
@@ -1969,30 +2569,45 @@ export class TransaccionesService {
           distanciaInicialKm: distanciaInicialKmFinal,
           fechaHoraInicio: fechaHoraInicio,
           numeroSerieMonedero: monedero.numeroSerie,
-          numeroSerieValidador: createTransaccioneDebitoDto.numeroSerieValidador,
+          numeroSerieValidador:
+            createTransaccioneDebitoDto.numeroSerieValidador,
           numeroTransbordo,
           idViaje: idViaje,
           esQR: createTransaccioneDebitoDto.esQR ? 1 : 0,
           cobroMaximo: cobroMaximo,
-          descuentoTransbordo: costoTransbordo !== null && costoTransbordo !== undefined ? parseFloat(costoTransbordo.toFixed(2)) : null,
-          tipoDescuentoTransbordo: tipoDescuentoTransbordo !== null && tipoDescuentoTransbordo !== undefined ? Number(tipoDescuentoTransbordo) : null,
+          descuentoTransbordo:
+            costoTransbordo !== null && costoTransbordo !== undefined
+              ? parseFloat(costoTransbordo.toFixed(2))
+              : null,
+          tipoDescuentoTransbordo:
+            tipoDescuentoTransbordo !== null &&
+            tipoDescuentoTransbordo !== undefined
+              ? Number(tipoDescuentoTransbordo)
+              : null,
           esMultiple: createTransaccioneDebitoDto.esMultiple ? 1 : 0,
         });
         await this.transaccionesdebitoRepository.save(newTransaccion);
-        
+
         //se guarda en el historico
         await this.historicoTransaccionesDebitoRepository.save(newTransaccion);
 
         // Registrar en bit?cora
-        const tipoTarifaTexto = tipoTarifa === EnumTipoTarifa.FIJA ? 'FIJA' : tipoTarifa === EnumTipoTarifa.ABIERTA ? 'ABIERTA' : 'OTRO';
-        const mensajeRechazo = cantidadPasajes > 1 
-          ? `${cantidadPasajes} transacciones de débito RECHAZADAS por saldo insuficiente (Tarifa ${tipoTarifaTexto})`
-          : `Transacción de débito RECHAZADA por saldo insuficiente (Tarifa ${tipoTarifaTexto})`;
-        
-        const detalleMonto = tipoTarifa === EnumTipoTarifa.ABIERTA
-          ? `cobro máximo de $${(cobroMaximo || 0).toFixed(2)} por pasaje`
-          : `monto de $${montoConDescuento.toFixed(2)} por pasaje`;
-        
+        const tipoTarifaTexto =
+          tipoTarifa === EnumTipoTarifa.FIJA
+            ? 'FIJA'
+            : tipoTarifa === EnumTipoTarifa.ABIERTA
+              ? 'ABIERTA'
+              : 'OTRO';
+        const mensajeRechazo =
+          cantidadPasajes > 1
+            ? `${cantidadPasajes} transacciones de débito RECHAZADAS por saldo insuficiente (Tarifa ${tipoTarifaTexto})`
+            : `Transacción de débito RECHAZADA por saldo insuficiente (Tarifa ${tipoTarifaTexto})`;
+
+        const detalleMonto =
+          tipoTarifa === EnumTipoTarifa.ABIERTA
+            ? `cobro máximo de $${(cobroMaximo || 0).toFixed(2)} por pasaje`
+            : `monto de $${montoConDescuento.toFixed(2)} por pasaje`;
+
         await this.bitacoraLogger.logToBitacora(
           'Transacciones',
           mensajeRechazo,
@@ -2004,40 +2619,52 @@ export class TransaccionesService {
           `Saldo insuficiente. Se intentó validar $${montoTotalAValidar.toFixed(2)} (${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} con ${detalleMonto})`,
         );
 
-        const mensajeError = tipoTarifa === EnumTipoTarifa.ABIERTA
-          ? `Saldo insuficiente. Se requiere $${montoTotalAValidar.toFixed(2)} para ${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} (cobro máximo: $${(cobroMaximo || 0).toFixed(2)} por pasaje)`
-          : `Saldo insuficiente. Se requiere $${montoTotalAValidar.toFixed(2)} para ${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} (monto: $${montoConDescuento.toFixed(2)} por pasaje)`;
+        const mensajeError =
+          tipoTarifa === EnumTipoTarifa.ABIERTA
+            ? `Saldo insuficiente. Se requiere $${montoTotalAValidar.toFixed(2)} para ${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} (cobro máximo: $${(cobroMaximo || 0).toFixed(2)} por pasaje)`
+            : `Saldo insuficiente. Se requiere $${montoTotalAValidar.toFixed(2)} para ${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} (monto: $${montoConDescuento.toFixed(2)} por pasaje)`;
 
         throw new BadRequestException(mensajeError);
       }
 
       // 5?? Si saldo OK, actualizamos el monedero y estado
       estado = transicionarEstado(estado, EventoTransaccion.SALDO_OK);
-      
+
       // Calcular monto total a descontar para actualización del saldo (solo para tarifas PAGADAS)
       // Para tarifas FIJA: usar montoConDescuento
       // Para tarifas ABIERTA: no se descuenta el saldo todavía
       const montoTotalADescontar = montoConDescuento * cantidadPasajes;
-      let montoFinalParaMonedero = Number(monedero.saldo) - montoTotalADescontar;
-      
+      const montoFinalParaMonedero =
+        Number(monedero.saldo) - montoTotalADescontar;
+
       // Solo actualizar el saldo del monedero si la transacci?n es PAGADO
       // Si es ABIERTA, no se descuenta el saldo todav?a
       let montoAGuardar = 0;
       if (controlTransaccion === EnumControlTransacciones.PAGADO) {
-        console.log('[TRANSACCIONES] ===== ACTUALIZANDO SALDO DEL MONEDERO =====');
-        console.log(`[TRANSACCIONES] Número de serie del monedero: ${monedero.numeroSerie}`);
-        console.log(`[TRANSACCIONES] Saldo que se va a guardar en el monedero: $${montoFinalParaMonedero.toFixed(2)}`);
+        console.log(
+          '[TRANSACCIONES] ===== ACTUALIZANDO SALDO DEL MONEDERO =====',
+        );
+        console.log(
+          `[TRANSACCIONES] Número de serie del monedero: ${monedero.numeroSerie}`,
+        );
+        console.log(
+          `[TRANSACCIONES] Saldo que se va a guardar en el monedero: $${montoFinalParaMonedero.toFixed(2)}`,
+        );
         console.log(`[TRANSACCIONES] Control transacción: PAGADO`);
-        
+
         await this.monederosService.updateMonederoSaldo(
           monedero.numeroSerie,
           idUser,
           montoFinalParaMonedero,
         );
-        
-        console.log('[TRANSACCIONES] Saldo del monedero actualizado exitosamente');
-        console.log('[TRANSACCIONES] =================================================');
-        
+
+        console.log(
+          '[TRANSACCIONES] Saldo del monedero actualizado exitosamente',
+        );
+        console.log(
+          '[TRANSACCIONES] =================================================',
+        );
+
         // Para tarifas INCREMENTAL (tipoTarifa === 2), guardar la tarifa base en el campo monto
         // Para otras tarifas, guardar el monto con descuento
         if (tipoTarifa === 2) {
@@ -2046,11 +2673,17 @@ export class TransaccionesService {
           montoAGuardar = montoConDescuento;
         }
       } else {
-        console.log('[TRANSACCIONES] ===== TRANSACCIÓN ABIERTA - NO SE DESCUENTA SALDO =====');
+        console.log(
+          '[TRANSACCIONES] ===== TRANSACCIÓN ABIERTA - NO SE DESCUENTA SALDO =====',
+        );
         console.log(`[TRANSACCIONES] Control transacción: ABIERTA`);
-        console.log(`[TRANSACCIONES] El saldo del monedero NO se descuenta todavía`);
-        console.log('[TRANSACCIONES] =======================================================');
-        
+        console.log(
+          `[TRANSACCIONES] El saldo del monedero NO se descuenta todavía`,
+        );
+        console.log(
+          '[TRANSACCIONES] =======================================================',
+        );
+
         // Para transacciones ABIERTAS, si es tarifa INCREMENTAL (tipoTarifa === 2), guardar la tarifa base
         // Si no es INCREMENTAL, el monto se guarda como 0
         if (tipoTarifa === 2) {
@@ -2062,7 +2695,7 @@ export class TransaccionesService {
 
       // 6?? Guardamos transacci?n(es) aprobada(s)
       const transaccionesCreadas: number[] = [];
-      
+
       // Crear múltiples débitos si esMultiple es true
       for (let i = 0; i < cantidadPasajes; i++) {
         const newTransaccion = this.transaccionesdebitoRepository.create({
@@ -2074,30 +2707,44 @@ export class TransaccionesService {
           distanciaInicialKm: distanciaInicialKmFinal,
           fechaHoraInicio: fechaHoraInicio,
           numeroSerieMonedero: monedero.numeroSerie,
-          numeroSerieValidador: createTransaccioneDebitoDto.numeroSerieValidador,
+          numeroSerieValidador:
+            createTransaccioneDebitoDto.numeroSerieValidador,
           numeroTransbordo,
           idViaje: idViaje,
           esQR: createTransaccioneDebitoDto.esQR ? 1 : 0,
-          cobroMaximo: esTarifaPorEstaciones ? cobroMaximoEstaciones : cobroMaximo,
-          descuentoTransbordo: costoTransbordo !== null && costoTransbordo !== undefined ? parseFloat(costoTransbordo.toFixed(2)) : null,
-          tipoDescuentoTransbordo: tipoDescuentoTransbordo !== null && tipoDescuentoTransbordo !== undefined ? Number(tipoDescuentoTransbordo) : null,
+          cobroMaximo: esTarifaPorEstaciones
+            ? cobroMaximoEstaciones
+            : cobroMaximo,
+          descuentoTransbordo:
+            costoTransbordo !== null && costoTransbordo !== undefined
+              ? parseFloat(costoTransbordo.toFixed(2))
+              : null,
+          tipoDescuentoTransbordo:
+            tipoDescuentoTransbordo !== null &&
+            tipoDescuentoTransbordo !== undefined
+              ? Number(tipoDescuentoTransbordo)
+              : null,
           esMultiple: createTransaccioneDebitoDto.esMultiple ? 1 : 0,
         });
-        
-        const transaccionSave = await this.transaccionesdebitoRepository.save(newTransaccion);
+
+        const transaccionSave =
+          await this.transaccionesdebitoRepository.save(newTransaccion);
         transaccionesCreadas.push(Number(transaccionSave.id));
 
         // Se guardará la transacción en el historico de transacciones solamente cuando controltransaccion sea pagado
         if (controlTransaccion === EnumControlTransacciones.PAGADO) {
-          await this.historicoTransaccionesDebitoRepository.save(newTransaccion);
+          await this.historicoTransaccionesDebitoRepository.save(
+            newTransaccion,
+          );
         }
       }
 
       // 7?? Bit?cora de ?xito
-      const mensajeBitacora = cantidadPasajes > 1 
-        ? `${cantidadPasajes} transacciones de débito APROBADAS` 
-        : `Transacción de débito APROBADA${controlTransaccion === EnumControlTransacciones.ABIERTA ? ' (ABIERTA)' : ''}`;
-      
+      const mensajeBitacora =
+        cantidadPasajes > 1
+          ? `${cantidadPasajes} transacciones de débito APROBADAS`
+          : `Transacción de débito APROBADA${controlTransaccion === EnumControlTransacciones.ABIERTA ? ' (ABIERTA)' : ''}`;
+
       await this.bitacoraLogger.logToBitacora(
         'Transacciones',
         mensajeBitacora,
@@ -2125,26 +2772,33 @@ export class TransaccionesService {
         if (qrActivo) {
           // Si el pago es con QR (esQR = true) y la tarifa es ABIERTA o ESTACIONES, mantener el QR en estatus 1
           const esPagoConQR = createTransaccioneDebitoDto.esQR === true;
-          const esTarifaAbierta = tipoTarifa === EnumTipoTarifa.ABIERTA || tipoTarifa === EnumTipoTarifa.ESTACIONES;
+          const esTarifaAbierta =
+            tipoTarifa === EnumTipoTarifa.ABIERTA ||
+            tipoTarifa === EnumTipoTarifa.ESTACIONES;
 
           if (esPagoConQR && esTarifaAbierta) {
-            console.log(`[POST_DEBITO] Pago con QR y tarifa ABIERTA: QR ID ${qrActivo.id} se mantiene en estatus 1 (ACTIVO)`);
+            console.log(
+              `[POST_DEBITO] Pago con QR y tarifa ABIERTA: QR ID ${qrActivo.id} se mantiene en estatus 1 (ACTIVO)`,
+            );
           } else {
             // Cambiar el QR a estatus 0 (INACTIVO)
             await this.qrCodesRepository.update(qrActivo.id, {
               estatus: EstatusEnum.INACTIVO, // 0 = INACTIVO
             });
-            console.log(`[POST_DEBITO] QR ID: ${qrActivo.id} actualizado a estatus 0 (INACTIVO)`);
+            console.log(
+              `[POST_DEBITO] QR ID: ${qrActivo.id} actualizado a estatus 0 (INACTIVO)`,
+            );
           }
         }
       }
 
       // 9?? Finalizamos la transacci?n
-      estado = transicionarEstado(estado, EventoTransaccion.FINALIZAR);
+      void transicionarEstado(estado, EventoTransaccion.FINALIZAR);
 
-      const mensajeRespuesta = cantidadPasajes > 1 
-        ? `${cantidadPasajes} transacciones creadas correctamente`
-        : 'Transacción creada correctamente';
+      const mensajeRespuesta =
+        cantidadPasajes > 1
+          ? `${cantidadPasajes} transacciones creadas correctamente`
+          : 'Transacción creada correctamente';
 
       return {
         status: 'success',
@@ -2203,18 +2857,27 @@ export class TransaccionesService {
     return { ids, placeholders };
   }
 
-  private obtenerEstacionesDeVariante(variante: Variantes | null): Array<{ lat: number; lng: number; nombre: string }> {
-    const recorrido = this.parsearRecorridoDetallado(variante?.recorridoDetallado ?? null);
+  private obtenerEstacionesDeVariante(
+    variante: Variantes | null,
+  ): Array<{ lat: number; lng: number; nombre: string }> {
+    const recorrido = this.parsearRecorridoDetallado(
+      variante?.recorridoDetallado ?? null,
+    );
     if (!Array.isArray(recorrido)) return [];
     return recorrido
-      .filter((p: any) =>
-        p &&
-        typeof p.lat === 'number' &&
-        typeof p.lng === 'number' &&
-        typeof p.nombre === 'string' &&
-        p.nombre.trim() !== '',
+      .filter(
+        (p: any) =>
+          p &&
+          typeof p.lat === 'number' &&
+          typeof p.lng === 'number' &&
+          typeof p.nombre === 'string' &&
+          p.nombre.trim() !== '',
       )
-      .map((p: any) => ({ lat: p.lat, lng: p.lng, nombre: String(p.nombre).trim() }));
+      .map((p: any) => ({
+        lat: p.lat,
+        lng: p.lng,
+        nombre: String(p.nombre).trim(),
+      }));
   }
 
   private encontrarIndiceEstacionMasCercana(
@@ -2264,21 +2927,47 @@ export class TransaccionesService {
 
       //Si fechaInicio y fechaFin son null arroja las transacciones del dia de la tabla TransaccionesRecarga y TransaccionesDebito
       if (!fechaInicio && !fechaFin) {
-        fechaInicio = fechaActual
-        fechaFin = fechaActual
+        fechaInicio = fechaActual;
+        fechaFin = fechaActual;
         // Rol 11 (Cajero): solo recargas por IdUsuario (disponible en histórico)
-        entidadRecarga = rol === 11 ? 'HistoricoTransaccionesRecarga' : 'TransaccionesRecarga';
+        entidadRecarga =
+          rol === 11 ? 'HistoricoTransaccionesRecarga' : 'TransaccionesRecarga';
         entidadDebito = 'TransaccionesDebito';
-        transacciones = await this.resolverPorRolDefault(idUser, fechaInicio, fechaFin, email, cliente, rol, page, limit, entidadDebito, entidadRecarga);
+        transacciones = await this.resolverPorRolDefault(
+          idUser,
+          fechaInicio,
+          fechaFin,
+          email,
+          cliente,
+          rol,
+          page,
+          limit,
+          entidadDebito,
+          entidadRecarga,
+        );
       } else {
         //Si fechaInicio y fechaFin no son null arroja las transacciones del dia de la tabla HistoricoTransaccionesRecarga y HistoricoTransaccionesDebito
         //asigna fechaActual solo si el valor de la izquierda es null o undefined
-        fechaInicio = fechaInicio?.split("T")[0] ?? fechaActual;
-        fechaFin = fechaFin?.split("T")[0] ?? fechaActual;
+        fechaInicio = fechaInicio?.split('T')[0] ?? fechaActual;
+        fechaFin = fechaFin?.split('T')[0] ?? fechaActual;
         // Rol 11 (Cajero): solo recargas por IdUsuario (histórico)
-        entidadRecarga = rol === 11 ? 'HistoricoTransaccionesRecarga' : 'HistoricoTransaccionesRecarga';
+        entidadRecarga =
+          rol === 11
+            ? 'HistoricoTransaccionesRecarga'
+            : 'HistoricoTransaccionesRecarga';
         entidadDebito = 'HistoricoTransaccionesDebito';
-        transacciones = await this.resolverPorRolDefault(idUser, fechaInicio, fechaFin, email, cliente, rol, page, limit, entidadDebito, entidadRecarga);
+        transacciones = await this.resolverPorRolDefault(
+          idUser,
+          fechaInicio,
+          fechaFin,
+          email,
+          cliente,
+          rol,
+          page,
+          limit,
+          entidadDebito,
+          entidadRecarga,
+        );
       }
 
       const { data, total } = transacciones;
@@ -2330,17 +3019,35 @@ export class TransaccionesService {
 
       //Si fechaInicio y fechaFin son null arroja las transacciones del dia de la tabla TransaccionesDebito
       if (!fechaInicio && !fechaFin) {
-        fechaInicio = fechaActual
-        fechaFin = fechaActual
+        fechaInicio = fechaActual;
+        fechaFin = fechaActual;
         entidadDebito = 'TransaccionesDebito';
-        transacciones = await this.resolverPorRolDebitoQR(fechaInicio, fechaFin, email, cliente, rol, page, limit, entidadDebito);
+        transacciones = await this.resolverPorRolDebitoQR(
+          fechaInicio,
+          fechaFin,
+          email,
+          cliente,
+          rol,
+          page,
+          limit,
+          entidadDebito,
+        );
       } else {
         //Si fechaInicio y fechaFin no son null arroja las transacciones del dia de la tabla HistoricoTransaccionesDebito
         //asigna fechaActual solo si el valor de la izquierda es null o undefined
-        fechaInicio = fechaInicio?.split("T")[0] ?? fechaActual;
-        fechaFin = fechaFin?.split("T")[0] ?? fechaActual;
+        fechaInicio = fechaInicio?.split('T')[0] ?? fechaActual;
+        fechaFin = fechaFin?.split('T')[0] ?? fechaActual;
         entidadDebito = 'HistoricoTransaccionesDebito';
-        transacciones = await this.resolverPorRolDebitoQR(fechaInicio, fechaFin, email, cliente, rol, page, limit, entidadDebito);
+        transacciones = await this.resolverPorRolDebitoQR(
+          fechaInicio,
+          fechaFin,
+          email,
+          cliente,
+          rol,
+          page,
+          limit,
+          entidadDebito,
+        );
       }
 
       const { data, total } = transacciones;
@@ -2374,13 +3081,13 @@ export class TransaccionesService {
     rol: number,
     page: number,
     limit: number,
-    entidadDebito: string
+    entidadDebito: string,
   ) {
     try {
       let totalResult;
       let transacciones;
       const offset = (page - 1) * limit;
-      
+
       switch (rol) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
@@ -2500,7 +3207,13 @@ AND td.EsQR = 1
 ORDER BY td.FHRegistro DESC
 LIMIT ? OFFSET ?;
         `,
-            [fechaInicio, fechaFin, Number(cliente), Number(limit), Number(offset)],
+            [
+              fechaInicio,
+              fechaFin,
+              Number(cliente),
+              Number(limit),
+              Number(offset),
+            ],
           );
 
           // Query para total (sin paginación)
@@ -2532,21 +3245,25 @@ AND td.EsQR = 1;
             await this.pasajeroService.findOnePasajeroCorreo(email);
 
           if (!pasajero || !pasajero.id) {
-            throw new NotFoundException('Pasajero no encontrado para el usuario');
+            throw new NotFoundException(
+              'Pasajero no encontrado para el usuario',
+            );
           }
-          
+
           // Validar parámetros
           if (!fechaInicio || !fechaFin) {
-            throw new BadRequestException('Las fechas de inicio y fin son requeridas');
+            throw new BadRequestException(
+              'Las fechas de inicio y fin son requeridas',
+            );
           }
           if (!entidadDebito) {
             throw new BadRequestException('La entidad de débito es requerida');
           }
-          
+
           const pasajeroId = Number(pasajero.id);
           const limitNum = Number(limit);
           const offsetNum = Number(offset);
-          
+
           transacciones = await this.transaccionesrecargaRepository.query(
             `
 SELECT 
@@ -2626,11 +3343,11 @@ AND td.EsQR = 1;
         case 10:
           // Administrador, Reportes, Capturista - usar clienteHijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
-          
+
           if (ids.length === 0) {
             return { data: [], total: 0 };
           }
-          
+
           transacciones = await this.transaccionesrecargaRepository.query(
             `
 SELECT 
@@ -2711,16 +3428,25 @@ AND td.EsQR = 1;
         id: row.id ? Number(row.id) : null,
         tipoTransaccion: row.tipoTransaccion || null,
         monto: row.monto ? Number(parseFloat(String(row.monto)).toFixed(2)) : 0,
-        latitudInicial: row.latitudInicial ? Number(parseFloat(String(row.latitudInicial)).toFixed(7)) : null,
-        longitudInicial: row.longitudInicial ? Number(parseFloat(String(row.longitudInicial)).toFixed(7)) : null,
-        latitudFinal: row.latitudFinal ? Number(parseFloat(String(row.latitudFinal)).toFixed(7)) : null,
-        longitudFinal: row.longitudFinal ? Number(parseFloat(String(row.longitudFinal)).toFixed(7)) : null,
+        latitudInicial: row.latitudInicial
+          ? Number(parseFloat(String(row.latitudInicial)).toFixed(7))
+          : null,
+        longitudInicial: row.longitudInicial
+          ? Number(parseFloat(String(row.longitudInicial)).toFixed(7))
+          : null,
+        latitudFinal: row.latitudFinal
+          ? Number(parseFloat(String(row.latitudFinal)).toFixed(7))
+          : null,
+        longitudFinal: row.longitudFinal
+          ? Number(parseFloat(String(row.longitudFinal)).toFixed(7))
+          : null,
         fechaHoraInicio: row.fechaHoraInicio || null,
         fechaHoraFinal: row.fechaHoraFinal || null,
         fhRegistro: row.fhRegistro || null,
         numeroSerieMonedero: row.numeroSerieMonedero || null,
         numeroSerieValidador: row.numeroSerieValidador || null,
-        esQR: row.esQR !== null && row.esQR !== undefined ? Number(row.esQR) : null,
+        esQR:
+          row.esQR !== null && row.esQR !== undefined ? Number(row.esQR) : null,
         nombreMetodoPago: row.nombreMetodoPago || null,
         idCliente: row.idCliente ? Number(row.idCliente) : null,
         nombreCliente: row.nombreCliente || null,
@@ -2756,13 +3482,13 @@ AND td.EsQR = 1;
     page: number,
     limit: number,
     entidadDebito: string,
-    entidadRecarga: string
+    entidadRecarga: string,
   ) {
     try {
       let totalResult;
       let transacciones;
       const offset = (page - 1) * limit;
-      
+
       switch (rol) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
@@ -2849,7 +3575,14 @@ WHERE DATE(tr.FHRegistro) BETWEEN ? AND ?
 ORDER BY todas_transacciones.fhRegistro DESC
 LIMIT ? OFFSET ?;
         `,
-            [fechaInicio, fechaFin, fechaInicio, fechaFin, Number(limit), Number(offset)],
+            [
+              fechaInicio,
+              fechaFin,
+              fechaInicio,
+              fechaFin,
+              Number(limit),
+              Number(offset),
+            ],
           );
 
           // Query para total (sin paginación)
@@ -2948,12 +3681,16 @@ LIMIT ? OFFSET ?;
           ];
 
           console.log('[paginado][rol=11] Query recargas:', queryRecargasRol11);
-          console.log('[paginado][rol=11] Params recargas:', queryRecargasRol11Params);
-
-          transacciones = await this.historicoTransaccionesRecargaRepository.query(
-            queryRecargasRol11,
+          console.log(
+            '[paginado][rol=11] Params recargas:',
             queryRecargasRol11Params,
           );
+
+          transacciones =
+            await this.historicoTransaccionesRecargaRepository.query(
+              queryRecargasRol11,
+              queryRecargasRol11Params,
+            );
 
           const queryRecargasRol11Total = `
 SELECT COUNT(*) AS total
@@ -2972,12 +3709,11 @@ AND htr.IdUsuario = ?;
             Number(idUser),
           ];
 
-      
-
-          totalResult = await this.historicoTransaccionesRecargaRepository.query(
-            queryRecargasRol11Total,
-            queryRecargasRol11TotalParams,
-          );
+          totalResult =
+            await this.historicoTransaccionesRecargaRepository.query(
+              queryRecargasRol11Total,
+              queryRecargasRol11TotalParams,
+            );
           break;
 
         case 3:
@@ -3071,7 +3807,16 @@ AND (m.IdCliente = ? OR m.IdCliente IS NULL)
 ORDER BY todas_transacciones.fhRegistro DESC
 LIMIT ? OFFSET ?;
         `,
-            [fechaInicio, fechaFin, Number(cliente), fechaInicio, fechaFin, Number(cliente), Number(limit), Number(offset)],
+            [
+              fechaInicio,
+              fechaFin,
+              Number(cliente),
+              fechaInicio,
+              fechaFin,
+              Number(cliente),
+              Number(limit),
+              Number(offset),
+            ],
           );
 
           // Query para total (sin paginación)
@@ -3110,7 +3855,14 @@ WHERE DATE(tr.FHRegistro) BETWEEN ? AND ?
 AND (m.IdCliente = ? OR m.IdCliente IS NULL)
 ) AS todas;
   `,
-            [fechaInicio, fechaFin, Number(cliente), fechaInicio, fechaFin, Number(cliente)],
+            [
+              fechaInicio,
+              fechaFin,
+              Number(cliente),
+              fechaInicio,
+              fechaFin,
+              Number(cliente),
+            ],
           );
           break;
 
@@ -3120,21 +3872,27 @@ AND (m.IdCliente = ? OR m.IdCliente IS NULL)
             await this.pasajeroService.findOnePasajeroCorreo(email);
 
           if (!pasajero || !pasajero.id) {
-            throw new NotFoundException('Pasajero no encontrado para el usuario');
+            throw new NotFoundException(
+              'Pasajero no encontrado para el usuario',
+            );
           }
-          
+
           // Validar parámetros
           if (!fechaInicio || !fechaFin) {
-            throw new BadRequestException('Las fechas de inicio y fin son requeridas');
+            throw new BadRequestException(
+              'Las fechas de inicio y fin son requeridas',
+            );
           }
           if (!entidadDebito || !entidadRecarga) {
-            throw new BadRequestException('Las entidades de débito y recarga son requeridas');
+            throw new BadRequestException(
+              'Las entidades de débito y recarga son requeridas',
+            );
           }
-          
+
           const pasajeroId = Number(pasajero.id);
           const limitNum = Number(limit);
           const offsetNum = Number(offset);
-          
+
           transacciones = await this.transaccionesrecargaRepository.query(
             `
 SELECT * FROM (
@@ -3225,7 +3983,16 @@ AND p.Id = ?
 ORDER BY todas_transacciones.fhRegistro DESC
 LIMIT ? OFFSET ?;
         `,
-            [fechaInicio, fechaFin, pasajeroId, fechaInicio, fechaFin, pasajeroId, limitNum, offsetNum],
+            [
+              fechaInicio,
+              fechaFin,
+              pasajeroId,
+              fechaInicio,
+              fechaFin,
+              pasajeroId,
+              limitNum,
+              offsetNum,
+            ],
           );
 
           // Query para total (sin paginaci?n)
@@ -3272,7 +4039,14 @@ AND p.Id = ?
 ) AS todas;
 
   `,
-            [fechaInicio, fechaFin, Number(pasajero.id), fechaInicio, fechaFin, Number(pasajero.id)],
+            [
+              fechaInicio,
+              fechaFin,
+              Number(pasajero.id),
+              fechaInicio,
+              fechaFin,
+              Number(pasajero.id),
+            ],
           );
 
           break;
@@ -3368,7 +4142,16 @@ AND m.IdCliente IN (${placeholders})
 ORDER BY FHRegistro DESC
 LIMIT ? OFFSET ?;
         `,
-            [fechaInicio, fechaFin, ...ids, fechaInicio, fechaFin, ...ids, Number(limit), Number(offset)],
+            [
+              fechaInicio,
+              fechaFin,
+              ...ids,
+              fechaInicio,
+              fechaFin,
+              ...ids,
+              Number(limit),
+              Number(offset),
+            ],
           );
 
           // Query para total (sin paginación)
@@ -3425,15 +4208,20 @@ AND m.IdCliente IN (${placeholders})
         ...item,
         id: Number(item.id),
         monto: Number(item.monto),
-        latitudInicial: item.latitudInicial ? Number(item.latitudInicial) : null,
-        longitudInicial: item.longitudInicial ? Number(item.longitudInicial) : null,
+        latitudInicial: item.latitudInicial
+          ? Number(item.latitudInicial)
+          : null,
+        longitudInicial: item.longitudInicial
+          ? Number(item.longitudInicial)
+          : null,
         latitudFinal: item.latitudFinal ? Number(item.latitudFinal) : null,
         longitudFinal: item.longitudFinal ? Number(item.longitudFinal) : null,
         idCliente: item.idCliente ? Number(item.idCliente) : null,
         idPasajero: item.idPasajero ? Number(item.idPasajero) : null,
-        tipoMonedero: item.origenTabla === 'DEBITO' && item.esQR !== undefined 
-          ? this.transformarEsQR(Number(item.esQR)) 
-          : null,
+        tipoMonedero:
+          item.origenTabla === 'DEBITO' && item.esQR !== undefined
+            ? this.transformarEsQR(Number(item.esQR))
+            : null,
       }));
 
       //API Response
@@ -3456,7 +4244,6 @@ AND m.IdCliente IN (${placeholders})
         details: error.stack,
       });
     }
-
   }
 
   async findAllTransacciones(
@@ -3732,11 +4519,13 @@ FROM (
           //Datos por usuario
           const pasajero =
             await this.pasajeroService.findOnePasajeroCorreo(email);
-          
+
           if (!pasajero || !pasajero.id) {
-            throw new NotFoundException('Pasajero no encontrado para el usuario');
+            throw new NotFoundException(
+              'Pasajero no encontrado para el usuario',
+            );
           }
-          
+
           transacciones = await this.transaccionesrecargaRepository.query(
             `
 (
@@ -3978,9 +4767,10 @@ FROM (
         latitud: Number(item.latitud),
         longitud: Number(item.longitud),
         idPasajero: Number(item.idPasajero),
-        tipoMonedero: item.origenTabla === 'DEBITO' && item.esQR !== undefined 
-          ? this.transformarEsQR(Number(item.esQR)) 
-          : null,
+        tipoMonedero:
+          item.origenTabla === 'DEBITO' && item.esQR !== undefined
+            ? this.transformarEsQR(Number(item.esQR))
+            : null,
       }));
 
       //API Response
@@ -4021,11 +4811,11 @@ FROM (
       const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
       // Solo la fecha del momento
       const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
-      
-      fechaInicio = fechaActual
-        fechaFin = fechaActual
-        entidadRecarga = 'TransaccionesRecarga';
-        entidadDebito = 'TransaccionesDebito';
+
+      fechaInicio = fechaActual;
+      fechaFin = fechaActual;
+      entidadRecarga = 'TransaccionesRecarga';
+      entidadDebito = 'TransaccionesDebito';
       switch (rol) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
@@ -4449,9 +5239,10 @@ INNER JOIN Clientes c
         longitudFinal: Number(item.longitudFinal),
         idCliente: Number(item.idCliente),
         idPasajero: Number(item.idPasajero),
-        tipoMonedero: item.origenTabla === 'DEBITO' && item.esQR !== undefined 
-          ? this.transformarEsQR(Number(item.esQR)) 
-          : null,
+        tipoMonedero:
+          item.origenTabla === 'DEBITO' && item.esQR !== undefined
+            ? this.transformarEsQR(Number(item.esQR))
+            : null,
       }));
       return { data: data };
     } catch (error) {
@@ -4529,9 +5320,10 @@ INNER JOIN Clientes c
         longitudFinal: Number(item.longitudFinal),
         idCliente: Number(item.idCliente),
         idPasajero: Number(item.idPasajero),
-        tipoMonedero: item.origenTabla === 'DEBITO' && item.esQR !== undefined 
-          ? this.transformarEsQR(Number(item.esQR)) 
-          : null,
+        tipoMonedero:
+          item.origenTabla === 'DEBITO' && item.esQR !== undefined
+            ? this.transformarEsQR(Number(item.esQR))
+            : null,
       }));
       return { data: data };
     } catch (error) {
@@ -4592,7 +5384,7 @@ INNER JOIN Clientes c
 
       let usarTablaActual = false;
       let usarTablaHistorico = true;
-      
+
       if (!fechaInicio && !fechaFin) {
         // Sin fechas = usar ambas tablas (actual + histórico del día de hoy)
         // Esto asegura que se muestren todas las recargas del día actual
@@ -4603,11 +5395,12 @@ INNER JOIN Clientes c
         fechaConditionActivo = `AND DATE(tr.FHRegistro) = '${fechaActual}'`;
       } else {
         // Con fechas: si incluyen hoy, usar ambas tablas
-        const fechaInicioComparar = fechaInicio?.split("T")[0] ?? fechaActual;
-        const fechaFinComparar = fechaFin?.split("T")[0] ?? fechaActual;
-        usarTablaActual = fechaFinComparar >= fechaActual || fechaInicioComparar <= fechaActual;
+        const fechaInicioComparar = fechaInicio?.split('T')[0] ?? fechaActual;
+        const fechaFinComparar = fechaFin?.split('T')[0] ?? fechaActual;
+        usarTablaActual =
+          fechaFinComparar >= fechaActual || fechaInicioComparar <= fechaActual;
         usarTablaHistorico = true; // Siempre consultar histórico si hay fechas
-        
+
         // Construir condiciones de fechas
         if (fechaInicio && fechaFin) {
           fechaCondition = 'AND DATE(htr.FHRegistro) BETWEEN ? AND ?';
@@ -4643,7 +5436,9 @@ INNER JOIN Clientes c
       switch (rol) {
         case 1:
           // SA = Todas las recargas
-          console.log('[getHistoricoRecargasPaginado] Caso 1 - Ejecutando query');
+          console.log(
+            '[getHistoricoRecargasPaginado] Caso 1 - Ejecutando query',
+          );
           if (usarTablaActual && usarTablaHistorico) {
             // Consultar ambas tablas con UNION ALL
             recargas = await this.historicoTransaccionesRecargaRepository.query(
@@ -4744,8 +5539,9 @@ LIMIT ? OFFSET ?;
               [...queryParams, ...queryParams, limit, offset],
             );
 
-            totalResult = await this.historicoTransaccionesRecargaRepository.query(
-              `
+            totalResult =
+              await this.historicoTransaccionesRecargaRepository.query(
+                `
 SELECT COUNT(*) AS total
 FROM (
 SELECT htr.Id
@@ -4765,8 +5561,8 @@ WHERE 1=1
 ${fechaConditionActivo}
 ) AS todas;
             `,
-              [...queryParams, ...queryParams],
-            );
+                [...queryParams, ...queryParams],
+              );
           } else if (usarTablaActual) {
             // Solo tabla actual
             recargas = await this.historicoTransaccionesRecargaRepository.query(
@@ -4819,8 +5615,9 @@ LIMIT ? OFFSET ?;
               [...queryParams, limit, offset],
             );
 
-            totalResult = await this.historicoTransaccionesRecargaRepository.query(
-              `
+            totalResult =
+              await this.historicoTransaccionesRecargaRepository.query(
+                `
 SELECT COUNT(*) AS total
 FROM TransaccionesRecarga tr
 LEFT JOIN Monederos m ON tr.NumeroSerieMonedero = m.NumeroSerie
@@ -4828,8 +5625,8 @@ LEFT JOIN Clientes c ON m.IdCliente = c.Id
 WHERE 1=1
 ${fechaConditionActivo};
             `,
-              queryParams,
-            );
+                queryParams,
+              );
           } else {
             // Solo histórico
             recargas = await this.historicoTransaccionesRecargaRepository.query(
@@ -4883,8 +5680,9 @@ LIMIT ? OFFSET ?;
               [...queryParams, limit, offset],
             );
 
-            totalResult = await this.historicoTransaccionesRecargaRepository.query(
-              `
+            totalResult =
+              await this.historicoTransaccionesRecargaRepository.query(
+                `
 SELECT COUNT(*) AS total
 FROM HistoricoTransaccionesRecarga htr
 LEFT JOIN Monederos m ON htr.NumeroSerieMonedero = m.NumeroSerie
@@ -4892,8 +5690,8 @@ LEFT JOIN Clientes c ON m.IdCliente = c.Id
 WHERE 1=1
 ${fechaCondition};
             `,
-              queryParams,
-            );
+                queryParams,
+              );
           }
           console.log('[getHistoricoRecargasPaginado] Caso 1 - Resultado:', {
             cantidad: Array.isArray(recargas) ? recargas.length : 'no es array',
@@ -4903,9 +5701,11 @@ ${fechaCondition};
 
         case 2:
           // ADMIN = Sus recargas y las de clientes hijos
-          console.log('[getHistoricoRecargasPaginado] Caso 2 - Ejecutando query');
+          console.log(
+            '[getHistoricoRecargasPaginado] Caso 2 - Ejecutando query',
+          );
           const { ids, placeholders } = await this.clienteHijos(cliente);
-          
+
           if (usarTablaActual && usarTablaHistorico) {
             // Consultar ambas tablas con UNION ALL
             recargas = await this.historicoTransaccionesRecargaRepository.query(
@@ -5006,8 +5806,9 @@ LIMIT ? OFFSET ?;
               [...ids, ...ids, ...queryParams, ...queryParams, limit, offset],
             );
 
-            totalResult = await this.historicoTransaccionesRecargaRepository.query(
-              `
+            totalResult =
+              await this.historicoTransaccionesRecargaRepository.query(
+                `
 SELECT COUNT(*) AS total
 FROM (
 SELECT htr.Id
@@ -5027,8 +5828,8 @@ WHERE m.IdCliente IN (${placeholders})
 ${fechaConditionActivo}
 ) AS todas;
             `,
-              [...ids, ...ids, ...queryParams, ...queryParams],
-            );
+                [...ids, ...ids, ...queryParams, ...queryParams],
+              );
           } else if (usarTablaActual) {
             // Solo tabla actual
             recargas = await this.historicoTransaccionesRecargaRepository.query(
@@ -5081,8 +5882,9 @@ LIMIT ? OFFSET ?;
               [...ids, ...queryParams, limit, offset],
             );
 
-            totalResult = await this.historicoTransaccionesRecargaRepository.query(
-              `
+            totalResult =
+              await this.historicoTransaccionesRecargaRepository.query(
+                `
 SELECT COUNT(*) AS total
 FROM TransaccionesRecarga tr
 LEFT JOIN Monederos m ON tr.NumeroSerieMonedero = m.NumeroSerie
@@ -5090,8 +5892,8 @@ LEFT JOIN Clientes c ON m.IdCliente = c.Id
 WHERE m.IdCliente IN (${placeholders})
 ${fechaConditionActivo};
             `,
-              [...ids, ...queryParams],
-            );
+                [...ids, ...queryParams],
+              );
           } else {
             // Solo histórico
             recargas = await this.historicoTransaccionesRecargaRepository.query(
@@ -5145,8 +5947,9 @@ LIMIT ? OFFSET ?;
               [...ids, ...queryParams, limit, offset],
             );
 
-            totalResult = await this.historicoTransaccionesRecargaRepository.query(
-              `
+            totalResult =
+              await this.historicoTransaccionesRecargaRepository.query(
+                `
 SELECT COUNT(*) AS total
 FROM HistoricoTransaccionesRecarga htr
 LEFT JOIN Monederos m ON htr.NumeroSerieMonedero = m.NumeroSerie
@@ -5154,8 +5957,8 @@ LEFT JOIN Clientes c ON m.IdCliente = c.Id
 WHERE m.IdCliente IN (${placeholders})
 ${fechaCondition};
             `,
-              [...ids, ...queryParams],
-            );
+                [...ids, ...queryParams],
+              );
           }
           console.log('[getHistoricoRecargasPaginado] Caso 2 - Resultado:', {
             cantidad: Array.isArray(recargas) ? recargas.length : 'no es array',
@@ -5165,14 +5968,23 @@ ${fechaCondition};
 
         case 3:
           // Cajero = Solo sus recargas (por IdUsuario) Y filtrar por clientes hijos
-          console.log('[getHistoricoRecargasPaginado] Caso 3 - Ejecutando query, idUser:', idUser, 'cliente:', cliente);
-          const { ids: idsCajero, placeholders: placeholdersCajero } = await this.clienteHijos(cliente);
-          console.log('[getHistoricoRecargasPaginado] Caso 3 - Clientes hijos obtenidos:', {
-            ids: idsCajero,
-            placeholders: placeholdersCajero,
-            cantidad: idsCajero?.length,
-          });
-          
+          console.log(
+            '[getHistoricoRecargasPaginado] Caso 3 - Ejecutando query, idUser:',
+            idUser,
+            'cliente:',
+            cliente,
+          );
+          const { ids: idsCajero, placeholders: placeholdersCajero } =
+            await this.clienteHijos(cliente);
+          console.log(
+            '[getHistoricoRecargasPaginado] Caso 3 - Clientes hijos obtenidos:',
+            {
+              ids: idsCajero,
+              placeholders: placeholdersCajero,
+              cantidad: idsCajero?.length,
+            },
+          );
+
           if (usarTablaActual && usarTablaHistorico) {
             // Consultar ambas tablas con UNION ALL
             // Nota: TransaccionesRecarga no tiene IdUsuario, así que solo consultamos histórico cuando hay IdUsuario
@@ -5229,16 +6041,17 @@ LIMIT ? OFFSET ?;
               [idUser, ...idsCajero, ...queryParams, limit, offset],
             );
 
-            totalResult = await this.historicoTransaccionesRecargaRepository.query(
-              `
+            totalResult =
+              await this.historicoTransaccionesRecargaRepository.query(
+                `
 SELECT COUNT(*) AS total
 FROM HistoricoTransaccionesRecarga htr
 LEFT JOIN Monederos m ON htr.NumeroSerieMonedero = m.NumeroSerie
 WHERE htr.IdUsuario = ? AND (m.IdCliente IN (${placeholdersCajero}) OR m.IdCliente IS NULL)
 ${fechaConditionHistorico};
             `,
-              [idUser, ...idsCajero, ...queryParams],
-            );
+                [idUser, ...idsCajero, ...queryParams],
+              );
           } else if (usarTablaActual) {
             // Solo tabla actual - pero TransaccionesRecarga no tiene IdUsuario, así que no hay recargas del cajero en tabla actual
             recargas = [];
@@ -5296,16 +6109,17 @@ LIMIT ? OFFSET ?;
               [idUser, ...idsCajero, ...queryParams, limit, offset],
             );
 
-            totalResult = await this.historicoTransaccionesRecargaRepository.query(
-              `
+            totalResult =
+              await this.historicoTransaccionesRecargaRepository.query(
+                `
 SELECT COUNT(*) AS total
 FROM HistoricoTransaccionesRecarga htr
 LEFT JOIN Monederos m ON htr.NumeroSerieMonedero = m.NumeroSerie
 WHERE htr.IdUsuario = ? AND (m.IdCliente IN (${placeholdersCajero}) OR m.IdCliente IS NULL)
 ${fechaCondition};
             `,
-              [idUser, ...idsCajero, ...queryParams],
-            );
+                [idUser, ...idsCajero, ...queryParams],
+              );
           }
           console.log('[getHistoricoRecargasPaginado] Caso 3 - Resultado:', {
             cantidad: Array.isArray(recargas) ? recargas.length : 'no es array',
@@ -5317,18 +6131,19 @@ ${fechaCondition};
           // Pasajero = Solo las de él (filtrar por monederos del pasajero asociado al usuario)
           // Buscar pasajero por IdUsuario directamente o por correo como fallback
           let pasajeroId: number | null = null;
-          
+
           try {
             // Intentar buscar pasajero por IdUsuario directamente
             const pasajeroPorUsuario = await this.pasajeroRepository.findOne({
               where: { idUsuario: idUser },
             });
-            
+
             if (pasajeroPorUsuario) {
               pasajeroId = pasajeroPorUsuario.id;
             } else {
               // Fallback: buscar por correo
-              const pasajeroPorCorreo = await this.pasajeroService.findOnePasajeroCorreo(email);
+              const pasajeroPorCorreo =
+                await this.pasajeroService.findOnePasajeroCorreo(email);
               if (pasajeroPorCorreo && pasajeroPorCorreo.id) {
                 pasajeroId = pasajeroPorCorreo.id;
               }
@@ -5336,7 +6151,8 @@ ${fechaCondition};
           } catch (error) {
             // Si falla, intentar por correo
             try {
-              const pasajeroPorCorreo = await this.pasajeroService.findOnePasajeroCorreo(email);
+              const pasajeroPorCorreo =
+                await this.pasajeroService.findOnePasajeroCorreo(email);
               if (pasajeroPorCorreo && pasajeroPorCorreo.id) {
                 pasajeroId = pasajeroPorCorreo.id;
               }
@@ -5344,21 +6160,28 @@ ${fechaCondition};
               // Si no se encuentra, pasajeroId queda null
             }
           }
-          
+
           // Buscar recargas solo en HistoricoTransaccionesRecarga
           // Filtrar por: IdUsuario del usuario Y clientes hijos (solo las recargas que él realizó en su cliente y clientes hijos)
           // Para pasajero: solo mostrar las recargas donde IdUsuario = idUser AND m.IdCliente IN (clientes hijos)
-          console.log('[getHistoricoRecargasPaginado] Caso 9 - Obteniendo clientes hijos para cliente:', cliente);
-          const { ids: idsPasajero, placeholders: placeholdersPasajero } = await this.clienteHijos(cliente);
-          console.log('[getHistoricoRecargasPaginado] Caso 9 - Clientes hijos obtenidos:', {
-            ids: idsPasajero,
-            placeholders: placeholdersPasajero,
-            cantidad: idsPasajero?.length,
-          });
-          
+          console.log(
+            '[getHistoricoRecargasPaginado] Caso 9 - Obteniendo clientes hijos para cliente:',
+            cliente,
+          );
+          const { ids: idsPasajero, placeholders: placeholdersPasajero } =
+            await this.clienteHijos(cliente);
+          console.log(
+            '[getHistoricoRecargasPaginado] Caso 9 - Clientes hijos obtenidos:',
+            {
+              ids: idsPasajero,
+              placeholders: placeholdersPasajero,
+              cantidad: idsPasajero?.length,
+            },
+          );
+
           const condicionesWhereHistorico = `htr.IdUsuario = ? AND (m.IdCliente IN (${placeholdersPasajero}) OR m.IdCliente IS NULL)`;
           const paramsWhere = [idUser, ...idsPasajero, ...queryParams];
-          
+
           // Obtener recargas del histórico con paginación
           recargas = await this.historicoTransaccionesRecargaRepository.query(
             `
@@ -5412,17 +6235,20 @@ LIMIT ? OFFSET ?;
           );
 
           // Query para total
-          console.log('[getHistoricoRecargasPaginado] Caso 9 - Ejecutando query de total');
-          totalResult = await this.historicoTransaccionesRecargaRepository.query(
-            `
+          console.log(
+            '[getHistoricoRecargasPaginado] Caso 9 - Ejecutando query de total',
+          );
+          totalResult =
+            await this.historicoTransaccionesRecargaRepository.query(
+              `
 SELECT COUNT(*) AS total
 FROM HistoricoTransaccionesRecarga htr
 LEFT JOIN Monederos m ON htr.NumeroSerieMonedero = m.NumeroSerie
 WHERE htr.IdUsuario = ? AND (m.IdCliente IN (${placeholdersPasajero}) OR m.IdCliente IS NULL)
 ${fechaConditionHistorico};
             `,
-            paramsWhere,
-          );
+              paramsWhere,
+            );
           console.log('[getHistoricoRecargasPaginado] Caso 9 - Resultado:', {
             cantidad: Array.isArray(recargas) ? recargas.length : 'no es array',
             total: totalResult?.[0]?.total,
@@ -5430,12 +6256,16 @@ ${fechaConditionHistorico};
           break;
 
         default:
-          throw new BadRequestException('Rol no válido para consultar histórico de recargas');
+          throw new BadRequestException(
+            'Rol no válido para consultar histórico de recargas',
+          );
       }
 
       console.log('[getHistoricoRecargasPaginado] Procesando resultados:', {
         recargasEsArray: Array.isArray(recargas),
-        recargasLength: Array.isArray(recargas) ? recargas.length : 'no es array',
+        recargasLength: Array.isArray(recargas)
+          ? recargas.length
+          : 'no es array',
         totalResult,
         total: totalResult?.[0]?.total,
       });
@@ -5445,10 +6275,13 @@ ${fechaConditionHistorico};
 
       // Validar que recargas sea un array
       if (!Array.isArray(recargas)) {
-        console.error('[getHistoricoRecargasPaginado] ERROR: recargas no es un array:', {
-          tipo: typeof recargas,
-          valor: recargas,
-        });
+        console.error(
+          '[getHistoricoRecargasPaginado] ERROR: recargas no es un array:',
+          {
+            tipo: typeof recargas,
+            valor: recargas,
+          },
+        );
         throw new BadRequestException({
           message: 'Error: las recargas no se obtuvieron correctamente',
         });
@@ -5458,16 +6291,23 @@ ${fechaConditionHistorico};
       const data = recargas.map((item) => ({
         ...item,
         id: Number(item.id),
-        idTipoTransaccion: item.idTipoTransaccion ? Number(item.idTipoTransaccion) : null,
+        idTipoTransaccion: item.idTipoTransaccion
+          ? Number(item.idTipoTransaccion)
+          : null,
         monto: Number(item.monto),
         idCliente: item.idCliente ? Number(item.idCliente) : null,
         idMonedero: item.idMonedero ? Number(item.idMonedero) : null,
         idPasajero: item.idPasajero ? Number(item.idPasajero) : null,
         idUsuario: item.idUsuario ? Number(item.idUsuario) : null,
-        idUsuarioRecarga: item.idUsuarioRecarga ? Number(item.idUsuarioRecarga) : null,
+        idUsuarioRecarga: item.idUsuarioRecarga
+          ? Number(item.idUsuarioRecarga)
+          : null,
       }));
 
-      console.log('[getHistoricoRecargasPaginado] Datos transformados - cantidad:', data.length);
+      console.log(
+        '[getHistoricoRecargasPaginado] Datos transformados - cantidad:',
+        data.length,
+      );
 
       const result: ApiResponseCommon = {
         data: data,

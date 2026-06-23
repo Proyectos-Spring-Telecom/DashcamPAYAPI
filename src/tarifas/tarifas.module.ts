@@ -9,7 +9,10 @@ import { UsuariosZonas } from 'src/entities/UsuariosZonas';
 import { Clientes } from 'src/entities/Clientes';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Tarifas,Variantes,UsuariosZonas,Clientes]), BitacoraModule],
+  imports: [
+    TypeOrmModule.forFeature([Tarifas, Variantes, UsuariosZonas, Clientes]),
+    BitacoraModule,
+  ],
   controllers: [TarifasController],
   providers: [TarifasService],
 })

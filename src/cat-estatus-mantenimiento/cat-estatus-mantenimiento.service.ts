@@ -30,9 +30,10 @@ export class CatEstatusMantenimientoService {
     idUser: number,
   ): Promise<ApiCrudResponse> {
     try {
-      const estatusMantenimiento = await this.catEstatusMantenimientoRepository.findOne({
-        where: { nombre: createCatEstatusMantenimientoDto.nombre },
-      });
+      const estatusMantenimiento =
+        await this.catEstatusMantenimientoRepository.findOne({
+          where: { nombre: createCatEstatusMantenimientoDto.nombre },
+        });
       if (estatusMantenimiento) {
         throw new BadRequestException('El estatus de mantenimiento ya existe');
       }
@@ -88,9 +89,10 @@ export class CatEstatusMantenimientoService {
 
   async findAllList(): Promise<ApiResponseCommon> {
     try {
-      const estatusMantenimientos = await this.catEstatusMantenimientoRepository.find({
-        order: { nombre: 'ASC' },
-      });
+      const estatusMantenimientos =
+        await this.catEstatusMantenimientoRepository.find({
+          order: { nombre: 'ASC' },
+        });
 
       // Forzamos ids a number
       const data = estatusMantenimientos.map((item) => ({
@@ -114,11 +116,12 @@ export class CatEstatusMantenimientoService {
 
   async findAll(page: number, limit: number): Promise<ApiResponseCommon> {
     try {
-      const [data, total] = await this.catEstatusMantenimientoRepository.findAndCount({
-        order: { nombre: 'ASC' },
-        skip: (page - 1) * limit,
-        take: limit,
-      });
+      const [data, total] =
+        await this.catEstatusMantenimientoRepository.findAndCount({
+          order: { nombre: 'ASC' },
+          skip: (page - 1) * limit,
+          take: limit,
+        });
 
       // Forzamos ids a number
       const estatusMantenimientos = data.map((item) => ({
@@ -147,9 +150,10 @@ export class CatEstatusMantenimientoService {
 
   async findOne(id: number): Promise<ApiResponseCommon> {
     try {
-      const estatusMantenimiento = await this.catEstatusMantenimientoRepository.findOne({
-        where: { id: id },
-      });
+      const estatusMantenimiento =
+        await this.catEstatusMantenimientoRepository.findOne({
+          where: { id: id },
+        });
       if (!estatusMantenimiento) {
         throw new NotFoundException('Estatus de mantenimiento no encontrado');
       }
@@ -179,9 +183,10 @@ export class CatEstatusMantenimientoService {
     idUser: number,
   ): Promise<ApiCrudResponse> {
     try {
-      const estatusMantenimiento = await this.catEstatusMantenimientoRepository.findOne({
-        where: { id: id },
-      });
+      const estatusMantenimiento =
+        await this.catEstatusMantenimientoRepository.findOne({
+          where: { id: id },
+        });
       if (!estatusMantenimiento) {
         throw new NotFoundException('Estatus de mantenimiento no encontrado');
       }
@@ -192,7 +197,9 @@ export class CatEstatusMantenimientoService {
           where: { nombre: updateCatEstatusMantenimientoDto.nombre },
         });
         if (existing && existing.id !== id) {
-          throw new BadRequestException('El nombre del estatus de mantenimiento ya existe');
+          throw new BadRequestException(
+            'El nombre del estatus de mantenimiento ya existe',
+          );
         }
       }
 
@@ -200,9 +207,10 @@ export class CatEstatusMantenimientoService {
         id,
         updateCatEstatusMantenimientoDto,
       );
-      const estatusMantenimientoResult = await this.catEstatusMantenimientoRepository.findOne({
-        where: { id: id },
-      });
+      const estatusMantenimientoResult =
+        await this.catEstatusMantenimientoRepository.findOne({
+          where: { id: id },
+        });
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updateCatEstatusMantenimientoDto };
@@ -250,9 +258,10 @@ export class CatEstatusMantenimientoService {
 
   async remove(id: number, idUser: number): Promise<ApiCrudResponse> {
     try {
-      const estatusMantenimiento = await this.catEstatusMantenimientoRepository.findOne({
-        where: { id: id },
-      });
+      const estatusMantenimiento =
+        await this.catEstatusMantenimientoRepository.findOne({
+          where: { id: id },
+        });
 
       if (!estatusMantenimiento) {
         throw new NotFoundException('Estatus de mantenimiento no encontrado');

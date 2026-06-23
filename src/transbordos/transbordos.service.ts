@@ -60,14 +60,19 @@ export class TransbordosService {
       }
 
       // Validar que el número de detalles no exceda el número de transbordos permitidos
-      if (createTransbordoDto.detalles.length > createTransbordoDto.numeroTransbordos) {
+      if (
+        createTransbordoDto.detalles.length >
+        createTransbordoDto.numeroTransbordos
+      ) {
         throw new BadRequestException(
           `El número de detalles (${createTransbordoDto.detalles.length}) no puede exceder el número de transbordos permitidos (${createTransbordoDto.numeroTransbordos})`,
         );
       }
 
       // Validar que no haya números de transbordo duplicados
-      const nrosTransbordos = createTransbordoDto.detalles.map(d => d.nroTransbordo);
+      const nrosTransbordos = createTransbordoDto.detalles.map(
+        (d) => d.nroTransbordo,
+      );
       const duplicados = nrosTransbordos.filter(
         (item, index) => nrosTransbordos.indexOf(item) !== index,
       );
@@ -95,10 +100,11 @@ export class TransbordosService {
         estatus: 1, // Por defecto activo
       });
 
-      const transbordoGuardado = await queryRunner.manager.save(nuevoTransbordo);
+      const transbordoGuardado =
+        await queryRunner.manager.save(nuevoTransbordo);
 
       // Crear los detalles
-      const detalles = createTransbordoDto.detalles.map(detalle =>
+      const detalles = createTransbordoDto.detalles.map((detalle) =>
         this.detalleTransbordosRepository.create({
           idTransbordo: transbordoGuardado.id,
           costo: detalle.costo,
@@ -221,15 +227,24 @@ export class TransbordosService {
         WHERE tp.IdCliente IN (${placeholders})
       `;
 
-      const data = await this.transbordosRepository.query(query, [...ids, limit, offset]);
-      const countResult = await this.transbordosRepository.query(countQuery, ids);
+      const data = await this.transbordosRepository.query(query, [
+        ...ids,
+        limit,
+        offset,
+      ]);
+      const countResult = await this.transbordosRepository.query(
+        countQuery,
+        ids,
+      );
       const total = countResult[0]?.total || 0;
 
       // Formatear los datos
       const formattedData = data.map((item: any) => ({
         id: Number(item.Id),
         idCliente: Number(item.IdCliente),
-        idTipoDescuento: item.IdTipoDescuento ? Number(item.IdTipoDescuento) : null,
+        idTipoDescuento: item.IdTipoDescuento
+          ? Number(item.IdTipoDescuento)
+          : null,
         nombreTipoDescuento: item.NombreTipoDescuento || null,
         nombreCliente: item.NombreCliente,
         nombre: item.Nombre,
@@ -237,9 +252,7 @@ export class TransbordosService {
         numeroTransbordos: Number(item.NumeroTransbordos),
         estatus: Number(item.Estatus),
         cantidadDetalles: Number(item.CantidadDetalles),
-        detalles: item.Detalles
-          ? JSON.parse(`[${item.Detalles}]`)
-          : [],
+        detalles: item.Detalles ? JSON.parse(`[${item.Detalles}]`) : [],
       }));
 
       // Registro en la bitácora SUCCESS
@@ -296,7 +309,11 @@ export class TransbordosService {
     try {
       const transbordo = await this.transbordosRepository.findOne({
         where: { id },
-        relations: ['detalleTransbordos', 'idClienteTransbordo', 'tipoDescuento'],
+        relations: [
+          'detalleTransbordos',
+          'idClienteTransbordo',
+          'tipoDescuento',
+        ],
       });
 
       if (!transbordo) {
@@ -305,7 +322,9 @@ export class TransbordosService {
 
       // Verificar que el transbordo esté activo
       if (transbordo.estatus === 0) {
-        throw new NotFoundException(`Transbordo con ID ${id} no encontrado o está inactivo`);
+        throw new NotFoundException(
+          `Transbordo con ID ${id} no encontrado o está inactivo`,
+        );
       }
 
       // Registro en la bitácora SUCCESS
@@ -320,22 +339,24 @@ export class TransbordosService {
       );
 
       const result: ApiResponseCommon = {
-        data: [{
-          id: Number(transbordo.id),
-          nombre: transbordo.nombre,
-          tiempo: transbordo.tiempo,
-          numeroTransbordos: transbordo.numeroTransbordos,
-          estatus: transbordo.estatus,
-          idCliente: transbordo.idCliente,
-          idTipoDescuento: transbordo.idTipoDescuento,
-          nombreTipoDescuento: transbordo.tipoDescuento?.nombre || null,
-          nombreCliente: transbordo.idClienteTransbordo?.nombre,
-          detalles: transbordo.detalleTransbordos.map(detalle => ({
-            id: Number(detalle.id),
-            costo: Number(detalle.costo),
-            nroTransbordo: detalle.nroTransbordo,
-          })),
-        }],
+        data: [
+          {
+            id: Number(transbordo.id),
+            nombre: transbordo.nombre,
+            tiempo: transbordo.tiempo,
+            numeroTransbordos: transbordo.numeroTransbordos,
+            estatus: transbordo.estatus,
+            idCliente: transbordo.idCliente,
+            idTipoDescuento: transbordo.idTipoDescuento,
+            nombreTipoDescuento: transbordo.tipoDescuento?.nombre || null,
+            nombreCliente: transbordo.idClienteTransbordo?.nombre,
+            detalles: transbordo.detalleTransbordos.map((detalle) => ({
+              id: Number(detalle.id),
+              costo: Number(detalle.costo),
+              nroTransbordo: detalle.nroTransbordo,
+            })),
+          },
+        ],
       };
 
       return result;
@@ -401,20 +422,26 @@ export class TransbordosService {
       }
 
       // Determinar el número de transbordos a usar para validación
-      const numeroTransbordos = updateTransbordoDto.numeroTransbordos !== undefined
-        ? updateTransbordoDto.numeroTransbordos
-        : transbordoExistente.numeroTransbordos;
+      const numeroTransbordos =
+        updateTransbordoDto.numeroTransbordos !== undefined
+          ? updateTransbordoDto.numeroTransbordos
+          : transbordoExistente.numeroTransbordos;
 
       // Validar detalles si se proporcionan
       if (updateTransbordoDto.detalles) {
-        if (numeroTransbordos !== null && updateTransbordoDto.detalles.length > numeroTransbordos) {
+        if (
+          numeroTransbordos !== null &&
+          updateTransbordoDto.detalles.length > numeroTransbordos
+        ) {
           throw new BadRequestException(
             `El número de detalles (${updateTransbordoDto.detalles.length}) no puede exceder el número de transbordos permitidos (${numeroTransbordos})`,
           );
         }
 
         // Validar números de transbordo duplicados
-        const nrosTransbordos = updateTransbordoDto.detalles.map(d => d.nroTransbordo);
+        const nrosTransbordos = updateTransbordoDto.detalles.map(
+          (d) => d.nroTransbordo,
+        );
         const duplicados = nrosTransbordos.filter(
           (item, index) => nrosTransbordos.indexOf(item) !== index,
         );
@@ -426,7 +453,10 @@ export class TransbordosService {
 
         // Validar rango de números de transbordo
         const maxNroTransbordo = Math.max(...nrosTransbordos);
-        if (numeroTransbordos !== null && maxNroTransbordo > numeroTransbordos) {
+        if (
+          numeroTransbordos !== null &&
+          maxNroTransbordo > numeroTransbordos
+        ) {
           throw new BadRequestException(
             `El número de transbordo ${maxNroTransbordo} excede el número máximo permitido (${numeroTransbordos})`,
           );
@@ -438,7 +468,7 @@ export class TransbordosService {
         });
 
         // Crear nuevos detalles
-        const nuevosDetalles = updateTransbordoDto.detalles.map(detalle =>
+        const nuevosDetalles = updateTransbordoDto.detalles.map((detalle) =>
           this.detalleTransbordosRepository.create({
             idTransbordo: id,
             costo: detalle.costo,
@@ -458,13 +488,15 @@ export class TransbordosService {
         datosActualizacion.tiempo = updateTransbordoDto.tiempo;
       }
       if (updateTransbordoDto.numeroTransbordos !== undefined) {
-        datosActualizacion.numeroTransbordos = updateTransbordoDto.numeroTransbordos;
+        datosActualizacion.numeroTransbordos =
+          updateTransbordoDto.numeroTransbordos;
       }
       if (updateTransbordoDto.idCliente !== undefined) {
         datosActualizacion.idCliente = updateTransbordoDto.idCliente;
       }
       if (updateTransbordoDto.idTipoDescuento !== undefined) {
-        datosActualizacion.idTipoDescuento = updateTransbordoDto.idTipoDescuento || null;
+        datosActualizacion.idTipoDescuento =
+          updateTransbordoDto.idTipoDescuento || null;
       }
 
       if (Object.keys(datosActualizacion).length > 0) {
@@ -484,7 +516,9 @@ export class TransbordosService {
       });
 
       if (!transbordoActualizado) {
-        throw new NotFoundException(`Transbordo con ID ${id} no encontrado después de actualizar`);
+        throw new NotFoundException(
+          `Transbordo con ID ${id} no encontrado después de actualizar`,
+        );
       }
 
       // Registro en la bitácora SUCCESS
@@ -552,7 +586,9 @@ export class TransbordosService {
       }
 
       if (transbordo.estatus === 0) {
-        throw new BadRequestException(`El Transbordo con ID ${id} ya está inactivo`);
+        throw new BadRequestException(
+          `El Transbordo con ID ${id} ya está inactivo`,
+        );
       }
 
       const nombreTransbordo = transbordo.nombre || '';
@@ -619,7 +655,9 @@ export class TransbordosService {
       }
 
       if (transbordo.estatus === 1) {
-        throw new BadRequestException(`El Transbordo con ID ${id} ya está activo`);
+        throw new BadRequestException(
+          `El Transbordo con ID ${id} ya está activo`,
+        );
       }
 
       const nombreTransbordo = transbordo.nombre || '';
@@ -693,7 +731,7 @@ export class TransbordosService {
       );
 
       const result: ApiResponseCommon = {
-        data: tiposDescuento.map(tipo => ({
+        data: tiposDescuento.map((tipo) => ({
           id: Number(tipo.id),
           nombre: tipo.nombre,
         })),

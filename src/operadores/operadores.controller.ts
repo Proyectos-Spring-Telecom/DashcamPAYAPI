@@ -17,7 +17,13 @@ import { UpdateOperadoreDto } from './dto/update-operadore.dto';
 import { UpdateOperadorStatusDto } from './dto/update-operadores-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+} from '@nestjs/swagger';
 
 @ApiTags('Operadores')
 @ApiBearerAuth('bearer-token')
@@ -36,16 +42,17 @@ export class OperadoresController {
   }
 
   @Get('list')
-  findAllListOperador(@Request() req,): Promise<ApiResponseCommon> {
+  findAllListOperador(@Request() req): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.operadoresService.findAllListOperadores(+cliente, +rol,);
+    return this.operadoresService.findAllListOperadores(+cliente, +rol);
   }
 
   @Get('by-cliente/:idCliente')
   @ApiOperation({
     summary: 'Listar operadores por ID de cliente',
-    description: 'Obtiene todos los operadores activos pertenecientes únicamente al cliente especificado (a través de la relación Operadores -> Usuarios -> Clientes).',
+    description:
+      'Obtiene todos los operadores activos pertenecientes únicamente al cliente especificado (a través de la relación Operadores -> Usuarios -> Clientes).',
   })
   @ApiParam({
     name: 'idCliente',
@@ -71,7 +78,11 @@ export class OperadoresController {
   ): Promise<ApiResponseCommon> {
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return await this.operadoresService.findByCliente(+idCliente, +idUser, +rol);
+    return await this.operadoresService.findByCliente(
+      +idCliente,
+      +idUser,
+      +rol,
+    );
   }
 
   @Get(':page/:limit')
@@ -82,14 +93,19 @@ export class OperadoresController {
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.operadoresService.findAllOperadores(+cliente, +rol, page, limit);
+    return this.operadoresService.findAllOperadores(
+      +cliente,
+      +rol,
+      page,
+      limit,
+    );
   }
 
   @Get(':id')
-  findOneOperador(@Param('id') id: string,@Request() req) {
+  findOneOperador(@Param('id') id: string, @Request() req) {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
-    return this.operadoresService.findOneOperador(+id, +cliente, + rol);
+    return this.operadoresService.findOneOperador(+id, +cliente, +rol);
   }
 
   @Patch('estatus/:id')

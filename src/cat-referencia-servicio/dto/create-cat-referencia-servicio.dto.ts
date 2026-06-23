@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, MaxLength, IsOptional, IsInt, IsIn } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  MaxLength,
+  IsOptional,
+  IsInt,
+  IsIn,
+} from 'class-validator';
 
 export class CreateCatReferenciaServicioDto {
   @ApiProperty({
@@ -8,7 +15,9 @@ export class CreateCatReferenciaServicioDto {
     required: true,
   })
   @IsString({ message: 'El nombre debe ser una cadena de texto.' })
-  @IsNotEmpty({ message: 'El nombre de la referencia de servicio es obligatorio.' })
+  @IsNotEmpty({
+    message: 'El nombre de la referencia de servicio es obligatorio.',
+  })
   @MaxLength(45, { message: 'El nombre no puede exceder los 45 caracteres.' })
   nombre: string;
 
@@ -23,4 +32,3 @@ export class CreateCatReferenciaServicioDto {
   @IsOptional()
   estatus?: number = 1;
 }
-

@@ -5,9 +5,7 @@ import { ReportesController } from './reportes.controller';
 import { Clientes } from 'src/entities/Clientes';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Clientes]),
-  ],
+  imports: [TypeOrmModule.forFeature([Clientes])],
   controllers: [ReportesController],
   providers: [ReportesService],
 })

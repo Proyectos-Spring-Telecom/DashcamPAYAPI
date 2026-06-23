@@ -1,9 +1,4 @@
-import {
-  Column,
-  Entity,
-  OneToMany,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { DireccionesTarjeta } from './DireccionesTarjeta';
 import { applySchema } from 'src/common/apply-schema.decorator';
 
@@ -34,7 +29,9 @@ export class DatosTarjeta {
   @Column('tinyint', { name: 'Estatus', nullable: true, default: () => "'1'" })
   estatus: number | null;
 
-  @OneToMany(() => DireccionesTarjeta, (direccionesTarjeta) => direccionesTarjeta.idDatosTarjeta2)
+  @OneToMany(
+    () => DireccionesTarjeta,
+    (direccionesTarjeta) => direccionesTarjeta.idDatosTarjeta2,
+  )
   direccionesTarjeta: DireccionesTarjeta[];
 }
-

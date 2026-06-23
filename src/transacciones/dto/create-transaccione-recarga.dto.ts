@@ -32,7 +32,8 @@ export class CreateTransaccioneRecargaDto {
     required: false,
   })
   @IsEnum(EnumTipoTransaccion, {
-    message: 'El tipo de transaccion debe ser: 1 (Recarga), 2 (Debito), 3 (Rechazo)',
+    message:
+      'El tipo de transaccion debe ser: 1 (Recarga), 2 (Debito), 3 (Rechazo)',
   })
   @IsOptional()
   @Transform(toNumberDecimal)
@@ -42,7 +43,12 @@ export class CreateTransaccioneRecargaDto {
     example: 150.75,
     description: 'Monto de la transacción (2 decimales)',
   })
-  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'monto must be a number conforming to the specified constraints' })
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    {
+      message: 'monto must be a number conforming to the specified constraints',
+    },
+  )
   @IsNotEmpty()
   @Transform(toNumberDecimal)
   monto: number;
@@ -77,7 +83,8 @@ export class CreateTransaccioneRecargaDto {
 
   @ApiProperty({
     example: 'DISP-0001',
-    description: 'Número de serie del validador (también acepta numeroSerieDispositivo)',
+    description:
+      'Número de serie del validador (también acepta numeroSerieDispositivo)',
     required: false,
   })
   @IsString()
@@ -86,12 +93,14 @@ export class CreateTransaccioneRecargaDto {
 
   @ApiProperty({
     example: 1,
-    description: 'Método de pago: 1 (Efectivo), 2 (Transferencia), 3 (Tarjeta de crédito), 4 (Tarjeta de débito)',
+    description:
+      'Método de pago: 1 (Efectivo), 2 (Transferencia), 3 (Tarjeta de crédito), 4 (Tarjeta de débito)',
     enum: EnumMetodoPago,
     required: true,
   })
   @IsEnum(EnumMetodoPago, {
-    message: 'El método de pago debe ser: 1 (Efectivo), 2 (Transferencia), 3 (Tarjeta de crédito), 4 (Tarjeta de débito)',
+    message:
+      'El método de pago debe ser: 1 (Efectivo), 2 (Transferencia), 3 (Tarjeta de crédito), 4 (Tarjeta de débito)',
   })
   @IsNotEmpty({ message: 'El método de pago es obligatorio' })
   @Transform(toNumberDecimal)
@@ -99,56 +108,102 @@ export class CreateTransaccioneRecargaDto {
 
   @ApiPropertyOptional({
     example: 'token_vzhdS4W-6IAE6KlfGLUXmDH8VIDMFs',
-    description: 'Token de la tarjeta de Netpay (obligatorio si método de pago es Tarjeta)',
+    description:
+      'Token de la tarjeta de Netpay (obligatorio si método de pago es Tarjeta)',
   })
-  @ValidateIf((o) => o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO || o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO)
+  @ValidateIf(
+    (o) =>
+      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
+      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
+  )
   @IsString({ message: 'El tokenCardNetPay debe ser una cadena de texto' })
-  @IsNotEmpty({ message: 'El tokenCardNetPay es obligatorio cuando el método de pago es Tarjeta' })
+  @IsNotEmpty({
+    message:
+      'El tokenCardNetPay es obligatorio cuando el método de pago es Tarjeta',
+  })
   tokenCardNetPay?: string;
 
   @ApiPropertyOptional({
     example: 'trans_1234567890',
-    description: 'Transaction Token ID de Netpay (se obtiene de la respuesta de Netpay, no se debe enviar en el request)',
+    description:
+      'Transaction Token ID de Netpay (se obtiene de la respuesta de Netpay, no se debe enviar en el request)',
   })
-  @ValidateIf((o) => o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO || o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO)
-  @IsString({ message: 'El transactionTokenIdNetPay debe ser una cadena de texto' })
+  @ValidateIf(
+    (o) =>
+      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
+      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
+  )
+  @IsString({
+    message: 'El transactionTokenIdNetPay debe ser una cadena de texto',
+  })
   @IsOptional()
   transactionTokenIdNetPay?: string;
 
   @ApiPropertyOptional({
     example: '1222337263222',
-    description: 'Reference ID de Netpay (obligatorio si método de pago es Tarjeta)',
+    description:
+      'Reference ID de Netpay (obligatorio si método de pago es Tarjeta)',
   })
-  @ValidateIf((o) => o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO || o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO)
+  @ValidateIf(
+    (o) =>
+      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
+      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
+  )
   @IsString({ message: 'El referenceIdNetPay debe ser una cadena de texto' })
-  @IsNotEmpty({ message: 'El referenceIdNetPay es obligatorio cuando el método de pago es Tarjeta' })
+  @IsNotEmpty({
+    message:
+      'El referenceIdNetPay es obligatorio cuando el método de pago es Tarjeta',
+  })
   referenceIdNetPay?: string;
 
   @ApiPropertyOptional({
     example: '1721779181755',
-    description: 'Session ID para Netpay (obligatorio si método de pago es Tarjeta)',
+    description:
+      'Session ID para Netpay (obligatorio si método de pago es Tarjeta)',
   })
-  @ValidateIf((o) => o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO || o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO)
+  @ValidateIf(
+    (o) =>
+      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
+      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
+  )
   @IsString({ message: 'El sessionId debe ser una cadena de texto' })
-  @IsNotEmpty({ message: 'El sessionId es obligatorio cuando el método de pago es Tarjeta' })
+  @IsNotEmpty({
+    message: 'El sessionId es obligatorio cuando el método de pago es Tarjeta',
+  })
   sessionId?: string;
 
   @ApiPropertyOptional({
     example: '1721779181755',
-    description: 'Device Fingerprint para Netpay (obligatorio si método de pago es Tarjeta)',
+    description:
+      'Device Fingerprint para Netpay (obligatorio si método de pago es Tarjeta)',
   })
-  @ValidateIf((o) => o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO || o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO)
+  @ValidateIf(
+    (o) =>
+      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
+      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
+  )
   @IsString({ message: 'El deviceFingerPrint debe ser una cadena de texto' })
-  @IsNotEmpty({ message: 'El deviceFingerPrint es obligatorio cuando el método de pago es Tarjeta' })
+  @IsNotEmpty({
+    message:
+      'El deviceFingerPrint es obligatorio cuando el método de pago es Tarjeta',
+  })
   deviceFingerPrint?: string;
 
   @ApiPropertyOptional({
     example: 1,
-    description: 'ID de la dirección guardada en BD (obligatorio si método de pago es Tarjeta)',
+    description:
+      'ID de la dirección guardada en BD (obligatorio si método de pago es Tarjeta)',
   })
-  @ValidateIf((o) => o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO || o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO)
+  @ValidateIf(
+    (o) =>
+      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
+      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
+  )
   @IsNumber()
-  @IsNotEmpty({ message: 'El idDireccion es obligatorio cuando el método de pago es Tarjeta' })
+  @IsNotEmpty({
+    message:
+      'El idDireccion es obligatorio cuando el método de pago es Tarjeta',
+  })
   @Transform(toNumberDecimal)
   idDireccion?: number;
 
@@ -163,9 +218,14 @@ export class CreateTransaccioneRecargaDto {
       httpBrowserScreenWidth: '1718',
       httpBrowserTimeDifference: '360',
     },
-    description: 'Información del dispositivo para Netpay (obligatorio si método de pago es Tarjeta)',
+    description:
+      'Información del dispositivo para Netpay (obligatorio si método de pago es Tarjeta)',
   })
-  @ValidateIf((o) => o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO || o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO)
+  @ValidateIf(
+    (o) =>
+      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
+      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
+  )
   @IsOptional()
   deviceInformation?: {
     deviceChannel?: string;
@@ -177,5 +237,4 @@ export class CreateTransaccioneRecargaDto {
     httpBrowserScreenWidth?: string;
     httpBrowserTimeDifference?: string;
   };
-
 }

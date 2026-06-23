@@ -1,7 +1,12 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { CatTipoTarifaService } from './cat-tipo-tarifa.service';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
-import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 
 @ApiTags('Catálogo tipo tarifa')
@@ -14,7 +19,8 @@ export class CatTipoTarifaController {
   @Get()
   @ApiOperation({
     summary: 'Obtener listado de tipos de tarifa',
-    description: 'Obtiene un listado completo de todos los tipos de tarifa sin paginación.',
+    description:
+      'Obtiene un listado completo de todos los tipos de tarifa sin paginación.',
   })
   @ApiResponse({
     status: 200,

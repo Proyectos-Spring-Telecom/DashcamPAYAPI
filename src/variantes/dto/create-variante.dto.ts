@@ -15,7 +15,7 @@ import {
   ValidateNested,
   IsBoolean,
 } from 'class-validator';
-import { Type, Transform } from 'class-transformer';
+import { Type } from 'class-transformer';
 
 class PuntoDto {
   @IsNumber()
@@ -51,7 +51,10 @@ export class CreateVarianteDto {
   puntoFin?: object;
 
   @ApiProperty({
-    example: [{ lat: 20.1, lng: -103.1 }, { lat: 20.2, lng: -103.2 }],
+    example: [
+      { lat: 20.1, lng: -103.1 },
+      { lat: 20.2, lng: -103.2 },
+    ],
     description: 'Recorrido base para interpolación',
   })
   @IsArray()
@@ -117,9 +120,9 @@ export class CreateVarianteDto {
   })
   @IsOptional()
   @IsNumber({}, { message: 'El ID del tipo de variante debe ser un número' })
-  @IsPositive({ message: 'El ID del tipo de variante debe ser un número positivo' })
+  @IsPositive({
+    message: 'El ID del tipo de variante debe ser un número positivo',
+  })
   @Type(() => Number)
   idTipoVariante?: number;
-
 }
-

@@ -19,7 +19,8 @@ export class DireccionesController {
   @Get('/CP/:cp')
   @ApiOperation({
     summary: 'Buscar direcciones por código postal',
-    description: 'Obtiene información de direcciones basada en el código postal proporcionado.',
+    description:
+      'Obtiene información de direcciones basada en el código postal proporcionado.',
   })
   @ApiParam({
     name: 'cp',

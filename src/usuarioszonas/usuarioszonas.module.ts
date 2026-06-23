@@ -8,9 +8,11 @@ import { Zonas } from 'src/entities/Zonas';
 import { Usuarios } from 'src/entities/Usuarios';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UsuariosZonas,Zonas,Usuarios]), BitacoraModule],
+  imports: [
+    TypeOrmModule.forFeature([UsuariosZonas, Zonas, Usuarios]),
+    BitacoraModule,
+  ],
   controllers: [UsuarioszonasController],
   providers: [UsuarioszonasService],
 })
 export class UsuarioszonasModule {}
-

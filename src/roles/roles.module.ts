@@ -6,10 +6,7 @@ import { BitacoraModule } from 'src/bitacora/bitacora.module';
 import { Roles } from 'src/entities/Roles';
 
 @Module({
-  imports: [
-      TypeOrmModule.forFeature([Roles]),
-      BitacoraModule,
-    ],
+  imports: [TypeOrmModule.forFeature([Roles]), BitacoraModule],
   controllers: [RolesController],
   providers: [RolesService],
 })

@@ -8,7 +8,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ViajesConteos } from 'src/entities/ViajesConteos';
 import { Repository } from 'typeorm';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
-import { ApiCrudResponse, ApiResponseCommon, EstatusEnumBitcora } from 'src/common/ApiResponse';
+import {
+  ApiCrudResponse,
+  ApiResponseCommon,
+  EstatusEnumBitcora,
+} from 'src/common/ApiResponse';
 import { Clientes } from 'src/entities/Clientes';
 import { EnumModulos } from 'src/common/estatus.enum';
 
@@ -20,7 +24,7 @@ export class ViajesconteosService {
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
-  ) { }
+  ) {}
 
   async create(idUser: number, createViajesconteoDto: CreateViajesconteoDto) {
     try {
@@ -38,7 +42,7 @@ export class ViajesconteosService {
         'CREATE',
         querylogger,
         idUser,
-        EnumModulos.VIAJESCONTEOS, 
+        EnumModulos.VIAJESCONTEOS,
         EstatusEnumBitcora.SUCCESS,
       );
 
@@ -48,7 +52,9 @@ export class ViajesconteosService {
         message: 'El viajeconteo ha sido creado exitosamente.',
         data: {
           id: Number(viajesconteosSave.idConteo),
-          nombre: `Viaje ID: ${viajesconteosSave.idConteo} Transaccion ID: ${viajesconteosSave.idViaje} ` || '',
+          nombre:
+            `Viaje ID: ${viajesconteosSave.idConteo} Transaccion ID: ${viajesconteosSave.idViaje} ` ||
+            '',
         },
       };
       return result;
@@ -259,14 +265,13 @@ ORDER BY v.Id DESC;
     return this.viajesconteosRepository.query(query, [cliente]);
   }
 
-
   async findAllList(
     idUser: number,
     cliente: number,
     rol: number,
   ): Promise<ApiResponseCommon> {
     try {
-      let viajesconteos
+      let viajesconteos;
 
       switch (rol) {
         case 1: // Super Admin
@@ -357,12 +362,12 @@ ORDER BY v.Id DESC;
           break;
 
         default:
-        case 3:  // Operador
-          viajesconteos = await this.consultarViajesConteosCL(cliente)
+        case 3: // Operador
+          viajesconteos = await this.consultarViajesConteosCL(cliente);
           break;
       }
 
-      const data = viajesconteos.map((item) => ({
+      const _data = viajesconteos.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
         idCliente: Number(item.idCliente),
@@ -468,11 +473,7 @@ GROUP BY
 ORDER BY v.Id DESC
 LIMIT ? OFFSET ?;
     `;
-    return this.viajesconteosRepository.query(query, [
-      ...ids,
-      limit,
-      offset,
-    ]);
+    return this.viajesconteosRepository.query(query, [...ids, limit, offset]);
   }
 
   private async consultarTotalPoscionesPaginados(cliente: number) {
@@ -576,11 +577,7 @@ GROUP BY
 ORDER BY v.Id DESC
 LIMIT ? OFFSET ?;
     `;
-    return this.viajesconteosRepository.query(query, [
-      cliente,
-      limit,
-      offset,
-    ]);
+    return this.viajesconteosRepository.query(query, [cliente, limit, offset]);
   }
 
   private async consultarTotalPoscionesPaginadosCl(cliente: number) {
@@ -608,7 +605,8 @@ AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
     cliente: number,
     rol: number,
     page: number,
-    limit: number) {
+    limit: number,
+  ) {
     try {
       const offset = (page - 1) * limit;
       let viajesconteos;
@@ -714,19 +712,26 @@ LEFT JOIN ConteoPasajeros cp ON cp.Id = vc.IdConteo
         case 2: // Administrador
         case 8: // Reportes
         case 10: // Capturista
-          viajesconteos = await this.consultarPoscionesPaginado(cliente, limit, offset);
+          viajesconteos = await this.consultarPoscionesPaginado(
+            cliente,
+            limit,
+            offset,
+          );
 
           totalResult = await this.consultarTotalPoscionesPaginados(cliente);
           break;
 
         default:
-        case 3:  // Operador
-          viajesconteos = await this.consultarPoscionesPaginadoCL(cliente, limit, offset);
+        case 3: // Operador
+          viajesconteos = await this.consultarPoscionesPaginadoCL(
+            cliente,
+            limit,
+            offset,
+          );
 
           totalResult = await this.consultarTotalPoscionesPaginadosCl(cliente);
           break;
       }
-
 
       const total = Number(totalResult[0]?.total || 0);
       const data = viajesconteos.map((item) => ({
@@ -837,7 +842,7 @@ ORDER BY v.Id DESC
         `,
         [id],
       );
-      const data = viajesconteos.map((item) => ({
+      const _data = viajesconteos.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
         idCliente: Number(item.idCliente),
@@ -861,5 +866,4 @@ ORDER BY v.Id DESC
       });
     }
   }
-
 }
