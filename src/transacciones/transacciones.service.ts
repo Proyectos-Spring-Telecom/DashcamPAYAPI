@@ -1185,6 +1185,8 @@ export class TransaccionesService {
                     DistanciaBaseKm: tarifa.distanciaBaseKm,
                     IncrementoCadaMetros: tarifa.incrementoCadaMetros,
                     TipoTarifa: tarifa.tipoTarifa,
+                    CostoPorEstacion: tarifa.costoPorEstacion,
+                    CantidadEstacionesBase: tarifa.cantidadEstacionesBase,
                   };
                 }
               }
@@ -1210,7 +1212,10 @@ export class TransaccionesService {
             const distanciaKm = distanciaMetros / 1000; // Convertir a kilómetros
 
             // Calcular monto basado en la distancia
-            const tarifaBase = Number(transaccionAbierta.monto) || 0;
+            const tarifaBase =
+              Number(transaccionAbierta.monto) ||
+              Number(tarifaInfoUpdate?.TarifaBase) ||
+              0;
             let montoCalculado = tarifaBase;
 
             // Tarifa por estaciones (TipoTarifa=3): calcular por número de estaciones recorridas
@@ -1733,6 +1738,8 @@ export class TransaccionesService {
                           DistanciaBaseKm: tarifa.distanciaBaseKm,
                           IncrementoCadaMetros: tarifa.incrementoCadaMetros,
                           TipoTarifa: tarifa.tipoTarifa,
+                          CostoPorEstacion: tarifa.costoPorEstacion,
+                          CantidadEstacionesBase: tarifa.cantidadEstacionesBase,
                         };
                       }
                     }
@@ -1759,7 +1766,9 @@ export class TransaccionesService {
 
                   // Calcular monto basado en la distancia
                   const tarifaBaseUpdate =
-                    Number(transaccionAbiertaFisica.monto) || 0;
+                    Number(transaccionAbiertaFisica.monto) ||
+                    Number(tarifaInfoUpdate?.TarifaBase) ||
+                    0;
                   let montoCalculado = tarifaBaseUpdate;
 
                   // Tarifa por estaciones (TipoTarifa=3): calcular por número de estaciones recorridas
@@ -2665,10 +2674,12 @@ export class TransaccionesService {
           '[TRANSACCIONES] =================================================',
         );
 
-        // Para tarifas INCREMENTAL (tipoTarifa === 2), guardar la tarifa base en el campo monto
-        // Para otras tarifas, guardar el monto con descuento
-        if (tipoTarifa === 2) {
-          montoAGuardar = tarifaBase; // Guardar tarifa base para tarifas INCREMENTAL
+        // ABIERTA y ESTACIONES: guardar tarifa base; FIJA: monto con descuento
+        if (
+          tipoTarifa === EnumTipoTarifa.ABIERTA ||
+          tipoTarifa === EnumTipoTarifa.ESTACIONES
+        ) {
+          montoAGuardar = tarifaBase;
         } else {
           montoAGuardar = montoConDescuento;
         }
@@ -2684,10 +2695,12 @@ export class TransaccionesService {
           '[TRANSACCIONES] =======================================================',
         );
 
-        // Para transacciones ABIERTAS, si es tarifa INCREMENTAL (tipoTarifa === 2), guardar la tarifa base
-        // Si no es INCREMENTAL, el monto se guarda como 0
-        if (tipoTarifa === 2) {
-          montoAGuardar = tarifaBase; // Guardar tarifa base para tarifas INCREMENTAL
+        // ABIERTA y ESTACIONES: persistir tarifa base al abrir (el extra se calcula al cerrar)
+        if (
+          tipoTarifa === EnumTipoTarifa.ABIERTA ||
+          tipoTarifa === EnumTipoTarifa.ESTACIONES
+        ) {
+          montoAGuardar = tarifaBase;
         } else {
           montoAGuardar = 0;
         }
