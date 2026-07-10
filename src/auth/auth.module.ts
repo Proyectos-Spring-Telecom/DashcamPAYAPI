@@ -19,6 +19,7 @@ import { Turnos } from 'src/entities/Turnos';
 import { Viajes } from 'src/entities/Viajes';
 import { RefreshSessions } from 'src/entities/RefreshSessions';
 import { LoggerService } from 'src/common/logger.service';
+import { Validadores } from 'src/entities/Validadores';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { LoggerService } from 'src/common/logger.service';
       Turnos,
       Viajes,
       RefreshSessions,
+      Validadores,
     ]),
   ],
   controllers: [AuthController],
