@@ -37,6 +37,7 @@ import { Turnos } from 'src/entities/Turnos';
 import { Viajes } from 'src/entities/Viajes';
 import { RefreshSessions } from 'src/entities/RefreshSessions';
 import { LoggerService } from 'src/common/logger.service';
+import { Validadores } from 'src/entities/Validadores';
 import { createHash, randomInt, randomUUID } from 'crypto';
 import { IsNull } from 'typeorm';
 
@@ -59,6 +60,8 @@ export class AuthService {
     private readonly viajesRepository: Repository<Viajes>,
     @InjectRepository(RefreshSessions)
     private readonly refreshSessionsRepository: Repository<RefreshSessions>,
+    @InjectRepository(Validadores)
+    private readonly validadoresRepository: Repository<Validadores>,
     private readonly jwtService: JwtService,
     private readonly emailService: MailService,
     private readonly bitacoraLogger: BitacoraLoggerService,
@@ -702,17 +705,12 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
   // ========================================
   async singInPin(loginAuthPin: LoginAuthPinDto) {
     try {
-      //buscamos el usuario
-      /* Debe tener el mismo correo
-         Debe estar activo en estatus
-         debe estar confirmado el correo
-         y el cliente al que pertenece debe estar activo
-      */
+      // Buscar por usuario/correo (activo, email confirmado, cliente activo).
+      // El validadorId puede diferir: tras validar el PIN se reasigna al dispositivo del request.
       const user = await this.usuariosRepository.findOne({
         relations: ['idRol2', 'idCliente2', 'idCliente2.idPadre2'],
         where: {
           userName: loginAuthPin.userName,
-          validadorId: loginAuthPin.validadorId,
           estatus: 1,
           emailConfirmado: 1,
           idCliente2: {
@@ -728,11 +726,6 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
       }
       if (!user) {
         throw new NotFoundException('No se encontró al usuario.');
-      }
-      if (user.validadorId !== loginAuthPin.validadorId) {
-        throw new NotFoundException(
-          'El dispositivo reportado no coincide con el dispositivo asignado al usuario.',
-        );
       }
 
       const pinValid =
@@ -756,9 +749,38 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         throw new UnauthorizedException('Credenciales invalidas');
       }
 
-      await this.usuariosRepository.update(user.id, {
-        ultimoLogin: this.formatFechaDesfasada(),
-      });
+      // Si el dispositivo del request no coincide con el asignado, reasignarlo (igual que PATCH actualizar/validador)
+      if (user.validadorId !== loginAuthPin.validadorId) {
+        const dispositivo = await this.validadoresRepository.findOne({
+          where: { numeroSerie: loginAuthPin.validadorId },
+        });
+        if (!dispositivo) {
+          throw new NotFoundException(
+            `Validador numero de serie: ${loginAuthPin.validadorId} no fue encontrado.`,
+          );
+        }
+
+        const usuariosConDispositivo = await this.usuariosRepository.find({
+          where: { validadorId: loginAuthPin.validadorId },
+        });
+        if (usuariosConDispositivo.length > 0) {
+          await Promise.all(
+            usuariosConDispositivo.map((u) =>
+              this.usuariosRepository.update(u.id, { validadorId: null }),
+            ),
+          );
+        }
+
+        await this.usuariosRepository.update(user.id, {
+          validadorId: loginAuthPin.validadorId,
+          ultimoLogin: this.formatFechaDesfasada(),
+        });
+        user.validadorId = loginAuthPin.validadorId;
+      } else {
+        await this.usuariosRepository.update(user.id, {
+          ultimoLogin: this.formatFechaDesfasada(),
+        });
+      }
 
       const operador = await this.fetchOperadorDatosByUserId(user.id);
       if (!operador?.length || !operador[0]) {
