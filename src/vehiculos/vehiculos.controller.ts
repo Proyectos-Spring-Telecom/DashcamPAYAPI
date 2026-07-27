@@ -15,6 +15,8 @@ import { VehiculosService } from './vehiculos.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdateVehiculoEstatusDto } from './dto/update-vehiculos-estatus.dto';
 import {
@@ -27,7 +29,8 @@ import {
 
 @ApiTags('Vehiculos')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@TenantResource('vehiculo')
 @Controller('vehiculos')
 export class VehiculosController {
   constructor(private readonly vehiculosService: VehiculosService) {}
@@ -46,6 +49,7 @@ export class VehiculosController {
   }
 
   @Get('by-cliente/:idCliente')
+  @TenantResource({ resolver: 'cliente', idParam: 'idCliente' })
   @ApiOperation({
     summary: 'Listar vehículos por ID de cliente',
     description:
@@ -79,6 +83,7 @@ export class VehiculosController {
   }
 
   @Get('clientes/:id')
+  @TenantResource({ resolver: 'cliente', idParam: 'id' })
   async findAllValidadoresClientes(
     @Param('id', ParseIntPipe) id: number,
     @Request() req,

@@ -12,6 +12,8 @@ import {
 import { ViajesService } from './viajes.service';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
   ApiBearerAuth,
   ApiTags,
@@ -24,8 +26,9 @@ import { ApiResponseCommon } from 'src/common/ApiResponse';
 
 @ApiTags('Viajes')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('viajes')
+@TenantResource('viaje')
 export class ViajesController {
   constructor(private readonly viajesService: ViajesService) {}
 

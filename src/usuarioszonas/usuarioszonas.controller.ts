@@ -17,12 +17,15 @@ import { UpdateUsuarioszonaDto } from './dto/update-usuarioszona.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdateUsuariosZonasEstatusDto } from './dto/update-usuarioszona-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Usuarios Zonas')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('usuarioszonas')
+@TenantResource('usuarioZona')
 export class UsuarioszonasController {
   constructor(private readonly usuarioszonasService: UsuarioszonasService) {}
 
@@ -44,6 +47,7 @@ export class UsuarioszonasController {
   }
 
   @Get('usuario/:idUsuario')
+  @TenantResource({ resolver: 'usuario', idParam: 'idUsuario' })
   async findOneUsuario(@Param('idUsuario', ParseIntPipe) id: number) {
     return await this.usuarioszonasService.findOneUsuario(id);
   }
@@ -77,6 +81,7 @@ export class UsuarioszonasController {
   }
 
   @Put(':idUsuario')
+  @TenantResource({ resolver: 'usuario', idParam: 'idUsuario' })
   async update(
     @Param('idUsuario') id: string,
     @Body() updateUsuarioszonaDto: UpdateUsuarioszonaDto,

@@ -15,6 +15,8 @@ import { RutasService } from './rutas.service';
 import { CreateRutaDto } from './dto/create-ruta.dto';
 import { UpdateRutaDto } from './dto/update-ruta.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { UpdateRutasEstatusDto } from './dto/update-ruta-estatus.dto';
 import {
   ApiBearerAuth,
@@ -26,8 +28,9 @@ import {
 
 @ApiTags('Rutas')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('rutas')
+@TenantResource('ruta')
 export class RutasController {
   constructor(private readonly rutasService: RutasService) {}
 
@@ -53,6 +56,7 @@ export class RutasController {
   }
 
   @Get('by-zona/:idZona')
+  @TenantResource({ resolver: 'zona', idParam: 'idZona' })
   @ApiOperation({
     summary: 'Listar rutas por ID de zona',
     description:
@@ -86,6 +90,7 @@ export class RutasController {
   }
 
   @Get('by-idCliente/:idCliente')
+  @TenantResource({ resolver: 'cliente', idParam: 'idCliente' })
   @ApiOperation({
     summary: 'Listar rutas por ID de cliente',
     description:

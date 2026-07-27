@@ -16,12 +16,15 @@ import { UpdateTurnoDto } from './dto/update-turno.dto';
 import { UpdateTurnosEstatusDto } from './dto/update-turno-estatus.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Turnos')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('turnos')
+@TenantResource('turno')
 export class TurnosController {
   constructor(private readonly turnosService: TurnosService) {}
 

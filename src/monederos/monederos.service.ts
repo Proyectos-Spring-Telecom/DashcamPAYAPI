@@ -1277,6 +1277,68 @@ ORDER BY m.Id DESC;
   }
 
   // ========================================
+  // 🔹 DESCUENTO ATÓMICO DE SALDO (previene doble-cobro por concurrencia)
+  // ========================================
+  /**
+   * Descuenta `monto` del saldo del monedero de forma atómica.
+   *
+   * Ejecuta en una sola sentencia:
+   *   UPDATE Monederos SET Saldo = Saldo - :monto
+   *   WHERE NumeroSerie = :serie AND Estatus = 1 AND Saldo >= :monto
+   *
+   * El motor toma un lock exclusivo sobre la fila durante el UPDATE, por lo que
+   * dos cobros concurrentes NO pueden sobregirar el saldo: el segundo evalúa la
+   * condición `Saldo >= :monto` sobre el saldo ya descontado y, si no alcanza,
+   * no descuenta (affected = 0). Esto reemplaza el patrón inseguro de
+   * leer-calcular-escribir (last-write-wins) que causaba el doble-cargo.
+   *
+   * @returns true si se descontó (había saldo suficiente); false si no alcanzó
+   *          el saldo o el monedero no existe / está inactivo.
+   */
+  async descontarSaldoAtomico(
+    numeroSerie: string,
+    monto: number,
+    idUser: number,
+  ): Promise<boolean> {
+    if (monto < 0) {
+      throw new BadRequestException(
+        'El monto a descontar no puede ser negativo.',
+      );
+    }
+
+    const result = await this.monederoRepository
+      .createQueryBuilder()
+      .update(Monederos)
+      .set({ saldo: () => 'Saldo - :monto' })
+      .where('NumeroSerie = :numeroSerie', { numeroSerie })
+      .andWhere('Estatus = :estatus', {
+        estatus: EnumEstatusMonederos.ACTIVO,
+      })
+      .andWhere('Saldo >= :monto')
+      .setParameter('monto', monto)
+      .execute();
+
+    const descontado = (result.affected ?? 0) > 0;
+
+    // --- Registro en la bitácora ---
+    const querylogger = { numeroSerie, monto };
+    await this.bitacoraLogger.logToBitacora(
+      'Monederos',
+      descontado
+        ? `Descuento atómico de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`
+        : `Descuento atómico RECHAZADO (saldo insuficiente) de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`,
+      'UPDATE',
+      querylogger,
+      idUser,
+      EnumModulos.MONEDEROS,
+      descontado ? EstatusEnumBitcora.SUCCESS : EstatusEnumBitcora.ERROR,
+      descontado ? undefined : 'Saldo insuficiente',
+    );
+
+    return descontado;
+  }
+
+  // ========================================
   // 🔹 ACTUALIZAR MONEDERO
   // ========================================
   async updateMonedero(

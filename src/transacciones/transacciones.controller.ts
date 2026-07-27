@@ -10,6 +10,8 @@ import {
 } from '@nestjs/common';
 import { TransaccionesService } from './transacciones.service';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { CreateTransaccioneDebitoDto } from './dto/create-transaccione-debito.dto';
 import { CreateTransaccioneRecargaDto } from './dto/create-transaccione-recarga.dto';
@@ -34,7 +36,7 @@ export class TransaccionesController {
   // ========================================
 
   @Post('debito')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   createTransaccionDebito(
     @Body() createTransaccioneDebitoDto: CreateTransaccioneDebitoDto,
     @Request() req,
@@ -48,7 +50,7 @@ export class TransaccionesController {
   }
 
   @Post('recarga')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @ApiOperation({
     summary: 'Crea una transacción de recarga',
     description:
@@ -158,7 +160,7 @@ export class TransaccionesController {
   }
 
   @Post('paginado')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   async paginadoTransaccion(
     @Body() getTransaccioneDto: GetTransaccioneDto,
     @Request() req,
@@ -181,7 +183,7 @@ export class TransaccionesController {
   }
 
   @Post('paginado/debito-qr')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @ApiOperation({
     summary: 'Obtiene el listado de transacciones débito con QR paginado',
     description:
@@ -218,7 +220,7 @@ export class TransaccionesController {
   }
 
   @Post('paginado/recargas')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @ApiOperation({
     summary: 'Obtiene el listado de recargas paginado',
     description:
@@ -256,7 +258,7 @@ export class TransaccionesController {
   // ========================================
 
   @Get('list')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   async findAllListTransacciones(@Request() req): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
@@ -267,19 +269,21 @@ export class TransaccionesController {
   }
 
   @Get('RECARGA/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @TenantResource('transaccionRecarga')
   findOneTransaccioneRecarga(@Param('id', ParseIntPipe) id: number) {
     return this.transaccionesService.findOneTransaccionRecarga(id);
   }
 
   @Get('DEBITO/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @TenantResource('transaccionDebito')
   findOneTransaccioneDebito(@Param('id', ParseIntPipe) id: number) {
     return this.transaccionesService.findOneTransaccionDebito(id);
   }
 
   /*   @Get(':page/:limit')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   async findAllTransacciones(
     @Param('page', ParseIntPipe) page: number,
     @Param('limit', ParseIntPipe) limit: number,

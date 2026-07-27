@@ -96,4 +96,13 @@ export class CreateTransaccioneDebitoDto {
     message: 'cantidadPasajes es obligatorio cuando esMultiple es true',
   })
   cantidadPasajes?: number;
+
+  @ApiPropertyOptional({
+    example: 'a1b2c3d4-e5f6-47a8-9b0c-1d2e3f4a5b6c',
+    description:
+      'Llave de idempotencia generada por el dispositivo. Si el dispositivo reintenta el mismo cobro con la misma llave, la transacción no se cobra dos veces: se devuelve la transacción ya registrada.',
+  })
+  @IsString()
+  @IsOptional()
+  claveIdempotencia?: string;
 }

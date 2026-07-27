@@ -11,11 +11,13 @@ import {
 import { ViajestransaccionesService } from './viajestransacciones.service';
 import { CreateViajestransaccioneDto } from './dto/create-viajestransaccione.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Viajes transacciones')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('viajestransacciones')
 export class ViajestransaccionesController {
   constructor(
@@ -43,6 +45,7 @@ export class ViajestransaccionesController {
   }
 
   @Get('viajes/:id')
+  @TenantResource('viaje')
   findOneViajes(@Param('id', ParseIntPipe) id: number) {
     return this.viajestransaccionesService.findOneViajes(+id);
   }

@@ -16,6 +16,8 @@ import { CreateOperadoreDto } from './dto/create-operadore.dto';
 import { UpdateOperadoreDto } from './dto/update-operadore.dto';
 import { UpdateOperadorStatusDto } from './dto/update-operadores-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import {
   ApiBearerAuth,
@@ -27,8 +29,9 @@ import {
 
 @ApiTags('Operadores')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('operadores')
+@TenantResource('operador')
 export class OperadoresController {
   constructor(private readonly operadoresService: OperadoresService) {}
 
@@ -49,6 +52,7 @@ export class OperadoresController {
   }
 
   @Get('by-cliente/:idCliente')
+  @TenantResource({ resolver: 'cliente', idParam: 'idCliente' })
   @ApiOperation({
     summary: 'Listar operadores por ID de cliente',
     description:

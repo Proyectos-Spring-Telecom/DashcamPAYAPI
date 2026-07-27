@@ -15,6 +15,8 @@ import { InstalacionesService } from './instalaciones.service';
 import { CreateInstalacionesDto } from './dto/create-instalacione.dto';
 import { UpdateInstalacioneDto } from './dto/update-instalacione.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdateInstalacioneEstatusDto } from './dto/update-instalacione-estatus.dto';
 import {
@@ -27,8 +29,9 @@ import {
 
 @ApiTags('Instalaciones')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('instalaciones')
+@TenantResource('instalacion')
 export class InstalacionesController {
   constructor(private readonly instalacionesService: InstalacionesService) {}
 
@@ -57,6 +60,7 @@ export class InstalacionesController {
   }
 
   @Get('by-idValidador/:idValidador')
+  @TenantResource({ resolver: 'validador', idParam: 'idValidador' })
   @ApiOperation({
     summary: 'Obtener instalaciones por ID de validador',
     description:
