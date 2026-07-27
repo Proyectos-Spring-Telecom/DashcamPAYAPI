@@ -17,6 +17,8 @@ import { CreateMonederoDto } from './dto/create-monedero.dto';
 import { UpdateMonederoDto } from './dto/update-monedero.dto';
 import { UpdateMonederoEstatusDto } from './dto/update-monedero-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdateMonederoCatPasajeroDto } from './dto/update-monedero-catpasajero.dto';
 import { UpdateMonederoExtravioDto } from './dto/update-monedero-extravio.dto';
@@ -31,7 +33,7 @@ import {
 
 @ApiTags('Monederos')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('monederos')
 export class MonederosController {
   constructor(private readonly monederosService: MonederosService) {}
@@ -174,6 +176,7 @@ export class MonederosController {
   }
 
   @Get(':id')
+  @TenantResource('monedero')
   findOneMonedero(@Param('id', ParseIntPipe) id: number, @Request() _req) {
     return this.monederosService.findOneMonedero(id);
   }
@@ -183,6 +186,7 @@ export class MonederosController {
   // ========================================
 
   @Put(':id')
+  @TenantResource('monedero')
   updateMonedero(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateMonederoDto: UpdateMonederoDto,
@@ -197,6 +201,7 @@ export class MonederosController {
   // ========================================
 
   @Patch('tipo/pasajero/:id')
+  @TenantResource('monedero')
   updateMonederoTipoPasajero(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateMonederoCatPasajeroDto: UpdateMonederoCatPasajeroDto,
@@ -211,6 +216,7 @@ export class MonederosController {
   }
 
   @Patch('estatus/:id')
+  @TenantResource('monedero')
   updateMonederoEstatus(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateMonederoEstatusDto: UpdateMonederoEstatusDto,
@@ -229,6 +235,7 @@ export class MonederosController {
   // ========================================
 
   @Delete(':id')
+  @TenantResource('monedero')
   removeMonedero(@Param('id', ParseIntPipe) id: number, @Request() req) {
     const idUser = req.user.userId;
     return this.monederosService.removeMonedero(id, idUser);

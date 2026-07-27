@@ -22,11 +22,14 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Mantenimiento kilometraje')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('mantenimiento-kilometraje')
+@TenantResource('mantenimientoKilometraje')
 export class MantenimientoKilometrajeController {
   constructor(
     private readonly mantenimientoKilometrajeService: MantenimientoKilometrajeService,

@@ -16,6 +16,8 @@ import { CreateTarifaDto } from './dto/create-tarifa.dto';
 import { UpdateTarifaDto } from './dto/update-tarifa.dto';
 import { UpdateTarifasEstatusDto } from './dto/update-tarifa-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
   ApiBearerAuth,
   ApiTags,
@@ -26,8 +28,9 @@ import {
 
 @ApiTags('Tarifas')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('tarifas')
+@TenantResource('tarifa')
 export class TarifasController {
   constructor(private readonly tarifasService: TarifasService) {}
 
@@ -48,6 +51,7 @@ export class TarifasController {
   }
 
   @Get('variante/:idVariante')
+  @TenantResource({ resolver: 'variante', idParam: 'idVariante' })
   @ApiOperation({
     summary: 'Obtener tarifa por ID de variante',
     description: 'Obtiene la tarifa activa asociada a una variante específica',

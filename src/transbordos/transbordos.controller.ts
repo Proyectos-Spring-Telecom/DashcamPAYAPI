@@ -14,6 +14,8 @@ import { TransbordosService } from './transbordos.service';
 import { CreateTransbordoDto } from './dto/create-transbordo.dto';
 import { UpdateTransbordoDto } from './dto/update-transbordo.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
   ApiBearerAuth,
   ApiTags,
@@ -25,8 +27,9 @@ import {
 
 @ApiTags('Transbordos')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('transbordos')
+@TenantResource('transbordo')
 export class TransbordosController {
   constructor(private readonly transbordosService: TransbordosService) {}
 

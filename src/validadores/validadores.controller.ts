@@ -15,12 +15,15 @@ import { ValidadoresService } from './validadores.service';
 import { CreateValidadorDto } from './dto/create-validador.dto';
 import { UpdateValidadorDto } from './dto/update-validador.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { UpdateValidadorEstatusDto } from './dto/update-validador-estatus.dto';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdateValidadorEstadoDto } from './dto/update-validador-estado.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('validadores')
+@TenantResource('validador')
 export class ValidadoresController {
   constructor(private readonly ValidadoresService: ValidadoresService) {}
 
@@ -42,6 +45,7 @@ export class ValidadoresController {
   }
 
   @Get('/clientes/:id')
+  @TenantResource({ resolver: 'cliente', idParam: 'id' })
   async findAllValidadoresClientes(
     @Param('id', ParseIntPipe) id: number,
     @Request() req,

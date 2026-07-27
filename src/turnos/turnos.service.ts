@@ -83,14 +83,16 @@ export class TurnosService {
 
       const query = `
       SELECT
-	i.Id 
+	i.Id
 FROM Validadores d
 LEFT JOIN Instalaciones i ON i.idValidador = d.Id
-WHERE d.NumeroSerie = '${numeroSerieValidador}'
+WHERE d.NumeroSerie = ?
 AND i.Estatus = 1
       `;
 
-      const instalacion = await this.turnosRepository.query(query);
+      const instalacion = await this.turnosRepository.query(query, [
+        numeroSerieValidador,
+      ]);
       if (instalacion.length === 0) {
         throw new NotFoundException(
           'No se ha encontrado la instalación asignada al validador.',
@@ -1221,14 +1223,16 @@ ORDER BY t.Inicio DESC;
 
       const query = `
       SELECT
-	i.Id 
+	i.Id
 FROM Validadores d
 LEFT JOIN Instalaciones i ON i.idValidador = d.Id
-WHERE d.NumeroSerie = '${numeroSerieValidador}'
+WHERE d.NumeroSerie = ?
 AND i.Estatus = 1
       `;
 
-      const instalacion = await this.turnosRepository.query(query);
+      const instalacion = await this.turnosRepository.query(query, [
+        numeroSerieValidador,
+      ]);
       if (instalacion.length === 0) {
         throw new NotFoundException(
           'No se ha encontrado la instalación asignada al validador.',

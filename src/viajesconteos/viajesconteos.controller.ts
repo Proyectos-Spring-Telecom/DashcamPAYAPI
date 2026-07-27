@@ -11,12 +11,15 @@ import {
 import { ViajesconteosService } from './viajesconteos.service';
 import { CreateViajesconteoDto } from './dto/create-viajesconteo.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Viajes conteos')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('viajesconteos')
+@TenantResource('viaje')
 export class ViajesconteosController {
   constructor(private readonly viajesconteosService: ViajesconteosService) {}
 

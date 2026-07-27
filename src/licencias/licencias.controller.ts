@@ -18,6 +18,8 @@ import { LicenciasService } from './licencias.service';
 import { CreateLicenciaDto } from './dto/create-licencia.dto';
 import { UpdateLicenciaDto } from './dto/update-licencia.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
   ApiBearerAuth,
   ApiTags,
@@ -28,8 +30,9 @@ import {
 
 @ApiTags('Licencias')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('licencias')
+@TenantResource('licencia')
 export class LicenciasController {
   constructor(private readonly licenciasService: LicenciasService) {}
 

@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ValidadoresService } from 'src/validadores/validadores.service';
@@ -23,8 +25,9 @@ import { UpdateValidadorEstadoDto } from 'src/validadores/dto/update-validador-e
 
 @ApiTags('Validadores')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('validadores')
+@TenantResource('validador')
 export class ValidadoresController {
   constructor(private readonly validadoresService: ValidadoresService) {}
 
@@ -49,6 +52,7 @@ export class ValidadoresController {
   }
 
   @Get('by-cliente/:idCliente')
+  @TenantResource({ resolver: 'cliente', idParam: 'idCliente' })
   async findByCliente(
     @Param('idCliente', ParseIntPipe) idCliente: number,
     @Request() req,
@@ -63,6 +67,7 @@ export class ValidadoresController {
   }
 
   @Get('clientes/:id')
+  @TenantResource({ resolver: 'cliente', idParam: 'id' })
   async findAllValidadoresClientes(
     @Param('id', ParseIntPipe) id: number,
     @Request() req,

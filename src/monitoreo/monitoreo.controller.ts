@@ -10,6 +10,8 @@ import {
 } from '@nestjs/common';
 import { MonitoreoService } from './monitoreo.service';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -20,12 +22,13 @@ import { RecorridoMonitoreoDto } from './dto/recorrido-monitoreo.dto';
 
 @ApiTags('Monitoreo')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('monitoreo')
 export class MonitoreoController {
   constructor(private readonly monitoreoService: MonitoreoService) {}
 
   @Get('list/:cliente')
+  @TenantResource({ resolver: 'cliente', idParam: 'cliente' })
   findListPosiciones(
     @Param('cliente', ParseIntPipe) cliente: number,
     @Request() req,

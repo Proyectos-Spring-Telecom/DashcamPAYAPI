@@ -15,6 +15,8 @@ import { ClientesService } from './clientes.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { UpdateClienteEstatusDto } from './dto/update-clientes-estatus.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import {
@@ -51,7 +53,7 @@ export class ClientesController {
   // 🔹 ENDPOINTS PRIVADOS - CON AUTENTICACIÓN
   // ========================================
   @ApiBearerAuth('bearer-token')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   //Crear cliente
   @Post()
   async createCliente(
@@ -63,7 +65,7 @@ export class ClientesController {
   }
   //Obtener todos los clientes
   @Get('list')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   async getAllListClientes(@Request() req): Promise<ApiResponseCommon> {
     console.log(req.user, 'REQ');
     if (!req.user) {
@@ -84,7 +86,8 @@ export class ClientesController {
 
   //Obtener todos los clientes
   @Get('list/:cliente')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @TenantResource({ resolver: 'cliente', idParam: 'cliente' })
   async getAllListClientesId(
     @Param('cliente', ParseIntPipe) cliente: number,
     @Request() req,
@@ -96,7 +99,7 @@ export class ClientesController {
 
   //Obtener todos los clientes con paginado
   @Get(':page/:limit')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   getAllClientes(
     @Param('page', ParseIntPipe) page: number,
     @Param('limit', ParseIntPipe) limit: number,
@@ -116,7 +119,8 @@ export class ClientesController {
 
   //Obtener solo un cliente
   @Get(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @TenantResource('cliente')
   getOneCliente(@Param('id') id: string, @Request() req) {
     const _cliente = req.user.cliente;
     const _idUser = req.user.userId;
@@ -126,7 +130,8 @@ export class ClientesController {
 
   //Actualizar el estatus del cliente
   @Patch('estatus/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @TenantResource('cliente')
   updateEstatusClientes(
     @Param('id') id: string,
     @Request() req,
@@ -144,7 +149,8 @@ export class ClientesController {
 
   //Actualizar un cliente
   @Put(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @TenantResource('cliente')
   async updateCliente(
     @Param('id') id: string,
     @Request() req,
@@ -160,7 +166,8 @@ export class ClientesController {
 
   //Eliminar Cliente
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @TenantResource('cliente')
   async removeClientes(
     @Param('id') id: string,
     @Request() req,

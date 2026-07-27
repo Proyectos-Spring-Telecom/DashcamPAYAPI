@@ -23,13 +23,16 @@ import { UsuariosinstalacionesService } from './usuariosinstalaciones.service';
 import { CreateUsuariosInstalacionesDto } from './dto/create-usuariosinstalacione.dto';
 import { UpdateUsuariosinstalacioneDto } from './dto/update-usuariosinstalacione.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse } from 'src/common/ApiResponse';
 import { UpdateUsuariosInstalacionesEstatusDto } from './dto/update-usuariosinstalacione-estatus.dto';
 
 @ApiTags('Usuarios instalaciones')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('usuariosinstalaciones')
+@TenantResource('usuarioInstalacion')
 export class UsuariosinstalacionesController {
   constructor(
     private readonly usuariosinstalacionesService: UsuariosinstalacionesService,
@@ -91,6 +94,7 @@ export class UsuariosinstalacionesController {
   }
 
   @Get('usuario/:idUsuario')
+  @TenantResource({ resolver: 'usuario', idParam: 'idUsuario' })
   @ApiOperation({
     summary: 'Obtener instalaciones por usuario',
     description:
@@ -184,6 +188,7 @@ export class UsuariosinstalacionesController {
   }
 
   @Put(':idUsuario')
+  @TenantResource({ resolver: 'usuario', idParam: 'idUsuario' })
   @ApiOperation({
     summary: 'Actualizar relación usuario-instalación',
     description:

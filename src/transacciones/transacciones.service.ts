@@ -1097,6 +1097,33 @@ export class TransaccionesService {
       // 1?? Cambiamos estado a VALIDANDO_SALDO
       estado = transicionarEstado(estado, EventoTransaccion.CREAR);
 
+      // 1.1?? Idempotencia: si el dispositivo reintenta el mismo cobro con la
+      // misma claveIdempotencia, devolvemos la transacción ya registrada en
+      // lugar de volver a cobrar. Cubre el reintento del dispositivo (secuencial).
+      const claveIdempotencia =
+        createTransaccioneDebitoDto.claveIdempotencia?.trim() || null;
+      if (claveIdempotencia) {
+        const transaccionPrevia =
+          await this.transaccionesdebitoRepository.findOne({
+            where: { claveIdempotencia },
+            order: { id: 'ASC' },
+          });
+
+        if (transaccionPrevia) {
+          console.log(
+            `[POST_DEBITO] Reintento idempotente (clave: ${claveIdempotencia}). Se devuelve la transacción existente ID: ${transaccionPrevia.id} sin volver a cobrar.`,
+          );
+          return {
+            status: 'success',
+            message: 'Transacción ya procesada (idempotencia)',
+            data: {
+              id: Number(transaccionPrevia.id),
+              nombre: transaccionPrevia.numeroSerieMonedero || '',
+            },
+          };
+        }
+      }
+
       // 2?? Buscamos el monedero
       let monedero;
       if (createTransaccioneDebitoDto.esQR === true) {
@@ -1370,25 +1397,24 @@ export class TransaccionesService {
               }
             }
 
-            // Validar saldo
-            const saldoActual = Number(monedero.saldo);
-            const montoFinal = saldoActual - montoConDescuento;
+            // Descuento ATÓMICO del saldo al cerrar la transacción abierta.
+            // Descuenta y valida el saldo en una sola sentencia con lock de fila,
+            // evitando el doble-cobro por concurrencia (last-write-wins).
+            const descontado =
+              await this.monederosService.descontarSaldoAtomico(
+                monedero.numeroSerie,
+                montoConDescuento,
+                idUser,
+              );
 
-            if (montoFinal < 0) {
+            if (!descontado) {
               throw new BadRequestException(
                 `Saldo insuficiente para cerrar transacción abierta ID: ${transaccionAbierta.id}`,
               );
             }
 
-            // Actualizar saldo del monedero
-            await this.monederosService.updateMonederoSaldo(
-              monedero.numeroSerie,
-              idUser,
-              montoFinal,
-            );
-
             // Actualizar monedero local para reflejar el nuevo saldo
-            monedero.saldo = montoFinal;
+            monedero.saldo = Number(monedero.saldo) - montoConDescuento;
 
             // Obtener fecha actual con desfase de -6 horas
             const ahora = new Date();
@@ -1938,25 +1964,24 @@ export class TransaccionesService {
                     }
                   }
 
-                  // Validar saldo
-                  const saldoActual = Number(monedero.saldo);
-                  const montoFinal = saldoActual - montoConDescuento;
+                  // Descuento ATÓMICO del saldo al cerrar la transacción abierta
+                  // física. Descuenta y valida en una sola sentencia con lock de
+                  // fila, evitando el doble-cobro por concurrencia.
+                  const descontado =
+                    await this.monederosService.descontarSaldoAtomico(
+                      monedero.numeroSerie,
+                      montoConDescuento,
+                      idUser,
+                    );
 
-                  if (montoFinal < 0) {
+                  if (!descontado) {
                     throw new BadRequestException(
                       `Saldo insuficiente para cerrar transacción abierta física ID: ${transaccionAbiertaFisica.id}`,
                     );
                   }
 
-                  // Actualizar saldo del monedero
-                  await this.monederosService.updateMonederoSaldo(
-                    monedero.numeroSerie,
-                    idUser,
-                    montoFinal,
-                  );
-
                   // Actualizar monedero local para reflejar el nuevo saldo
-                  monedero.saldo = montoFinal;
+                  monedero.saldo = Number(monedero.saldo) - montoConDescuento;
 
                   // Obtener fecha actual con desfase de -6 horas
                   const fechaHoraFinal = fechaHoraActual
@@ -2568,72 +2593,23 @@ export class TransaccionesService {
           EventoTransaccion.SALDO_INSUFICIENTE,
         );
 
-        // Guardar transacci?n rechazada
-        const newTransaccion = this.transaccionesdebitoRepository.create({
-          idTipoTransaccion: EnumTipoTransaccion.RECHAZO,
-          monto: montoTotalAValidar, // Monto total que se intentó validar
-          controlTransaccion: EnumControlTransacciones.PAGADO,
-          latitudInicial: createTransaccioneDebitoDto.latitud,
-          longitudInicial: createTransaccioneDebitoDto.longitud,
-          distanciaInicialKm: distanciaInicialKmFinal,
-          fechaHoraInicio: fechaHoraInicio,
-          numeroSerieMonedero: monedero.numeroSerie,
-          numeroSerieValidador:
-            createTransaccioneDebitoDto.numeroSerieValidador,
-          numeroTransbordo,
-          idViaje: idViaje,
-          esQR: createTransaccioneDebitoDto.esQR ? 1 : 0,
-          cobroMaximo: cobroMaximo,
-          descuentoTransbordo:
-            costoTransbordo !== null && costoTransbordo !== undefined
-              ? parseFloat(costoTransbordo.toFixed(2))
-              : null,
-          tipoDescuentoTransbordo:
-            tipoDescuentoTransbordo !== null &&
-            tipoDescuentoTransbordo !== undefined
-              ? Number(tipoDescuentoTransbordo)
-              : null,
-          esMultiple: createTransaccioneDebitoDto.esMultiple ? 1 : 0,
-        });
-        await this.transaccionesdebitoRepository.save(newTransaccion);
-
-        //se guarda en el historico
-        await this.historicoTransaccionesDebitoRepository.save(newTransaccion);
-
-        // Registrar en bit?cora
-        const tipoTarifaTexto =
-          tipoTarifa === EnumTipoTarifa.FIJA
-            ? 'FIJA'
-            : tipoTarifa === EnumTipoTarifa.ABIERTA
-              ? 'ABIERTA'
-              : 'OTRO';
-        const mensajeRechazo =
-          cantidadPasajes > 1
-            ? `${cantidadPasajes} transacciones de débito RECHAZADAS por saldo insuficiente (Tarifa ${tipoTarifaTexto})`
-            : `Transacción de débito RECHAZADA por saldo insuficiente (Tarifa ${tipoTarifaTexto})`;
-
-        const detalleMonto =
-          tipoTarifa === EnumTipoTarifa.ABIERTA
-            ? `cobro máximo de $${(cobroMaximo || 0).toFixed(2)} por pasaje`
-            : `monto de $${montoConDescuento.toFixed(2)} por pasaje`;
-
-        await this.bitacoraLogger.logToBitacora(
-          'Transacciones',
-          mensajeRechazo,
-          'CREATE',
-          { createTransaccioneDebitoDto },
+        // Rechazo temprano (saldo claramente insuficiente según el saldo leído).
+        await this.registrarRechazoSaldoInsuficiente({
+          dto: createTransaccioneDebitoDto,
           idUser,
-          EnumModulos.TRANSACCIONES,
-          EstatusEnumBitcora.ERROR,
-          `Saldo insuficiente. Se intentó validar $${montoTotalAValidar.toFixed(2)} (${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} con ${detalleMonto})`,
-        );
-
-        const mensajeError =
-          tipoTarifa === EnumTipoTarifa.ABIERTA
-            ? `Saldo insuficiente. Se requiere $${montoTotalAValidar.toFixed(2)} para ${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} (cobro máximo: $${(cobroMaximo || 0).toFixed(2)} por pasaje)`
-            : `Saldo insuficiente. Se requiere $${montoTotalAValidar.toFixed(2)} para ${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} (monto: $${montoConDescuento.toFixed(2)} por pasaje)`;
-
-        throw new BadRequestException(mensajeError);
+          monedero,
+          montoTotalAValidar,
+          montoConDescuento,
+          cantidadPasajes,
+          tipoTarifa,
+          cobroMaximo,
+          distanciaInicialKmFinal,
+          fechaHoraInicio,
+          numeroTransbordo,
+          idViaje,
+          costoTransbordo,
+          tipoDescuentoTransbordo,
+        });
       }
 
       // 5?? Si saldo OK, actualizamos el monedero y estado
@@ -2643,32 +2619,62 @@ export class TransaccionesService {
       // Para tarifas FIJA: usar montoConDescuento
       // Para tarifas ABIERTA: no se descuenta el saldo todavía
       const montoTotalADescontar = montoConDescuento * cantidadPasajes;
-      const montoFinalParaMonedero =
-        Number(monedero.saldo) - montoTotalADescontar;
 
       // Solo actualizar el saldo del monedero si la transacci?n es PAGADO
       // Si es ABIERTA, no se descuenta el saldo todav?a
       let montoAGuardar = 0;
       if (controlTransaccion === EnumControlTransacciones.PAGADO) {
         console.log(
-          '[TRANSACCIONES] ===== ACTUALIZANDO SALDO DEL MONEDERO =====',
+          '[TRANSACCIONES] ===== DESCONTANDO SALDO DEL MONEDERO (ATÓMICO) =====',
         );
         console.log(
           `[TRANSACCIONES] Número de serie del monedero: ${monedero.numeroSerie}`,
         );
         console.log(
-          `[TRANSACCIONES] Saldo que se va a guardar en el monedero: $${montoFinalParaMonedero.toFixed(2)}`,
+          `[TRANSACCIONES] Monto a descontar: $${montoTotalADescontar.toFixed(2)}`,
         );
         console.log(`[TRANSACCIONES] Control transacción: PAGADO`);
 
-        await this.monederosService.updateMonederoSaldo(
+        // Descuento ATÓMICO: el UPDATE condicional (Saldo = Saldo - monto
+        // WHERE Saldo >= monto) descuenta y valida el saldo en una sola sentencia
+        // con lock de fila. Evita el doble-cargo cuando dos peticiones concurrentes
+        // leían el mismo saldo y la última escritura pisaba a la anterior.
+        const descontado = await this.monederosService.descontarSaldoAtomico(
           monedero.numeroSerie,
+          montoTotalADescontar,
           idUser,
-          montoFinalParaMonedero,
         );
 
+        if (!descontado) {
+          // Otra petición concurrente consumió el saldo entre la validación y el
+          // cobro. Registramos el rechazo y abortamos (lanza BadRequestException).
+          estado = transicionarEstado(
+            estado,
+            EventoTransaccion.SALDO_INSUFICIENTE,
+          );
+          await this.registrarRechazoSaldoInsuficiente({
+            dto: createTransaccioneDebitoDto,
+            idUser,
+            monedero,
+            montoTotalAValidar,
+            montoConDescuento,
+            cantidadPasajes,
+            tipoTarifa,
+            cobroMaximo,
+            distanciaInicialKmFinal,
+            fechaHoraInicio,
+            numeroTransbordo,
+            idViaje,
+            costoTransbordo,
+            tipoDescuentoTransbordo,
+          });
+        }
+
+        // Mantener coherente el saldo local para logs/lógica posterior.
+        monedero.saldo = Number(monedero.saldo) - montoTotalADescontar;
+
         console.log(
-          '[TRANSACCIONES] Saldo del monedero actualizado exitosamente',
+          '[TRANSACCIONES] Saldo del monedero descontado atómicamente',
         );
         console.log(
           '[TRANSACCIONES] =================================================',
@@ -2738,10 +2744,42 @@ export class TransaccionesService {
               ? Number(tipoDescuentoTransbordo)
               : null,
           esMultiple: createTransaccioneDebitoDto.esMultiple ? 1 : 0,
+          // La clave de idempotencia se guarda solo en la primera transacción
+          // (el índice único no permitiría repetirla en los pasajes múltiples).
+          claveIdempotencia: i === 0 ? claveIdempotencia : null,
         });
 
-        const transaccionSave =
-          await this.transaccionesdebitoRepository.save(newTransaccion);
+        let transaccionSave: TransaccionesDebito;
+        try {
+          transaccionSave =
+            await this.transaccionesdebitoRepository.save(newTransaccion);
+        } catch (error) {
+          // Backstop de idempotencia: el índice único sobre ClaveIdempotencia
+          // impide registrar dos veces la misma clave si dos peticiones entran
+          // casi al mismo tiempo. Ante el duplicado devolvemos la transacción ya
+          // registrada en vez de propagar el error.
+          if (
+            claveIdempotencia &&
+            i === 0 &&
+            (error?.code === 'ER_DUP_ENTRY' || error?.errno === 1062)
+          ) {
+            const previa = await this.transaccionesdebitoRepository.findOne({
+              where: { claveIdempotencia },
+              order: { id: 'ASC' },
+            });
+            if (previa) {
+              return {
+                status: 'success',
+                message: 'Transacción ya procesada (idempotencia)',
+                data: {
+                  id: Number(previa.id),
+                  nombre: previa.numeroSerieMonedero || '',
+                },
+              };
+            }
+          }
+          throw error;
+        }
         transaccionesCreadas.push(Number(transaccionSave.id));
 
         // Se guardará la transacción en el historico de transacciones solamente cuando controltransaccion sea pagado
@@ -2848,6 +2886,114 @@ export class TransaccionesService {
         `Error al generar la transacción de débito`,
       );
     }
+  }
+
+  /**
+   * Registra una transacción de RECHAZO por saldo insuficiente (en la tabla de
+   * transacciones, en el histórico y en la bitácora) y lanza una
+   * BadRequestException con el mensaje correspondiente.
+   *
+   * Se usa tanto en la validación temprana (saldo leído insuficiente) como
+   * cuando el descuento atómico falla por una carrera con otra petición.
+   */
+  private async registrarRechazoSaldoInsuficiente(params: {
+    dto: CreateTransaccioneDebitoDto;
+    idUser: number;
+    monedero: Monederos;
+    montoTotalAValidar: number;
+    montoConDescuento: number;
+    cantidadPasajes: number;
+    tipoTarifa: number;
+    cobroMaximo: number | null;
+    distanciaInicialKmFinal: number;
+    fechaHoraInicio: Date;
+    numeroTransbordo: number | null;
+    idViaje: number | null;
+    costoTransbordo: number | null;
+    tipoDescuentoTransbordo: number | null;
+  }): Promise<never> {
+    const {
+      dto,
+      idUser,
+      monedero,
+      montoTotalAValidar,
+      montoConDescuento,
+      cantidadPasajes,
+      tipoTarifa,
+      cobroMaximo,
+      distanciaInicialKmFinal,
+      fechaHoraInicio,
+      numeroTransbordo,
+      idViaje,
+      costoTransbordo,
+      tipoDescuentoTransbordo,
+    } = params;
+
+    // Guardar transacción rechazada
+    const newTransaccion = this.transaccionesdebitoRepository.create({
+      idTipoTransaccion: EnumTipoTransaccion.RECHAZO,
+      monto: montoTotalAValidar, // Monto total que se intentó validar
+      controlTransaccion: EnumControlTransacciones.PAGADO,
+      latitudInicial: dto.latitud,
+      longitudInicial: dto.longitud,
+      distanciaInicialKm: distanciaInicialKmFinal,
+      fechaHoraInicio: fechaHoraInicio,
+      numeroSerieMonedero: monedero.numeroSerie,
+      numeroSerieValidador: dto.numeroSerieValidador,
+      numeroTransbordo,
+      idViaje: idViaje,
+      esQR: dto.esQR ? 1 : 0,
+      cobroMaximo: cobroMaximo,
+      descuentoTransbordo:
+        costoTransbordo !== null && costoTransbordo !== undefined
+          ? parseFloat(costoTransbordo.toFixed(2))
+          : null,
+      tipoDescuentoTransbordo:
+        tipoDescuentoTransbordo !== null &&
+        tipoDescuentoTransbordo !== undefined
+          ? Number(tipoDescuentoTransbordo)
+          : null,
+      esMultiple: dto.esMultiple ? 1 : 0,
+    });
+    await this.transaccionesdebitoRepository.save(newTransaccion);
+
+    //se guarda en el historico
+    await this.historicoTransaccionesDebitoRepository.save(newTransaccion);
+
+    // Registrar en bitácora
+    const tipoTarifaTexto =
+      tipoTarifa === EnumTipoTarifa.FIJA
+        ? 'FIJA'
+        : tipoTarifa === EnumTipoTarifa.ABIERTA
+          ? 'ABIERTA'
+          : 'OTRO';
+    const mensajeRechazo =
+      cantidadPasajes > 1
+        ? `${cantidadPasajes} transacciones de débito RECHAZADAS por saldo insuficiente (Tarifa ${tipoTarifaTexto})`
+        : `Transacción de débito RECHAZADA por saldo insuficiente (Tarifa ${tipoTarifaTexto})`;
+
+    const detalleMonto =
+      tipoTarifa === EnumTipoTarifa.ABIERTA
+        ? `cobro máximo de $${(cobroMaximo || 0).toFixed(2)} por pasaje`
+        : `monto de $${montoConDescuento.toFixed(2)} por pasaje`;
+
+    await this.bitacoraLogger.logToBitacora(
+      'Transacciones',
+      mensajeRechazo,
+      'CREATE',
+      { createTransaccioneDebitoDto: dto },
+      idUser,
+      EnumModulos.TRANSACCIONES,
+      EstatusEnumBitcora.ERROR,
+      `Saldo insuficiente. Se intentó validar $${montoTotalAValidar.toFixed(2)} (${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} con ${detalleMonto})`,
+    );
+
+    const mensajeError =
+      tipoTarifa === EnumTipoTarifa.ABIERTA
+        ? `Saldo insuficiente. Se requiere $${montoTotalAValidar.toFixed(2)} para ${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} (cobro máximo: $${(cobroMaximo || 0).toFixed(2)} por pasaje)`
+        : `Saldo insuficiente. Se requiere $${montoTotalAValidar.toFixed(2)} para ${cantidadPasajes} pasaje${cantidadPasajes > 1 ? 's' : ''} (monto: $${montoConDescuento.toFixed(2)} por pasaje)`;
+
+    throw new BadRequestException(mensajeError);
   }
 
   //funcion para obtener los clientes hijos
