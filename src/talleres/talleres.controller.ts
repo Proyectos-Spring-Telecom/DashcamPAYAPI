@@ -14,13 +14,16 @@ import { TalleresService } from './talleres.service';
 import { CreateTallereDto } from './dto/create-tallere.dto';
 import { UpdateTallereDto } from './dto/update-tallere.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Talleres')
 @ApiBearerAuth('bearer-token')
 @Controller('talleres')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@TenantResource('taller')
 export class TalleresController {
   constructor(private readonly talleresService: TalleresService) {}
 

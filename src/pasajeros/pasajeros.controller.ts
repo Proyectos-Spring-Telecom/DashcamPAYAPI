@@ -19,6 +19,8 @@ import { CreatePasajeroDto } from './dto/create-pasajero.dto';
 import { UpdatePasajeroDto } from './dto/update-pasajero.dto';
 import { UpdatePasajeroEstatusDto } from './dto/update-pasajeros-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdatePasajeroEstadoSolicitudDto } from './dto/update-pasajeros-estado-solicitud.dto';
 import { UpdatePasajeroCustomerIdDto } from './dto/update-pasajero-customer-id.dto';
@@ -36,8 +38,9 @@ import * as multer from 'multer';
 
 @ApiTags('Pasajeros')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('pasajeros')
+@TenantResource('pasajero')
 export class PasajerosController {
   constructor(private readonly pasajerosService: PasajerosService) {}
 

@@ -22,11 +22,14 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Mantenimiento combustible')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('mantenimiento-combustible')
+@TenantResource('mantenimientoCombustible')
 export class MantenimientoCombustibleController {
   constructor(
     private readonly mantenimientoCombustibleService: MantenimientoCombustibleService,

@@ -14,6 +14,8 @@ import {
 import { ConteopasajerosService } from './conteopasajeros.service';
 import { CreateConteoPasajerosDto } from './dto/create-conteopasajero.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UpdateConteoPasajerosDto } from './dto/update-conteopasajero.dto';
@@ -26,7 +28,7 @@ export class ConteopasajerosController {
     private readonly conteopasajerosService: ConteopasajerosService,
   ) {}
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Post()
   async create(
     @Body() createConteopasajeroDto: CreateConteoPasajerosDto,
@@ -39,7 +41,7 @@ export class ConteopasajerosController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Patch()
   async update(
     @Body() updateConteoPasajerosDto: UpdateConteoPasajerosDto,
@@ -52,13 +54,13 @@ export class ConteopasajerosController {
   }
 
   // RUTAS ESPECÍFICAS PRIMERO (orden correcto)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('list')
   async findAllList(): Promise<ApiResponseCommon> {
     return await this.conteopasajerosService.findAllList();
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('hoy')
   async findToday(
     @Query('page') page: number,
@@ -69,7 +71,7 @@ export class ConteopasajerosController {
 
   // 📅 5. OBTENER DATOS DE LA ÚLTIMA SEMANA
   // GET /conteo-pasajeros/ultima-semana
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('ultima-semana')
   async findLastWeek(
     @Query('page') page: number,
@@ -79,7 +81,7 @@ export class ConteopasajerosController {
   }
 
   // 🗓️ 1. OBTENER DATOS DE UN DÍA ESPECÍFICO
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('fecha/:fecha')
   async findByDate(
     @Param('fecha') fecha: string,
@@ -93,7 +95,7 @@ export class ConteopasajerosController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('rango/:fechaInicio/:fechaFin')
   async findByDateRange(
     @Param('fechaInicio') fechaInicio: string,
@@ -116,7 +118,7 @@ export class ConteopasajerosController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('rango-agrupado/:fechaInicio/:fechaFin')
   async findByDateRangeAgrupado(
     @Param('fechaInicio') fechaInicio: string,
@@ -135,7 +137,7 @@ export class ConteopasajerosController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('fecha-hora/:fecha/:hora')
   async findByDateTime(
     @Param('fecha') fecha: string,
@@ -185,13 +187,13 @@ export class ConteopasajerosController {
   }
 
   // Resúmenes (sin paginación)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('resumen-horas/:fecha')
   async getHourlySummary(@Param('fecha') fecha: string): Promise<any[]> {
     return await this.conteopasajerosService.getHourlySummary(fecha);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('resumen-diario/:year/:month')
   async getDailySummary(
     @Param('year', ParseIntPipe) year: number,
@@ -201,7 +203,7 @@ export class ConteopasajerosController {
   }
 
   // RUTAS DINÁMICAS AL FINAL
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get(':page/:limit')
   findAll(
     @Param('page', ParseIntPipe) page: number,
@@ -220,8 +222,9 @@ export class ConteopasajerosController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get(':id')
+  @TenantResource('conteoPasajero')
   findOne(@Param('id') id: string) {
     return this.conteopasajerosService.findOne(+id);
   }

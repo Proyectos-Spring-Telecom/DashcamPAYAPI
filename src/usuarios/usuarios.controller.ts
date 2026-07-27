@@ -20,6 +20,8 @@ import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
 import { UpdateUsuarioEstatusDto } from './dto/update-usuario-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import {
   ApiOperation,
@@ -34,10 +36,11 @@ import { UpdateUsuarioOperadorDto } from './dto/update-usuario-operador.dto';
 import { UpdateUsuarioContrasena } from './dto/update-usuario-contrasena.dto';
 import { UpdateUsuarioValidadorDto } from './dto/update-usuario-validador.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @ApiTags('Usuarios')
 @ApiBearerAuth('bearer-token')
 @Controller('usuarios')
+@TenantResource('usuario')
 export class UsuariosController {
   constructor(private readonly usuariosService: UsuariosService) {}
 
@@ -88,6 +91,7 @@ export class UsuariosController {
   }
 
   @Get('list/rol/operador/:cliente')
+  @TenantResource({ resolver: 'cliente', idParam: 'cliente' })
   @ApiOperation({ summary: 'Obtener usuarios con rol operador' })
   @ApiResponse({ status: 200, description: 'Lista de usuarios operadores' })
   async findAllListOperador(
@@ -133,8 +137,8 @@ export class UsuariosController {
   // 🔹 PUT ROUTES (actualización completa)
   // ========================================
 
-  @Put('actualizar/contrasena/:id')
-  @ApiOperation({ summary: 'Cambiar contraseña de usuario' })
+  @Put('actualizar/contrasena')
+  @ApiOperation({ summary: 'Cambiar la contraseña del usuario autenticado' })
   @ApiResponse({
     status: 200,
     description: 'Contraseña actualizada exitosamente',
@@ -142,13 +146,14 @@ export class UsuariosController {
   @ApiResponse({ status: 400, description: 'Contraseña inválida' })
   @ApiResponse({ status: 404, description: 'Usuario no encontrado' })
   async updateContrasena(
-    @Param('id', ParseIntPipe) id: number,
     @Body() updateUsuarioContrasena: UpdateUsuarioContrasena,
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
+    // Seguridad: la contraseña que se cambia es SIEMPRE la del usuario
+    // autenticado (token). El endpoint ya no recibe ningún `:id`.
     return await this.usuariosService.updateContrasena(
-      id,
+      Number(idUser),
       idUser,
       updateUsuarioContrasena,
     );

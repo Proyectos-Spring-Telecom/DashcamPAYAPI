@@ -16,6 +16,8 @@ import { CreateZonasDto } from './dto/create-zona.dto';
 import { UpdateZonaDto } from './dto/update-zona.dto';
 import { UpdateZonasEstatusDto } from './dto/update-zona-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
   ApiBearerAuth,
   ApiTags,
@@ -26,8 +28,9 @@ import {
 
 @ApiTags('Zonas')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('zonas')
+@TenantResource('zona')
 export class ZonasController {
   constructor(private readonly zonasService: ZonasService) {}
 
@@ -48,6 +51,7 @@ export class ZonasController {
   }
 
   @Get('by-idCliente/:idCliente')
+  @TenantResource({ resolver: 'cliente', idParam: 'idCliente' })
   @ApiOperation({
     summary: 'Listar zonas por ID de cliente',
     description:
@@ -83,6 +87,7 @@ export class ZonasController {
   }
 
   @Get('by-cliente/:idCliente')
+  @TenantResource({ resolver: 'cliente', idParam: 'idCliente' })
   @ApiOperation({
     summary: 'Listar zonas por ID de cliente',
     description:

@@ -15,6 +15,8 @@ import { VariantesService } from './variantes.service';
 import { CreateVarianteDto } from './dto/create-variante.dto';
 import { UpdateVarianteDto } from './dto/update-variante.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { UpdateVariantesEstatusDto } from './dto/update-variante-estatus.dto';
 import {
   ApiBearerAuth,
@@ -26,8 +28,9 @@ import {
 
 @ApiTags('Variantes')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('variantes')
+@TenantResource('variante')
 export class VariantesController {
   constructor(private readonly variantesService: VariantesService) {}
 
@@ -74,6 +77,7 @@ export class VariantesController {
   }
 
   @Get('by-ruta/:idRuta')
+  @TenantResource({ resolver: 'ruta', idParam: 'idRuta' })
   @ApiOperation({
     summary: 'Listar variantes por ID de ruta',
     description:

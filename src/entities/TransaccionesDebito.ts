@@ -20,6 +20,9 @@ import { applySchema } from 'src/common/apply-schema.decorator';
   'numeroSerieValidador',
 ])
 @Index('FK_TransaccionesDebito_Viajes', ['idViaje'], {})
+@Index('UQ_TransaccionesDebito_ClaveIdempotencia', ['claveIdempotencia'], {
+  unique: true,
+})
 @Entity('TransaccionesDebito')
 export class TransaccionesDebito {
   @PrimaryGeneratedColumn({ type: 'bigint', name: 'Id' })
@@ -130,6 +133,13 @@ export class TransaccionesDebito {
 
   @Column('tinyint', { name: 'EsMultiple', nullable: true })
   esMultiple: number | null;
+
+  @Column('varchar', {
+    name: 'ClaveIdempotencia',
+    length: 100,
+    nullable: true,
+  })
+  claveIdempotencia: string | null;
 
   @ManyToOne(() => Viajes, (viajes) => viajes, {
     onDelete: 'NO ACTION',

@@ -13,6 +13,8 @@ import { PosicionesService } from './posiciones.service';
 import { CreatePosicionesDto } from './dto/create-posicione.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UpdatePosicionesDto } from './dto/update-posicione.dto';
 
@@ -28,6 +30,7 @@ export class PosicionesController {
   }
 
   @Patch(':id')
+  @TenantResource('posicion')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updatePosicionesDto: UpdatePosicionesDto,
@@ -35,7 +38,7 @@ export class PosicionesController {
     return this.posicionesService.update(id, updatePosicionesDto);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('list')
   async findAllList(@Request() req): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
@@ -44,7 +47,7 @@ export class PosicionesController {
     return await this.posicionesService.findAllList(+idUser, +cliente, +rol);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get(':page/:limit')
   async findAll(
     @Param('page', ParseIntPipe) page: number,
@@ -63,8 +66,9 @@ export class PosicionesController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get(':id')
+  @TenantResource('posicion')
   findOne(@Param('id') id: string) {
     return this.posicionesService.findOne(+id);
   }

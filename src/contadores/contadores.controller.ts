@@ -16,14 +16,17 @@ import { CreateContadoresDto } from './dto/create-contadores.dto';
 import { UpdateContadoresDto } from './dto/update-contadores.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { UpdateContadoresEstatusDto } from './dto/update-contadores-estatus.dto';
 import { UpdateContadoresEstadoDto } from './dto/update-contadores.estado.dto';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Contadores')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('contadores')
+@TenantResource('contador')
 export class ContadoresController {
   constructor(private readonly contadoresService: ContadoresService) {}
 
@@ -45,6 +48,7 @@ export class ContadoresController {
   }
 
   @Get('clientes/:id')
+  @TenantResource({ resolver: 'cliente', idParam: 'id' })
   async findAllContadoresClientes(
     @Param('id', ParseIntPipe) id: number,
     @Request() req,

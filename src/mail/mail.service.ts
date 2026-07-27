@@ -8,13 +8,24 @@ export class MailService {
   private transporter: nodemailer.Transporter;
 
   constructor() {
+    const smtpPassword =
+      process.env.SMTP_PASSWORD ||
+      process.env.E_MAIL_PASSWORD ||
+      process.env.E_MAIL_PASS;
+
+    if (!smtpPassword) {
+      throw new Error(
+        'Falta la contraseña SMTP: define SMTP_PASSWORD (o E_MAIL_PASSWORD / E_MAIL_PASS) en el entorno',
+      );
+    }
+
     this.transporter = nodemailer.createTransport({
       host: process.env.HOST, // o tu proveedor SMTP
       port: process.env.SMTP,
       secure: true,
       auth: {
         user: process.env.E_MAIL,
-        pass: 'system.EB9##',
+        pass: smtpPassword,
       },
     });
   }

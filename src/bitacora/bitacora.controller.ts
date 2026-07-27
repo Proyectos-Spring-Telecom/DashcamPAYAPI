@@ -10,13 +10,16 @@ import {
 } from '@nestjs/common';
 import { BitacoraLoggerService } from './bitacora.service';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
+import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Bitácora')
 @ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantOwnershipGuard)
 @Controller('bitacora')
+@TenantResource('bitacoraEntry')
 export class BitacoraController {
   constructor(private readonly bitacoraService: BitacoraLoggerService) {}
 
