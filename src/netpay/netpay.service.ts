@@ -572,10 +572,10 @@ export class NetpayService {
         preAuth: assignCardDto.preAuth ?? false,
       };
 
-      // cvv2 nunca se acepta desde el cliente. Se ignora por seguridad.
-      // if (assignCardDto.cvv2) {
-      //   payload.cvv2 = assignCardDto.cvv2;
-      // }
+      // cvv2 solo se reenvía a NetPay (no se guarda en BD)
+      if (assignCardDto.cvv2) {
+        payload.cvv2 = assignCardDto.cvv2;
+      }
 
       let idDireccionFinal: number | null = null;
 

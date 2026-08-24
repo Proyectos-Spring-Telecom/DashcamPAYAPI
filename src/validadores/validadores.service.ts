@@ -231,42 +231,8 @@ ORDER BY d.Id DESC;
         `);
           break;
 
-        case 3:
-          Validador = await this.validadoresRepository.query(
-            `
-        SELECT
-  -- Dispositivo
-  d.Id AS id,
-  d.NumeroSerie AS numeroSerie,
-  d.Marca AS marca,
-  d.Modelo AS modelo,
-  d.FechaCreacion AS fechaCreacion,
-  d.FechaActualizacion AS fechaActualizacion,
-  d.EstadoActual as estadoActual,
-  d.Estatus AS estatus,
-
-  -- Cliente
-  c.Id AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente
-
-FROM Validadores d
-INNER JOIN Clientes c ON d.IdCliente = c.Id
-
-WHERE d.IdCliente IN (?)
-  AND d.Estatus = 1
-  AND c.Estatus = 1
-
-ORDER BY d.Id DESC;
-        `,
-            [cliente],
-          );
-          break;
-
         default:
-          // Consulta de datos listado resto Usuario
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
           Validador = await this.validadoresRepository.query(
             `

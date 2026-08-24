@@ -21,7 +21,7 @@ export class MailService {
 
     this.transporter = nodemailer.createTransport({
       host: process.env.HOST, // o tu proveedor SMTP
-      port: process.env.SMTP,
+      port: Number(process.env.SMTP) || 465,
       secure: true,
       auth: {
         user: process.env.E_MAIL,
