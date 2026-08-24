@@ -3318,86 +3318,6 @@ AND td.EsQR = 1;
           );
           break;
 
-        case 3:
-        default:
-          //Usuarios Operador
-          transacciones = await this.transaccionesrecargaRepository.query(
-            `
-SELECT 
-    'DEBITO' AS origenTabla,
-    td.Id AS id,
-    ctt.Nombre AS tipoTransaccion,
-    td.Monto AS monto,
-    td.LatitudInicial AS latitudInicial,
-    td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
-    td.FechaHoraInicio AS fechaHoraInicio,
-    td.FechaHoraFinal AS fechaHoraFinal,
-    td.FHRegistro AS fhRegistro,
-    td.NumeroSerieMonedero AS numeroSerieMonedero,
-    td.NumeroSerieValidador AS numeroSerieValidador,
-    td.EsQR AS esQR,
-    NULL AS nombreMetodoPago,
-    c.Id AS idCliente,
-    c.Nombre AS nombreCliente,
-    c.ApellidoPaterno AS apellidoPaternoCliente,
-    c.ApellidoMaterno AS apellidoMaternoCliente,
-    d.Marca AS marcaDispositivo,
-    d.Modelo AS modeloDispositivo,
-    p.Id AS idPasajero,
-    p.Nombre AS nombrePasajero,
-    p.ApellidoPaterno AS apellidoPaternoPasajero,
-    p.ApellidoMaterno AS apellidoMaternoPasajero
-FROM ${entidadDebito} td
-LEFT JOIN CatTiposTransacciones ctt 
-    ON td.IdTipoTransaccion = ctt.Id
-LEFT JOIN Validadores d 
-    ON td.NumeroSerieValidador = d.NumeroSerie
-LEFT JOIN Monederos m 
-    ON td.NumeroSerieMonedero = m.NumeroSerie
-LEFT JOIN Pasajeros p 
-    ON m.IdPasajero = p.Id
-LEFT JOIN Clientes c
-    ON m.IdCliente = c.Id
-WHERE DATE(td.FHRegistro) BETWEEN ? AND ?
-AND (m.IdCliente = ? OR m.IdCliente IS NULL)
-AND td.EsQR = 1
-ORDER BY td.FHRegistro DESC
-LIMIT ? OFFSET ?;
-        `,
-            [
-              fechaInicio,
-              fechaFin,
-              Number(cliente),
-              Number(limit),
-              Number(offset),
-            ],
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.transaccionesrecargaRepository.query(
-            `
-SELECT COUNT(*) AS total
-FROM ${entidadDebito} td
-LEFT JOIN CatTiposTransacciones ctt 
-    ON td.IdTipoTransaccion = ctt.Id
-LEFT JOIN Validadores d 
-    ON td.NumeroSerieValidador = d.NumeroSerie
-LEFT JOIN Monederos m 
-    ON td.NumeroSerieMonedero = m.NumeroSerie
-LEFT JOIN Pasajeros p 
-    ON m.IdPasajero = p.Id
-LEFT JOIN Clientes c
-    ON m.IdCliente = c.Id
-WHERE DATE(td.FHRegistro) BETWEEN ? AND ?
-AND (m.IdCliente = ? OR m.IdCliente IS NULL)
-AND td.EsQR = 1;
-  `,
-            [fechaInicio, fechaFin, Number(cliente)],
-          );
-          break;
-
         case 9:
           //Datos por usuario
           const pasajero =
@@ -3497,10 +3417,8 @@ AND td.EsQR = 1;
 
           break;
 
-        case 2:
-        case 8:
-        case 10:
-          // Administrador, Reportes, Capturista - usar clienteHijos
+        default:
+          // Cualquier otro rol (admin, operador, etc.): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
 
           if (ids.length === 0) {
@@ -3875,156 +3793,6 @@ AND htr.IdUsuario = ?;
             );
           break;
 
-        case 3:
-        default:
-          //Usuarios Operador
-          transacciones = await this.transaccionesrecargaRepository.query(
-            `
-SELECT * FROM (
-SELECT 
-    'DEBITO' AS origenTabla,
-    td.Id AS id,
-    ctt.Nombre AS tipoTransaccion,
-    td.Monto AS monto,
-    td.LatitudInicial AS latitudInicial,
-    td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
-    td.FechaHoraInicio AS fechaHoraInicio,
-    td.FechaHoraFinal AS fechaHoraFinal,
-    td.FHRegistro AS fhRegistro,
-    td.NumeroSerieMonedero AS numeroSerieMonedero,
-    td.NumeroSerieValidador AS numeroSerieValidador,
-    td.EsQR AS esQR,
-    NULL AS nombreMetodoPago,
-    c.Id AS idCliente,
-    c.Nombre AS nombreCliente,
-    c.ApellidoPaterno AS apellidoPaternoCliente,
-    c.ApellidoMaterno AS apellidoMaternoCliente,
-    d.Marca AS marcaDispositivo,
-    d.Modelo AS modeloDispositivo,
-    p.Id AS idPasajero,
-    p.Nombre AS nombrePasajero,
-    p.ApellidoPaterno AS apellidoPaternoPasajero,
-    p.ApellidoMaterno AS apellidoMaternoPasajero
-FROM ${entidadDebito} td
-LEFT JOIN CatTiposTransacciones ctt 
-    ON td.IdTipoTransaccion = ctt.Id
-LEFT JOIN Validadores d 
-    ON td.NumeroSerieValidador = d.NumeroSerie
-LEFT JOIN Monederos m 
-    ON td.NumeroSerieMonedero = m.NumeroSerie
-LEFT JOIN Pasajeros p 
-    ON m.IdPasajero = p.Id
-LEFT JOIN Clientes c
-	ON m.IdCliente = c.Id
-WHERE DATE(td.FHRegistro) BETWEEN ? AND ?
-AND (m.IdCliente = ? OR m.IdCliente IS NULL)
-UNION ALL
-SELECT 
-    'RECARGA' AS origenTabla,
-    tr.Id AS id,
-    ctt.Nombre AS tipoTransaccion,
-    tr.Monto AS monto,
-    NULL AS latitudInicial,
-    NULL AS longitudInicial,
-    tr.LatitudFinal AS latitudFinal,
-    tr.LongitudFinal AS longitudFinal,
-    NULL AS fechaHoraInicio,
-    tr.FechaHoraFinal AS fechaHoraFinal,
-    tr.FHRegistro AS fhRegistro,
-    tr.NumeroSerieMonedero AS numeroSerieMonedero,
-    tr.NumeroSerieValidador AS numeroSerieValidador,
-    NULL AS esQR,
-    COALESCE(cmp.Nombre, 'Efectivo') AS nombreMetodoPago,
-    c.Id AS idCliente,
-    c.Nombre AS nombreCliente,
-    c.ApellidoPaterno AS apellidoPaternoCliente,
-    c.ApellidoMaterno AS apellidoMaternoCliente,
-    d.Marca AS marcaDispositivo,
-    d.Modelo AS modeloDispositivo,
-    p.Id AS idPasajero,
-    p.Nombre AS nombrePasajero,
-    p.ApellidoPaterno AS apellidoPaternoPasajero,
-    p.ApellidoMaterno AS apellidoMaternoPasajero
-FROM ${entidadRecarga} tr
-LEFT JOIN CatTiposTransacciones ctt 
-    ON tr.IdTipoTransaccion = ctt.Id
-LEFT JOIN CatMetodoPago cmp 
-    ON tr.IdMetodoPago = cmp.Id
-LEFT JOIN Validadores d 
-    ON tr.NumeroSerieValidador = d.NumeroSerie
-LEFT JOIN Monederos m 
-    ON tr.NumeroSerieMonedero = m.NumeroSerie
-LEFT JOIN Pasajeros p 
-    ON m.IdPasajero = p.Id
-LEFT JOIN Clientes c
-	ON m.IdCliente = c.Id
-WHERE DATE(tr.FHRegistro) BETWEEN ? AND ?
-AND (m.IdCliente = ? OR m.IdCliente IS NULL)
-) AS todas_transacciones
-ORDER BY todas_transacciones.fhRegistro DESC
-LIMIT ? OFFSET ?;
-        `,
-            [
-              fechaInicio,
-              fechaFin,
-              Number(cliente),
-              fechaInicio,
-              fechaFin,
-              Number(cliente),
-              Number(limit),
-              Number(offset),
-            ],
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.transaccionesrecargaRepository.query(
-            `
-SELECT COUNT(*) AS total
-FROM (
-    SELECT td.Id
-    FROM ${entidadDebito} td
-LEFT JOIN CatTiposTransacciones ctt 
-    ON td.IdTipoTransaccion = ctt.Id
-LEFT JOIN Validadores d 
-    ON td.NumeroSerieValidador = d.NumeroSerie
-LEFT JOIN Monederos m 
-    ON td.NumeroSerieMonedero = m.NumeroSerie
-LEFT JOIN Pasajeros p 
-    ON m.IdPasajero = p.Id
-LEFT JOIN Clientes c
-	ON m.IdCliente = c.Id
-WHERE DATE(td.FHRegistro) BETWEEN ? AND ?
-AND (m.IdCliente = ? OR m.IdCliente IS NULL)
-    UNION ALL
-    SELECT tr.Id
-    FROM ${entidadRecarga} tr
-LEFT JOIN CatTiposTransacciones ctt 
-    ON tr.IdTipoTransaccion = ctt.Id
-LEFT JOIN Validadores d 
-    ON tr.NumeroSerieValidador = d.NumeroSerie
-LEFT JOIN Monederos m 
-    ON tr.NumeroSerieMonedero = m.NumeroSerie
-LEFT JOIN Pasajeros p 
-    ON m.IdPasajero = p.Id
-LEFT JOIN Clientes c
-	ON m.IdCliente = c.Id
-WHERE DATE(tr.FHRegistro) BETWEEN ? AND ?
-AND (m.IdCliente = ? OR m.IdCliente IS NULL)
-) AS todas;
-  `,
-            [
-              fechaInicio,
-              fechaFin,
-              Number(cliente),
-              fechaInicio,
-              fechaFin,
-              Number(cliente),
-            ],
-          );
-          break;
-
         case 9:
           //Datos por usuario
           const pasajero =
@@ -4210,10 +3978,8 @@ AND p.Id = ?
 
           break;
 
-        case 2:
-        case 8:
-        case 10:
-          //resto usuarios
+        default:
+          // Cualquier otro rol (admin, operador, etc.): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
           transacciones = await this.transaccionesrecargaRepository.query(
             `
@@ -4550,130 +4316,6 @@ FROM (
           );
           break;
 
-        case 3:
-        default:
-          //Usuarios Operador
-          transacciones = await this.transaccionesrecargaRepository.query(
-            `
-(
-  SELECT 
-      'DEBITO' AS origenTabla,
-      td.Id AS id,
-      ctt.Nombre AS tipoTransaccion,
-      td.Monto AS monto,
-      td.Latitud AS latitud,
-      td.Longitud AS longitud,
-      td.FechaHora AS fechaHora,
-      td.FHRegistro AS fhRegistro,
-      td.NumeroSerieMonedero AS numeroSerieMonedero,
-      td.NumeroSerieValidador AS numeroSerieValidador,
-      td.ControlTransaccion AS controlTransaccion,
-      td.EsQR AS esQR,
-
-      -- Datos del cliente
-    c.Id AS idCliente,
-    c.Nombre AS nombreCliente,
-    c.ApellidoPaterno AS apellidoPaternoCliente,
-    c.ApellidoMaterno AS apellidoMaternoCliente,
-    
-
-      d.Marca AS marcaDispositivo,
-      d.Modelo AS modeloDispositivo,
-
-      p.Id AS idPasajero,
-      p.Nombre AS nombrePasajero,
-      p.ApellidoPaterno AS apellidoPaternoPasajero,
-      p.ApellidoMaterno AS apellidoMaternoPasajero
-
-  FROM TransaccionesDebito td
-  INNER JOIN CatTiposTransacciones ctt 
-      ON td.IdTipoTransaccion = ctt.Id
-  LEFT JOIN Validadores d 
-      ON td.NumeroSerieValidador = d.NumeroSerie
-  INNER JOIN Monederos m 
-      ON td.NumeroSerieMonedero = m.NumeroSerie
-  LEFT JOIN Pasajeros p 
-      ON m.IdPasajero = p.Id
-  INNER JOIN Clientes c
-	ON m.IdCliente = c.Id
-
-  WHERE m.IdCliente = ?   -- ?? aqu? colocas el ID del cliente que quieres consultar
-
-  UNION ALL
-
-  SELECT 
-      'RECARGA' AS origenTabla,
-      tr.Id AS id,
-      ctt.Nombre AS tipoTransaccion,
-      tr.Monto AS monto,
-      tr.Latitud AS latitud,
-      tr.Longitud AS longitud,
-      tr.FechaHora AS fechaHora,
-      tr.FHRegistro AS fhRegistro,
-      tr.NumeroSerieMonedero AS numeroSerieMonedero,
-      tr.NumeroSerieValidador AS numeroSerieValidador,
-      tr.ControlTransaccion AS controlTransaccion,
-      NULL AS esQR,
-
-      -- Datos del cliente
-    c.Id AS idCliente,
-    c.Nombre AS nombreCliente,
-    c.ApellidoPaterno AS apellidoPaternoCliente,
-    c.ApellidoMaterno AS apellidoMaternoCliente,
-    
-
-      d.Marca AS marcaDispositivo,
-      d.Modelo AS modeloDispositivo,
-
-      p.Id AS idPasajero,
-      p.Nombre AS nombrePasajero,
-      p.ApellidoPaterno AS apellidoPaternoPasajero,
-      p.ApellidoMaterno AS apellidoMaternoPasajero
-
-  FROM TransaccionesRecarga tr
-  INNER JOIN CatTiposTransacciones ctt 
-      ON tr.IdTipoTransaccion = ctt.Id
-  LEFT JOIN Validadores d 
-      ON tr.NumeroSerieValidador = d.NumeroSerie
-  INNER JOIN Monederos m 
-      ON tr.NumeroSerieMonedero = m.NumeroSerie
-  LEFT JOIN Pasajeros p 
-      ON m.IdPasajero = p.Id
-  INNER JOIN Clientes c
-	ON m.IdCliente = c.Id
-
-  WHERE m.IdCliente = ?   -- ?? aqu? colocas el ID del cliente que quieres consultar
-)
-ORDER BY FHRegistro DESC
-LIMIT ? OFFSET ?;
-
-        `,
-            [cliente, cliente, limit, offset],
-          );
-
-          // Query para total (sin paginaci?n)
-          totalResult = await this.transaccionesrecargaRepository.query(
-            `
-SELECT COUNT(*) AS total
-FROM (
-  SELECT td.Id
-  FROM TransaccionesDebito td
-  INNER JOIN Monederos m ON td.NumeroSerieMonedero = m.NumeroSerie
-  WHERE m.IdCliente = ?   -- ?? aqu? colocas el ID del cliente que quieres consultar
-
-  UNION ALL
-
-  SELECT tr.Id
-  FROM TransaccionesRecarga tr
-  INNER JOIN Monederos m ON tr.NumeroSerieMonedero = m.NumeroSerie
-  WHERE m.IdCliente = ?   -- ?? aqu? colocas el ID del cliente que quieres consultar
-) AS todas;
-
-  `,
-            [cliente, cliente],
-          );
-          break;
-
         case 9:
           //Datos por usuario
           const pasajero =
@@ -4787,10 +4429,8 @@ FROM (
 
           break;
 
-        case 2:
-        case 8:
-        case 10:
-          //resto usuarios
+        default:
+          // Cualquier otro rol (admin, operador, etc.): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
           transacciones = await this.transaccionesrecargaRepository.query(
             `
@@ -5081,9 +4721,8 @@ ORDER BY FHRegistro DESC
           );
           break;
 
-        case 2: // Administrador
-        case 8: // Reportes
-        case 10: // Capturista
+        default:
+          // Cualquier otro rol (admin, operador, etc.): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
           transacciones = await this.transaccionesrecargaRepository.query(
             `
@@ -5194,115 +4833,6 @@ ORDER BY FHRegistro DESC
 
         `,
             [...ids, ...ids],
-          );
-          break;
-
-        case 3:
-        default:
-          transacciones = await this.transaccionesrecargaRepository.query(
-            `
-SELECT 
-    'DEBITO' AS origenTabla,        -- ?? de qu? tabla viene
-    td.Id AS id,
-    ctt.Nombre AS tipoTransaccion,  -- ?? tipo seg?n el cat?logo (RECARGA, DEBITO o RECHAZADO)
-    td.Monto AS monto,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
-    td.FechaHoraFinal AS fechaHoraFinal,
-    td.FHRegistro AS fhRegistro,
-    td.NumeroSerieMonedero AS numeroSerieMonedero,
-    td.NumeroSerieValidador AS numeroSerieValidador,
-    td.ControlTransaccion AS controlTransaccion,
-    td.EsQR AS esQR,
-    NULL AS nombreMetodoPago,
-
-    -- Datos del cliente
-    c.Id AS idCliente,
-    c.Nombre AS nombreCliente,
-    c.ApellidoPaterno AS apellidoPaternoCliente,
-    c.ApellidoMaterno AS apellidoMaternoCliente,
-    
-
-    -- Datos del dispositivo
-    d.Marca AS marcaDispositivo,
-    d.Modelo AS modeloDispositivo,
-
-    -- Pasajero (v?a Monedero)
-    p.Id AS idPasajero,
-    p.Nombre AS nombrePasajero,
-    p.ApellidoPaterno AS apellidoPaternoPasajero,
-    p.ApellidoMaterno AS apellidoMaternoPasajero
-
- FROM ${entidadDebito} td
-  INNER JOIN CatTiposTransacciones ctt 
-      ON td.IdTipoTransaccion = ctt.Id
-  LEFT JOIN Validadores d 
-      ON td.NumeroSerieValidador = d.NumeroSerie
-  INNER JOIN Monederos m 
-      ON td.NumeroSerieMonedero = m.NumeroSerie
-  LEFT JOIN Pasajeros p 
-      ON m.IdPasajero = p.Id
-  INNER JOIN Clientes c
-	ON m.IdCliente = c.Id
-    
--- condiciones
-WHERE DATE(td.FHRegistro) BETWEEN '${fechaInicio}' AND '${fechaFin}'
-AND m.IdCliente = ?
-
-
-UNION ALL
-
-SELECT 
-    'RECARGA' AS origenTabla,       -- ?? solo indica de qu? tabla proviene
-    tr.Id AS id,
-    ctt.Nombre AS tipoTransaccion,  -- ?? valor real del tipo
-    tr.Monto AS monto,
-    tr.LatitudFinal AS latitudFinal,
-    tr.LongitudFinal AS longitudFinal,
-    tr.FechaHoraFinal AS fechaHoraFinal,
-    tr.FHRegistro AS fhRegistro,
-    tr.NumeroSerieMonedero AS numeroSerieMonedero,
-    tr.NumeroSerieValidador AS numeroSerieValidador,
-    tr.ControlTransaccion AS controlTransaccion,
-    NULL AS esQR,
-    COALESCE(cmp.Nombre, 'Efectivo') AS nombreMetodoPago,
-
-    -- Datos del cliente
-    c.Id AS idCliente,
-    c.Nombre AS nombreCliente,
-    c.ApellidoPaterno AS apellidoPaternoCliente,
-    c.ApellidoMaterno AS apellidoMaternoCliente,
-    
-
-    d.Marca AS marcaDispositivo,
-    d.Modelo AS modeloDispositivo,
-
-    p.Id AS idPasajero,
-    p.Nombre AS nombrePasajero,
-    p.ApellidoPaterno AS apellidoPaternoPasajero,
-    p.ApellidoMaterno AS apellidoMaternoPasajero
-
- FROM ${entidadRecarga} tr
-  INNER JOIN CatTiposTransacciones ctt 
-      ON tr.IdTipoTransaccion = ctt.Id
-  LEFT JOIN CatMetodoPago cmp 
-      ON tr.IdMetodoPago = cmp.Id
-  LEFT JOIN Validadores d 
-      ON tr.NumeroSerieValidador = d.NumeroSerie
-  INNER JOIN Monederos m 
-      ON tr.NumeroSerieMonedero = m.NumeroSerie
-  LEFT JOIN Pasajeros p 
-      ON m.IdPasajero = p.Id
-  INNER JOIN Clientes c
-	ON m.IdCliente = c.Id
-    
--- condiciones
-WHERE DATE(tr.FHRegistro) BETWEEN '${fechaInicio}' AND '${fechaFin}'
-AND m.IdCliente = ?
-
-ORDER BY FHRegistro DESC
-        `,
-            [cliente, cliente],
           );
           break;
       }
@@ -5858,10 +5388,10 @@ ${fechaCondition};
           });
           break;
 
-        case 2:
-          // ADMIN = Sus recargas y las de clientes hijos
+        default:
+          // Cualquier otro rol (admin, etc.): filtrar por idCliente + hijos
           console.log(
-            '[getHistoricoRecargasPaginado] Caso 2 - Ejecutando query',
+            '[getHistoricoRecargasPaginado] Default (clienteHijos) - Ejecutando query',
           );
           const { ids, placeholders } = await this.clienteHijos(cliente);
 
@@ -6119,10 +5649,15 @@ ${fechaCondition};
                 [...ids, ...queryParams],
               );
           }
-          console.log('[getHistoricoRecargasPaginado] Caso 2 - Resultado:', {
-            cantidad: Array.isArray(recargas) ? recargas.length : 'no es array',
-            total: totalResult?.[0]?.total,
-          });
+          console.log(
+            '[getHistoricoRecargasPaginado] Default (clienteHijos) - Resultado:',
+            {
+              cantidad: Array.isArray(recargas)
+                ? recargas.length
+                : 'no es array',
+              total: totalResult?.[0]?.total,
+            },
+          );
           break;
 
         case 3:
@@ -6413,11 +5948,6 @@ ${fechaConditionHistorico};
             total: totalResult?.[0]?.total,
           });
           break;
-
-        default:
-          throw new BadRequestException(
-            'Rol no válido para consultar histórico de recargas',
-          );
       }
 
       console.log('[getHistoricoRecargasPaginado] Procesando resultados:', {

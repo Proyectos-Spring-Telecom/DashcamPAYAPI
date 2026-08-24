@@ -260,7 +260,7 @@ WHERE
     let totalResult;
     switch (rol) {
       case 1:
-        // Consulta de datos paginados Usuario SuperAdministrador
+        // SuperAdministrador: todas las rutas
         data = await this.usuarioszonasRepository.query(
           `
 SELECT 
@@ -328,109 +328,10 @@ WHERE
         );
         break;
 
-      case 2:
-        // Consulta de datos paginados Usuario Administrador
-        data = await this.consultarRutasPaginado(cliente, limit, offset);
-
-        // Query para total (sin paginación)
-        totalResult = await this.consultarTotalRutasPaginados(cliente);
-        break;
-
-      case 3:
-        // Consulta de datos paginados Usuario Operador
-        data = await this.consultarRutasPaginado(cliente, limit, offset);
-
-        // Query para total (sin paginación)
-        totalResult = await this.consultarTotalRutasPaginados(cliente);
-        break;
-
-      case 8:
-        // Consulta de datos paginados Usuario Reportes
-        data = await this.consultarRutasPaginado(cliente, limit, offset);
-
-        // Query para total (sin paginación)
-        totalResult = await this.consultarTotalRutasPaginados(cliente);
-        break;
-
-      case 10:
-        // Consulta de datos paginados Usuario Capturista
-        data = await this.consultarRutasPaginado(cliente, limit, offset);
-
-        // Query para total (sin paginación)
-        totalResult = await this.consultarTotalRutasPaginados(cliente);
-        break;
-
       default:
-        // Consulta de datos paginados resto Usuario
-        data = await this.usuarioszonasRepository.query(
-          `
-  SELECT 
-    ru.Id AS id,
-    ru.Nombre AS nombre,
-    ru.PuntoInicio AS puntoInicio,
-    ru.NombreInicio AS nombreInicio,
-    ru.PuntoFin AS puntoFin,
-    ru.NombreFin AS nombreFin,
-    ru.FechaCreacion AS fechaCreacionRuta,
-    ru.Estatus AS estatusRuta,
-    ru.IdZonaFin AS idZonaFin,
-
-    -- Datos de la región inicial
-    r.Id AS idZona,
-    r.Nombre AS nombreZona,
-    r.Descripcion AS descripcionZona,
-    r.FechaCreacion AS fechaCreacionZona,
-    r.FechaActualizacion AS fechaActualizacionZona,
-    r.Estatus AS estatusZona,
-
-    -- Datos de la región final (si existe)
-    rf.Id AS idZonaFinDetalle,
-    rf.Nombre AS nombreZonaFinDetalle,
-    rf.Descripcion AS descripcionZonaFin,
-    rf.FechaCreacion AS fechaCreacionZonaFin,
-    rf.FechaActualizacion AS fechaActualizacionZonaFin,
-    rf.Estatus AS estatusZonaFin,
-
-  -- CLIENTE
-  c.Id AS idCliente,
-  c.Nombre As nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente,
-    CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
-
-  FROM UsuariosZonas ur
-  INNER JOIN Zonas r ON ur.IdZona = r.Id
-  INNER JOIN Rutas ru ON ru.IdZona = r.Id
-  LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
-  INNER JOIN Clientes c ON r.IdCliente = c.Id
-
-  WHERE ur.IdUsuario = ?
-    AND ur.Estatus = 1
-    AND r.Estatus = 1
-  
-  ORDER BY ru.Id DESC
-  LIMIT ? OFFSET ?;
-  `,
-          [idUser, limit, offset],
-        );
-
-        // Query para total (sin paginación)
-        totalResult = await this.usuarioszonasRepository.query(
-          `
-  SELECT COUNT(*) AS total
-  FROM UsuariosZonas ur
-  INNER JOIN Zonas r ON ur.IdZona = r.Id
-  INNER JOIN Rutas ru ON ru.IdZona = r.Id
-  LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
-  INNER JOIN Clientes c ON r.IdCliente = c.Id
-
-  WHERE ur.IdUsuario = ?
-    AND ur.Estatus = 1
-    AND r.Estatus = 1
-  `,
-          [idUser],
-        );
+        // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+        data = await this.consultarRutasPaginado(cliente, limit, offset);
+        totalResult = await this.consultarTotalRutasPaginados(cliente);
         break;
     }
 
@@ -538,7 +439,7 @@ ORDER BY ru.Id DESC;
       let rutas;
       switch (rol) {
         case 1:
-          // Consulta de datos paginados Usuario Administrador
+          // SuperAdministrador: todas las rutas
           rutas = await this.usuarioszonasRepository.query(
             `
 SELECT 
@@ -591,76 +492,9 @@ ORDER BY ru.Id DESC
           );
           break;
 
-        case 2:
-          // Consulta de datos paginados Usuario Administrador
-          rutas = await this.consultarRutasListado(cliente);
-          break;
-
-        case 3:
-          // Consulta de datos paginados Usuario Operador
-          rutas = await this.consultarRutasListado(cliente);
-          break;
-
-        case 8:
-          // Consulta de datos paginados Usuario Reportes
-          rutas = await this.consultarRutasListado(cliente);
-          break;
-
-        case 10:
-          // Consulta de datos paginados Usuario Capturista
-          rutas = await this.consultarRutasListado(cliente);
-          break;
-
         default:
-          console.log('default');
-          // Consulta de datos paginados Usuario
-          rutas = await this.usuarioszonasRepository.query(
-            `
-            SELECT 
-    ru.Id AS id,
-    ru.Nombre AS nombre,
-    ru.PuntoInicio AS puntoInicio,
-    ru.NombreInicio AS nombreInicio,
-    ru.PuntoFin AS puntoFin,
-    ru.NombreFin AS nombreFin,
-    ru.FechaCreacion AS fechaCreacionRuta,
-    ru.Estatus AS estatusRuta,
-    ru.IdZonaFin AS idZonaFin,
-    
-    r.Id AS idZona,
-    r.Nombre AS nombreZona,
-    r.Descripcion AS descripcionZona,
-    r.FechaCreacion AS fechaCreacionZona,
-    r.FechaActualizacion AS fechaActualizacionZona,
-    r.Estatus AS estatusZona,
-    
-    rf.Id AS idZonaFinDetalle,
-    rf.Nombre AS nombreZonaFinDetalle,
-    rf.Descripcion AS descripcionZonaFin,
-    rf.FechaCreacion AS fechaCreacionZonaFin,
-    rf.FechaActualizacion AS fechaActualizacionZonaFin,
-    rf.Estatus AS estatusZonaFin,
-    
-    c.Id AS idCliente,
-    c.Nombre AS nombreCliente,
-    CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
-
-FROM UsuariosZonas ur
-INNER JOIN Zonas r ON ur.IdZona = r.Id            -- Zona inicial
-INNER JOIN Rutas ru ON ru.IdZona = r.Id              -- Ruta
-LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id        -- Zona final (puede ser null)
-INNER JOIN Clientes c ON r.IdCliente = c.Id            -- Cliente
-
-WHERE  ur.Estatus = 1
-  AND r.Estatus = 1
-  AND ru.Estatus = 1
-  AND c.Estatus = 1
-
-ORDER BY ru.Id DESC;
-
-            `,
-            [idUser],
-          );
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          rutas = await this.consultarRutasListado(cliente);
           break;
       }
 

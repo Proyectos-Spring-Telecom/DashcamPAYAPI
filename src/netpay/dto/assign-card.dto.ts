@@ -54,8 +54,16 @@ export class AssignCardDto {
   })
   preAuth?: boolean = false;
 
-  // NOTA: cvv2 NO se acepta en esta API. El CVV se tokeniza SOLO en el cliente con NetpayJS.
-  // Si el cliente envía cvv2, será ignorado silenciosamente.
+  @ApiPropertyOptional({
+    description:
+      'CVV2 de la tarjeta. Solo se reenvía a NetPay para asignar el token; nunca se almacena.',
+    example: '123',
+    maxLength: 4,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4)
+  cvv2?: string;
 
   @ApiPropertyOptional({
     description: 'Nombre del titular de la tarjeta',

@@ -637,8 +637,13 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
           token,
           codigo,
         );
-      } catch (_emailError) {
+      } catch (emailError: unknown) {
         // Log del error pero no fallar la creación del pasajero
+        this.loggerService.error(
+          'AuthService',
+          'Error al enviar correo de confirmación en registro de pasajero',
+          emailError,
+        );
       }
 
       //afiliamos el monedero al pasajero y cambiamos estatus activo

@@ -411,69 +411,15 @@ INNER JOIN Clientes c
           );
           break;
 
-        case 2:
-          // Consulta de datos paginados Usuario Administrador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginado(
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult =
-            await this.consultarTotalConteoPasajerosPaginados(cliente);
-          break;
-
-        case 3:
-          // Consulta de datos paginados Usuario Operador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoCL(
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult =
-            await this.consultarTotalConteoPasajerosPaginadosCl(cliente);
-          break;
-
-        case 8:
-          // Consulta de datos paginados Usuario Reportes
-          conteoPasajeros = await this.consultarConteoPasajerosPaginado(
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult =
-            await this.consultarTotalConteoPasajerosPaginados(cliente);
-          break;
-
-        case 10:
-          // Consulta de datos paginados Usuario Capturista
-          conteoPasajeros = await this.consultarConteoPasajerosPaginado(
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult =
-            await this.consultarTotalConteoPasajerosPaginados(cliente);
-          break;
-
         default:
-          // Consulta de datos paginados Usuario Operador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoCL(
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          conteoPasajeros = await this.consultarConteoPasajerosPaginado(
             cliente,
             limit,
             offset,
           );
-
-          // Query para total (sin paginación)
           totalResult =
-            await this.consultarTotalConteoPasajerosPaginadosCl(cliente);
+            await this.consultarTotalConteoPasajerosPaginados(cliente);
           break;
       }
 
@@ -792,96 +738,20 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
           );
           break;
 
-        case 2:
-          // Consulta de datos paginados Usuario Administrador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(
-            fechaInicio,
-            fechaFin,
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginadosRango(
-            fechaInicio,
-            fechaFin,
-            cliente,
-          );
-          break;
-
-        case 3:
-          // Consulta de datos paginados Usuario Operador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRangoCL(
-            fechaInicio,
-            fechaFin,
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult =
-            await this.consultarTotalConteoPasajerosPaginadosRangoCl(
-              fechaInicio,
-              fechaFin,
-              cliente,
-            );
-          break;
-
-        case 8:
-          // Consulta de datos paginados Usuario Reportes
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(
-            fechaInicio,
-            fechaFin,
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginadosRango(
-            fechaInicio,
-            fechaFin,
-            cliente,
-          );
-          break;
-
-        case 10:
-          // Consulta de datos paginados Usuario Capturista
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(
-            fechaInicio,
-            fechaFin,
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalConteoPasajerosPaginadosRango(
-            fechaInicio,
-            fechaFin,
-            cliente,
-          );
-          break;
-
         default:
-          // Consulta de datos paginados Usuario Operador
-          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRangoCL(
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(
             fechaInicio,
             fechaFin,
             cliente,
             limit,
             offset,
           );
-
-          // Query para total (sin paginación)
-          totalResult =
-            await this.consultarTotalConteoPasajerosPaginadosRangoCl(
-              fechaInicio,
-              fechaFin,
-              cliente,
-            );
+          totalResult = await this.consultarTotalConteoPasajerosPaginadosRango(
+            fechaInicio,
+            fechaFin,
+            cliente,
+          );
           break;
       }
 
@@ -1278,10 +1148,8 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
           );
           break;
 
-        case 2:
-        case 8:
-        case 10:
-          // Roles que usan clientesHijos (Administrador, Reportes, Capturista)
+        default:
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
           if (ids.length === 0) {
             return { data: [] };
@@ -1305,30 +1173,6 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
             ORDER BY cp.IdViaje DESC
             `,
             [`${fechaInicio} 00:00:00`, `${fechaFin} 23:59:59`, ...ids],
-          );
-          break;
-
-        case 3:
-        default:
-          // Rol 3 (Operador) y otros: solo su cliente
-          resultados = await this.conteopasajeroRepository.query(
-            `
-            SELECT 
-              cp.IdViaje AS idViaje,
-              SUM(cp.Diferencia) AS diferencia,
-              SUM(cp.Entradas) AS subidas,
-              SUM(cp.Salidas) AS bajadas,
-              COUNT(*) AS cantidadRegistros
-            FROM ConteoPasajeros cp
-            INNER JOIN Contadores bv ON cp.NumeroSerieContador = bv.NumeroSerie
-            INNER JOIN Clientes c ON bv.IdCliente = c.Id
-            WHERE cp.FechaHora BETWEEN ? AND ?
-              AND cp.IdViaje IS NOT NULL
-              AND c.Id = ?
-            GROUP BY cp.IdViaje
-            ORDER BY cp.IdViaje DESC
-            `,
-            [`${fechaInicio} 00:00:00`, `${fechaFin} 23:59:59`, cliente],
           );
           break;
       }

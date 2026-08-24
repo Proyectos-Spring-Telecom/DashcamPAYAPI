@@ -153,60 +153,9 @@ ORDER BY d.Id DESC;
           );
           break;
 
-        case 2:
-        case 3:
-        case 8:
-        case 9:
-        case 10:
-        case 11:
-        case 13:
-          // Consulta de datos Usuarios
-          data = await this.consultarVarianteListado(cliente);
-          ultimaPosicion = await this.ultimaPosicion(cliente);
-          break;
-
         default:
-          // Consulta de datos Usuarios con permiso
-          const { ids } = await this.clienteHijos(cliente);
-          data = await this.usuarioszonasRepository.query(
-            `
-      SELECT 
-  -- Datos del variante (datos principales)
-  d.Id AS id,
-  d.Nombre AS nombreVariante,
-  d.PuntoInicio AS puntoInicio,
-  d.PuntoFin AS puntoFin,
-  d.RecorridoDetallado AS recorridoDetallado,
-  d.RecorridoInterpolar AS recorridoInterpolar,
-  d.DistanciaKm AS distanciaKm,
-  d.Estatus AS estatusVariante,
-
-  -- Cliente relacionado
-  c.Id AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente
-
-FROM Variantes d
-INNER JOIN Rutas ru ON d.IdRuta = ru.Id
-INNER JOIN Zonas r ON ru.IdZona = r.Id
-LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
-INNER JOIN Clientes c ON r.IdCliente = c.Id
-INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
-
-WHERE ur.IdUsuario = ?
-  AND ur.Estatus = 1
-  AND r.Estatus = 1
-  AND ru.Estatus = 1
-  AND d.Estatus = 1
-  AND c.Estatus = 1
-   AND c.Id IN (${cliente})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
-
-ORDER BY d.Id DESC;
-      `,
-            [idUser], // parámetro seguro
-          );
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          data = await this.consultarVarianteListado(cliente);
           ultimaPosicion = await this.ultimaPosicion(cliente);
           break;
       }

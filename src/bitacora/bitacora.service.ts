@@ -364,13 +364,18 @@ ORDER BY b.FechaCreacion DESC;
     const fechaCreacion = new Date();
     const querySanitizado = this.sanitizeQuery(query);
 
+    const descripcionSafe = this.truncate(descripcion, 250);
+    const moduloSafe = this.truncate(modulo, 100);
+    const accionSafe = this.truncate(accion, 45);
+    const errorSafe = error ? this.truncate(error, 1000) : undefined;
+
     const canonical = [
-      modulo ?? '',
-      descripcion ?? '',
-      accion ?? '',
+      moduloSafe ?? '',
+      descripcionSafe ?? '',
+      accionSafe ?? '',
       JSON.stringify(querySanitizado ?? {}),
       estatus ?? '',
-      error ?? '',
+      errorSafe ?? '',
       String(idUsuario),
       String(idModulo),
       fechaCreacion.toISOString(),
@@ -384,18 +389,23 @@ ORDER BY b.FechaCreacion DESC;
       .digest('hex');
 
     const registro = this.bitacoraRepository.create({
-      modulo,
-      descripcion,
-      accion,
+      modulo: moduloSafe,
+      descripcion: descripcionSafe,
+      accion: accionSafe,
       query: querySanitizado,
       estatus: estatus ?? null,
-      error: error ?? null,
+      error: errorSafe ?? null,
       idUsuario,
       idModulo,
       fechaCreacion,
       hash,
     });
     await this.bitacoraRepository.save(registro);
+  }
+
+  private truncate(value: string | null | undefined, max: number): string {
+    const text = value ?? '';
+    return text.length > max ? text.slice(0, max) : text;
   }
 
   private sanitizeQuery(query: any): any {

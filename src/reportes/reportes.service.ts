@@ -745,11 +745,8 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
           parametros.push(idPasajero);
           break;
 
-        case 2:
-        case 8:
-        case 10:
         default:
-          // Administrador, Reportes, Capturista y otros - usar clienteHijos
+          // Cualquier otro rol (2,8,10,15, nuevos): filtrar por idCliente + hijos
           const { ids: clienteIds, placeholders } =
             await this.clienteHijos(clienteFiltro);
 
