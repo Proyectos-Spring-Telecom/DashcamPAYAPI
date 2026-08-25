@@ -437,129 +437,15 @@ INNER JOIN Clientes c ON i.IdCliente = c.Id
           );
           break;
 
-        case 2:
-          // Consulta de datos paginados Usuario Administrador
-          instalaciones = await this.consultarInstalacionesPaginado(
-            cliente,
-            limit,
-            offset,
-          );
-          // Query para total (sin paginación)
-          totalResult =
-            await this.consultarTotalInstalacionesPaginados(cliente);
-          break;
-
-        case 3:
-          // Consulta de datos paginados Usuario Operador
-          instalaciones = await this.consultarInstalacionesPaginado(
-            cliente,
-            limit,
-            offset,
-          );
-          // Query para total (sin paginación)
-          totalResult =
-            await this.consultarTotalInstalacionesPaginados(cliente);
-          break;
-
-        case 8:
-          // Consulta de datos paginados Usuario Reportes
-          instalaciones = await this.consultarInstalacionesPaginado(
-            cliente,
-            limit,
-            offset,
-          );
-          // Query para total (sin paginación)
-          totalResult =
-            await this.consultarTotalInstalacionesPaginados(cliente);
-          break;
-
-        case 10:
-          // Consulta de datos paginados Usuario Capturista
-          instalaciones = await this.consultarInstalacionesPaginado(
-            cliente,
-            limit,
-            offset,
-          );
-          // Query para total (sin paginación)
-          totalResult =
-            await this.consultarTotalInstalacionesPaginados(cliente);
-          break;
-
         default:
-          // Usuarios normales - solo sus instalaciones asignadas
-          instalaciones = await this.usuariosinstalacionesRepository.query(
-            `
-SELECT
-  -- Instalación */*/*/* para resto Usuarios
-  i.Id AS id,
-  i.FechaCreacion AS fechaCreacion,
-  i.FechaActualizacion AS fechaActualizacion,
-  i.Estatus AS estatus,
-  
-  -- Validador
-  i.IdValidador AS idValidador,
-  d.NumeroSerie AS numeroSerieValidador,
-  d.Marca AS marcaValidador,
-  d.Modelo AS modeloValidador,
-  
-  -- Contadores (agregados)
-  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
-  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
-  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
-  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
-  
-  -- Vehículo
-  i.IdVehiculo AS idVehiculo,
-  v.Marca AS marcaVehiculo,
-  v.Modelo AS modeloVehiculo,
-  v.Placa AS placaVehiculo,
-  v.NumeroEconomico AS numeroEconomicoVehiculo,
-  
-  -- Cliente
-  i.IdCliente AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente
-
-FROM UsuariosInstalaciones ui
-INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
-INNER JOIN Validadores d ON i.IdValidador = d.Id AND i.IdCliente = d.IdCliente
-LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
-LEFT JOIN Contadores b ON ic.IdContador = b.Id
-INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
-INNER JOIN Clientes c ON i.IdCliente = c.Id
-
-WHERE ui.IdUsuario = ?
-  AND ui.Estatus = 1
-
-GROUP BY i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
-         i.IdValidador, d.NumeroSerie, d.Marca, d.Modelo,
-         i.IdVehiculo, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico, v.CantidadPuertas,
-         i.IdCliente, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus
-
-ORDER BY i.Id DESC
-  LIMIT ? OFFSET ?;
-
-  `,
-            [idUser, limit, offset],
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          instalaciones = await this.consultarInstalacionesPaginado(
+            cliente,
+            limit,
+            offset,
           );
-          // Query para total (sin paginación)
-          totalResult = await this.instalacionesRepository.query(
-            `
-    SELECT COUNT(DISTINCT i.Id) AS total
-  FROM UsuariosInstalaciones ui
-INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
-INNER JOIN Validadores d ON i.IdValidador = d.Id AND i.IdCliente = d.IdCliente
-LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
-LEFT JOIN Contadores b ON ic.IdContador = b.Id
-INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
-INNER JOIN Clientes c ON i.IdCliente = c.Id
-	WHERE ui.IdUsuario = ?
-	AND ui.Estatus = 1
-  `,
-            [idUser],
-          );
+          totalResult =
+            await this.consultarTotalInstalacionesPaginados(cliente);
           break;
       }
 
@@ -754,91 +640,9 @@ ORDER BY i.Id DESC;
           );
           break;
 
-        case 2:
-          // Consulta de datos paginados Usuario Administrador
-          instalaciones = await this.consultarInstalacionesListado(cliente);
-          break;
-
-        case 3:
-          // Consulta de datos paginados Usuario Operador
-          instalaciones = await this.consultarInstalacionesListado(cliente);
-          break;
-
-        case 8:
-          // Consulta de datos paginados Usuario Reportes
-          instalaciones = await this.consultarInstalacionesListado(cliente);
-          break;
-
-        case 10:
-          // Consulta de datos paginados Usuario Capturista
-          instalaciones = await this.consultarInstalacionesListado(cliente);
-          break;
-
         default:
-          // Usuarios normales - solo sus instalaciones asignadas
-          instalaciones = await this.usuariosinstalacionesRepository.query(
-            `
-SELECT
-  -- Instalación */*/*/* para resto Usuarios
-  i.Id AS id,
-  i.FechaCreacion AS fechaCreacion,
-  i.FechaActualizacion AS fechaActualizacion,
-  i.Estatus AS estatus,
-  
-  -- Validador
-  i.IdValidador AS idValidador,
-  d.NumeroSerie AS numeroSerieValidador,
-  d.Marca AS marcaValidador,
-  d.Modelo AS modeloValidador,
-  
-  -- Contador (múltiples contadores concatenados)
-  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
-  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
-  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
-  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
-  -- Para compatibilidad con código antiguo (todos los contadores concatenados)
-  MIN(b.Id) AS idContador,
-  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContador,
-  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContador,
-  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContador,
-  
-  -- Vehículo
-  i.IdVehiculo AS idVehiculo,
-  v.Marca AS marcaVehiculo,
-  v.Modelo AS modeloVehiculo,
-  v.Placa AS placaVehiculo,
-  v.NumeroEconomico AS numeroEconomicoVehiculo,
-  
-  -- Cliente
-  i.IdCliente AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente
-
-FROM UsuariosInstalaciones ui
-INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
-INNER JOIN Validadores d ON i.IdValidador = d.Id AND i.IdCliente = d.IdCliente
-LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
-LEFT JOIN Contadores b ON ic.IdContador = b.Id
-INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
-INNER JOIN Clientes c ON i.IdCliente = c.Id
-
-WHERE ui.IdUsuario = ?
-  AND ui.Estatus = 1
-  AND i.Estatus = 1
-  AND c.Estatus = 1
-
-GROUP BY i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
-         i.IdValidador, d.NumeroSerie, d.Marca, d.Modelo,
-         i.IdVehiculo, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico, v.CantidadPuertas,
-         i.IdCliente, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus
-
-ORDER BY i.Id DESC;
-
-  `,
-            [idUser],
-          );
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          instalaciones = await this.consultarInstalacionesListado(cliente);
           break;
       }
 
@@ -1190,85 +994,9 @@ ORDER BY i.Id DESC;
           );
           break;
 
-        case 2:
-          // Consulta de datos paginados Usuario Administrador
-          instalaciones = await this.consultarInstalacionesOne(cliente, id);
-          break;
-
-        case 3:
-          // Consulta de datos paginados Usuario Operador
-          instalaciones = await this.consultarInstalacionesOne(cliente, id);
-          break;
-
-        case 8:
-          // Consulta de datos paginados Usuario Reportes
-          instalaciones = await this.consultarInstalacionesOne(cliente, id);
-          break;
-
-        case 10:
-          // Consulta de datos paginados Usuario Capturista
-          instalaciones = await this.consultarInstalacionesOne(cliente, id);
-          break;
-
         default:
-          // Usuarios normales - solo sus instalaciones asignadas
-          instalaciones = await this.usuariosinstalacionesRepository.query(
-            `
-SELECT
-  -- Instalación */*/*/* para resto Usuarios
-  i.Id AS id,
-  i.FechaCreacion AS fechaCreacion,
-  i.FechaActualizacion AS fechaActualizacion,
-  i.Estatus AS estatus,
-  
-  -- Validador
-  i.IdValidador AS idValidador,
-  d.NumeroSerie AS numeroSerieValidador,
-  d.Marca AS marcaValidador,
-  d.Modelo AS modeloValidador,
-  
-  -- Contadores (agregados)
-  GROUP_CONCAT(DISTINCT b.Id ORDER BY b.Id SEPARATOR ',') AS idContadores,
-  GROUP_CONCAT(DISTINCT b.NumeroSerie ORDER BY b.Id SEPARATOR ', ') AS numeroSerieContadores,
-  GROUP_CONCAT(DISTINCT b.Marca ORDER BY b.Id SEPARATOR ', ') AS marcaContadores,
-  GROUP_CONCAT(DISTINCT b.Modelo ORDER BY b.Id SEPARATOR ', ') AS modeloContadores,
-  
-  -- Vehículo
-  i.IdVehiculo AS idVehiculo,
-  v.Marca AS marcaVehiculo,
-  v.Modelo AS modeloVehiculo,
-  v.Placa AS placaVehiculo,
-  v.NumeroEconomico AS numeroEconomicoVehiculo,
-  
-  -- Cliente
-  i.IdCliente AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente
-
-FROM UsuariosInstalaciones ui
-INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
-INNER JOIN Validadores d ON i.IdValidador = d.Id AND i.IdCliente = d.IdCliente
-LEFT JOIN InstalacionContadores ic ON i.Id = ic.IdInstalacion AND ic.Estatus = 1
-LEFT JOIN Contadores b ON ic.IdContador = b.Id
-INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
-INNER JOIN Clientes c ON i.IdCliente = c.Id
-
-WHERE ui.IdUsuario = ?
-  AND ui.Estatus = 1
-  AND i.Id = ?
-
-GROUP BY i.Id, i.FechaCreacion, i.FechaActualizacion, i.Estatus,
-         i.IdValidador, d.NumeroSerie, d.Marca, d.Modelo,
-         i.IdVehiculo, v.Marca, v.Modelo, v.Placa, v.NumeroEconomico, v.CantidadPuertas,
-         i.IdCliente, c.Nombre, c.ApellidoPaterno, c.ApellidoMaterno, c.Estatus
-
-ORDER BY i.Id DESC;
-
-  `,
-            [idUser, id],
-          );
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          instalaciones = await this.consultarInstalacionesOne(cliente, id);
           break;
       }
 

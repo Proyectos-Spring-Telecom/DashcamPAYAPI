@@ -295,87 +295,9 @@ ORDER BY t.Id DESC
           );
           break;
 
-        case 2:
-          // Usuario Administrador - obtiene todas las zonas
-          data = await this.consultarTarifasListado(cliente);
-          break;
-
-        case 8:
-          // Consulta de datos paginados Usuario Reportes
-          data = await this.consultarTarifasListado(cliente);
-          break;
-
-        case 10:
-          // Usuario Administrador - obtiene todas las zonas
-          data = await this.consultarTarifasListado(cliente);
-          break;
-
         default:
-          // Consulta de datos paginados Usuario Capturista
-          data = await this.usuarioszonasRepository.query(
-            `
-SELECT 
-  -- Datos de la tarifa
-  t.Id AS id,
-  t.TarifaBase,
-  t.DistanciaBaseKm,
-  t.IncrementoCadaMetros,
-  t.CostoAdicional,
-  t.CostoPorEstacion,
-  t.CantidadEstacionesBase,
-  t.TipoTarifa,
-  t.FechaCreacion AS fechaCreacionTarifa,
-  t.FechaActualizacion AS fechaActualizacionTarifa,
-  t.Estatus AS estatusTarifa,
-
-  -- Datos de la variante
-  d.Id AS idVariante,
-  d.Nombre AS nombreVariante,
-  d.PuntoInicio AS puntoInicio,
-  d.PuntoFin AS puntoFin,
-  d.DistanciaKm AS distanciaKm,
-
-  -- Datos de la ruta
-  ru.Id AS idRuta,
-  ru.Nombre AS nombreRuta,
-  ru.NombreInicio,
-  ru.NombreFin,
-
-  -- Región de inicio (la importante para filtro del usuario)
-  r.Id AS idZonaInicio,
-  r.Nombre AS nombreZonaInicio,
-
-  -- Región de fin
-  rf.Id AS idZonaFin,
-  rf.Nombre AS nombreZonaFin,
-
-  -- Cliente
-  c.Id AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
-
-FROM Tarifas t
-INNER JOIN Variantes d ON t.IdVariante = d.Id
-INNER JOIN Rutas ru ON d.IdRuta = ru.Id
-INNER JOIN Zonas r ON ru.IdZona = r.Id
-LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
-INNER JOIN Clientes c ON r.IdCliente = c.Id
-INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
-
-WHERE ur.IdUsuario = ?
-  AND ur.Estatus = 1
-  AND r.Estatus = 1
-  AND ru.Estatus = 1
-  AND d.Estatus = 1
-  AND t.Estatus = 1
-  AND c.Estatus = 1
-
-ORDER BY t.Id DESC;
-      `,
-            [idUser], // parámetro seguro
-          );
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          data = await this.consultarTarifasListado(cliente);
           break;
       }
 
@@ -600,114 +522,10 @@ WHERE r.Estatus = 1
           );
           break;
 
-        case 2:
-          // Consulta de datos paginados Usuario Administrador
-          data = await this.consultarTarifasPaginado(cliente, limit, offset);
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalTarifasPaginados(cliente);
-          break;
-
-        case 8:
-          // Consulta de datos paginados Usuario Reportes
-          data = await this.consultarTarifasPaginado(cliente, limit, offset);
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalTarifasPaginados(cliente);
-          break;
-
-        case 10:
-          // Consulta de datos paginados Usuario Capturista
-          data = await this.consultarTarifasPaginado(cliente, limit, offset);
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalTarifasPaginados(cliente);
-          break;
-
         default:
-          data = await this.usuarioszonasRepository.query(
-            `
-SELECT 
-  -- Datos de la tarifa
-  t.Id AS id,
-  t.TarifaBase,
-  t.DistanciaBaseKm,
-  t.IncrementoCadaMetros,
-  t.CostoAdicional,
-  t.CostoPorEstacion,
-  t.CantidadEstacionesBase,
-  t.TipoTarifa,
-  t.FechaCreacion AS fechaCreacionTarifa,
-  t.FechaActualizacion AS fechaActualizacionTarifa,
-  t.Estatus AS estatusTarifa,
-
-  -- Datos de la variante
-  d.Id AS idVariante,
-  d.Nombre AS nombreVariante,
-  d.PuntoInicio AS puntoInicio,
-  d.PuntoFin AS puntoFin,
-  d.DistanciaKm AS distanciaKm,
-
-  -- Datos de la ruta
-  ru.Id AS idRuta,
-  ru.Nombre AS nombreRuta,
-  ru.NombreInicio,
-  ru.NombreFin,
-
-  -- Región de inicio (la importante para filtro del usuario)
-  r.Id AS idZonaInicio,
-  r.Nombre AS nombreZonaInicio,
-
-  -- Región de fin
-  rf.Id AS idZonaFin,
-  rf.Nombre AS nombreZonaFin,
-
-  -- Cliente
-  c.Id AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
-
-FROM Tarifas t
-INNER JOIN Variantes d ON t.IdVariante = d.Id
-INNER JOIN Rutas ru ON d.IdRuta = ru.Id
-INNER JOIN Zonas r ON ru.IdZona = r.Id
-LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
-INNER JOIN Clientes c ON r.IdCliente = c.Id
-INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
-
-WHERE ur.IdUsuario = ?
-  AND ur.Estatus = 1
-  AND r.Estatus = 1
-  AND ru.Estatus = 1
-  AND d.Estatus = 1
-  AND t.Estatus = 1
-
-ORDER BY t.Id DESC
-  LIMIT ? OFFSET ?
-  `,
-            [idUser, limit, offset],
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.usuarioszonasRepository.query(
-            `
-SELECT COUNT(*) AS total
-FROM Tarifas t
-INNER JOIN Variantes d ON t.IdVariante = d.Id
-INNER JOIN Rutas ru ON d.IdRuta = ru.Id
-INNER JOIN Zonas r ON ru.IdZona = r.Id
-INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
-WHERE ur.IdUsuario = ?
-  AND ur.Estatus = 1         -- Relación usuario-región activa
-  AND r.Estatus = 1          -- Región activa
-  AND ru.Estatus = 1         -- Ruta activa
-  AND d.Estatus = 1          -- Variante activa
-  AND t.Estatus = 1          -- Tarifa activa
-  `,
-            [idUser],
-          );
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          data = await this.consultarTarifasPaginado(cliente, limit, offset);
+          totalResult = await this.consultarTotalTarifasPaginados(cliente);
           break;
       }
 
@@ -889,86 +707,9 @@ ORDER BY t.Id DESC
           );
           break;
 
-        case 2:
-          // Usuario Administrador - obtiene todas las zonas
-          data = await this.consultarTotalTarifasOne(id, cliente);
-          break;
-
-        case 8:
-          // Consulta de datos paginados Usuario Reportes
-          data = await this.consultarTotalTarifasOne(id, cliente);
-          break;
-
-        case 10:
-          // Usuario Administrador - obtiene todas las zonas
-          data = await this.consultarTotalTarifasOne(id, cliente);
-          break;
-
         default:
-          data = await this.usuarioszonasRepository.query(
-            `
-SELECT 
-  -- Datos de la tarifa
-  t.Id AS id,
-  t.TarifaBase,
-  t.DistanciaBaseKm,
-  t.IncrementoCadaMetros,
-  t.CostoAdicional,
-  t.CostoPorEstacion,
-  t.CantidadEstacionesBase,
-  t.TipoTarifa,
-  t.FechaCreacion AS fechaCreacionTarifa,
-  t.FechaActualizacion AS fechaActualizacionTarifa,
-  t.Estatus AS estatusTarifa,
-
-  -- Datos de la variante
-  d.Id AS idVariante,
-  d.Nombre AS nombreVariante,
-  d.PuntoInicio AS puntoInicio,
-  d.PuntoFin AS puntoFin,
-  d.DistanciaKm AS distanciaKm,
-
-  -- Datos de la ruta
-  ru.Id AS idRuta,
-  ru.Nombre AS nombreRuta,
-  ru.NombreInicio,
-  ru.NombreFin,
-
-  -- Región de inicio (la importante para filtro del usuario)
-  r.Id AS idZonaInicio,
-  r.Nombre AS nombreZonaInicio,
-
-  -- Región de fin
-  rf.Id AS idZonaFin,
-  rf.Nombre AS nombreZonaFin,
-
-  -- Cliente
-  c.Id AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  CONCAT(c.Nombre, ' ', c.ApellidoPaterno, ' ', c.ApellidoMaterno) AS nombreCompletoCliente
-
-FROM Tarifas t
-INNER JOIN Variantes d ON t.IdVariante = d.Id
-INNER JOIN Rutas ru ON d.IdRuta = ru.Id
-INNER JOIN Zonas r ON ru.IdZona = r.Id
-LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
-INNER JOIN Clientes c ON r.IdCliente = c.Id
-INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
-
-WHERE ur.IdUsuario = ?
-  AND ur.Estatus = 1
-  AND r.Estatus = 1
-  AND ru.Estatus = 1
-  AND d.Estatus = 1
-  AND t.Id = ?
-
-ORDER BY t.Id DESC
-  `,
-            [idUser, id],
-          );
-
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          data = await this.consultarTotalTarifasOne(id, cliente);
           break;
       }
 

@@ -384,17 +384,10 @@ ORDER BY v.Id DESC;
               `,
           );
           break;
-        case 2: // Administrador
-        case 8: // Reportes
-        case 10: // Capturista
+        default:
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           viajestransacciones =
             await this.consultarViajesTransacciones(cliente);
-          break;
-
-        default:
-        case 3: // Operador
-          viajestransacciones =
-            await this.consultarViajesTransaccionesCL(cliente);
           break;
       }
       const _data = viajestransacciones.map((item) => ({
@@ -790,23 +783,16 @@ LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
   `,
           );
           break;
-        case 2: // Administrador
-        case 8: // Reportes
-        case 10: // Capturista
-          viajestransacciones =
-            await this.consultarTotalViajesTransaccionesPaginados(cliente);
-
-          totalResult =
-            await this.consultarTotalViajesTransaccionesPaginados(cliente);
-          break;
-
-        case 3: // Operador
         default:
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           viajestransacciones =
-            await this.consultarTotalViajesTransaccionesPaginadosCl(cliente);
-
+            await this.consultarViajesTransaccionesPaginado(
+              cliente,
+              limit,
+              offset,
+            );
           totalResult =
-            await this.consultarTotalViajesTransaccionesPaginadosCl(cliente);
+            await this.consultarTotalViajesTransaccionesPaginados(cliente);
           break;
       }
 

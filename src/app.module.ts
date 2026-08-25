@@ -87,6 +87,7 @@ import { LoggerService } from './common/logger.service';
         HOST: Joi.string().optional(),
         SMTP: Joi.string().optional(),
         E_MAIL: Joi.string().optional(),
+        E_MAIL_PASS: Joi.string().optional(),
         E_MAIL_PASSWORD: Joi.string().optional(),
         SMTP_PASSWORD: Joi.string().optional(),
         NETPAY_ENVIRONMENT: Joi.string()

@@ -406,60 +406,14 @@ INNER JOIN Clientes c
   `,
           );
           break;
-        case 2:
-          // Consulta de datos paginados Usuario Administrador
-          posiciones = await this.consultarPoscionesPaginado(
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalPoscionesPaginados(cliente);
-          break;
-        case 3:
-          // Consulta de datos paginados Usuario Operador
-          posiciones = await this.consultarPoscionesPaginadoCL(
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalPoscionesPaginadosCl(cliente);
-          break;
-        case 8:
-          // Consulta de datos paginados Usuario Reportes
-          posiciones = await this.consultarPoscionesPaginado(
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalPoscionesPaginados(cliente);
-          break;
-        case 10:
-          // Consulta de datos paginados Usuario Capturista
-          posiciones = await this.consultarPoscionesPaginado(
-            cliente,
-            limit,
-            offset,
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalPoscionesPaginados(cliente);
-          break;
         default:
-          // Consulta de datos paginados Usuario Operador
-          posiciones = await this.consultarPoscionesPaginadoCL(
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          posiciones = await this.consultarPoscionesPaginado(
             cliente,
             limit,
             offset,
           );
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalPoscionesPaginadosCl(cliente);
+          totalResult = await this.consultarTotalPoscionesPaginados(cliente);
           break;
       }
 
@@ -607,15 +561,9 @@ ORDER BY p.Id DESC
         `,
           );
           break;
-        case 2: // Administrador
-        case 8: // Reportes
-        case 10: // Capturista
-          posiciones = await this.consultarPosciones(cliente);
-          break;
-
-        case 3: // Operador
         default:
-          posiciones = await this.consultarPoscionesCL(cliente);
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          posiciones = await this.consultarPosciones(cliente);
           break;
       }
 

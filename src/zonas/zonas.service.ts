@@ -209,7 +209,7 @@ WHERE
       //Obtenemos ConteoPasajeros
       switch (rol) {
         case 1:
-          // Usuario SuperAdministrador - obtiene todas las zonas
+          // SuperAdministrador: todas las zonas
           zonas = await this.zonasRepository.query(
             `
 SELECT
@@ -250,91 +250,10 @@ INNER JOIN Clientes c ON r.IdCliente = c.Id
           );
           break;
 
-        case 2:
-          // Usuario administrador - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasPagina(cliente, limit, offset);
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalZonasPaginados(cliente);
-          break;
-
-        case 3:
-          // Usuario operador - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasPagina(cliente, limit, offset);
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalZonasPaginados(cliente);
-          break;
-
-        case 8:
-          // Usuario Reportes - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasPagina(cliente, limit, offset);
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalZonasPaginados(cliente);
-          break;
-
-        case 10:
-          // Usuario Capturistas - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasPagina(cliente, limit, offset);
-
-          // Query para total (sin paginación)
-          totalResult = await this.consultarTotalZonasPaginados(cliente);
-          break;
-
         default:
-          // Usuarios normales - solo sus zonas asignadas
-          zonas = await this.zonasRepository.query(
-            `
-SELECT
-  -- Zona
-  r.Id AS id,
-  r.Nombre AS nombre,
-  r.Descripcion AS descripcion,
-  r.Geocerca AS geocerca,
-  r.FechaCreacion AS fechaCreacion,
-  r.FechaActualizacion AS fechaActualizacion,
-  r.Estatus AS estatus,
-
-  -- Cliente
-  c.Id AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente
-
-FROM Zonas r
-INNER JOIN Clientes c ON r.IdCliente = c.Id
-INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
-INNER JOIN Usuarios u ON ur.IdUsuario = u.Id
-
-WHERE 
-  ur.IdUsuario = ?       -- 🔹 ID del usuario a filtrar
-  AND ur.Estatus = 1
-
-ORDER BY r.Id DESC
-  LIMIT ? OFFSET ?;
-
-            `,
-            [idUser, limit, offset],
-          );
-
-          // Query para total (sin paginación)
-          totalResult = await this.zonasRepository.query(
-            `
-  SELECT COUNT(*) AS total
-FROM Zonas r
-INNER JOIN Clientes c ON r.IdCliente = c.Id
-INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
-INNER JOIN Usuarios u ON ur.IdUsuario = u.Id
-
-WHERE 
-  ur.IdUsuario = ?       -- 🔹 ID del usuario a filtrar
-  AND ur.Estatus = 1
-
-  `,
-            [idUser],
-          );
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          zonas = await this.consultarZonasPagina(cliente, limit, offset);
+          totalResult = await this.consultarTotalZonasPaginados(cliente);
           break;
       }
 
@@ -468,7 +387,7 @@ ORDER BY r.Id DESC
       let zonas;
       switch (rol) {
         case 1:
-          // Usuario SuperAdministrador - obtiene todas las zonas
+          // SuperAdministrador: todas las zonas
           zonas = await this.zonasRepository.query(
             `
 SELECT
@@ -502,61 +421,9 @@ ORDER BY r.Id DESC;
           );
           break;
 
-        case 2:
-          // Usuario administrador - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasListado(cliente);
-          break;
-        case 3:
-          // Usuario Operador - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasListado(cliente);
-          break;
-        case 8:
-          // Usuario Reportes - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasListado(cliente);
-          break;
-
-        case 10:
-          // Usuario Capturistas - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasListado(cliente);
-          break;
-
         default:
-          // Usuarios normales - solo sus zonas asignadas
-          console.log(rol);
-          zonas = await this.zonasRepository.query(
-            `
-SELECT
-  -- Zona
-  r.Id AS id,
-  r.Nombre AS nombre,
-  r.Descripcion AS descripcion,
-  r.Geocerca AS geocerca,
-  r.FechaCreacion AS fechaCreacion,
-  r.FechaActualizacion AS fechaActualizacion,
-  r.Estatus AS estatus,
-
-  -- Cliente
-  c.Id AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente
-
-FROM Zonas r
-INNER JOIN Clientes c ON r.IdCliente = c.Id
-INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
-INNER JOIN Usuarios u ON ur.IdUsuario = u.Id
-
-WHERE 
- ur.Estatus = 1
-  AND r.Estatus = 1
-  AND c.Estatus = 1
-
-ORDER BY r.Id DESC;
-
-            `,
-            [idUser],
-          );
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          zonas = await this.consultarZonasListado(cliente);
           break;
       }
 
@@ -622,7 +489,7 @@ ORDER BY r.Id DESC
 
       switch (rol) {
         case 1:
-          // Usuario SuperAdministrador - obtiene todas las zonas
+          // SuperAdministrador: cualquier zona
           zonas = await this.zonasRepository.query(
             `
 SELECT
@@ -656,60 +523,9 @@ ORDER BY r.Id DESC;
           );
           break;
 
-        case 2:
-          // Usuario administrador - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasOne(cliente, id);
-          break;
-        case 3:
-          // Usuario operador - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasOne(cliente, id);
-          break;
-        case 8:
-          // Usuario Reportes - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasOne(cliente, id);
-          break;
-
-        case 10:
-          // Usuario Capturistas - obtiene todas las zonas de su cliente
-          zonas = await this.consultarZonasOne(cliente, id);
-          break;
-
         default:
-          // Usuarios normales - solo sus zonas asignadas
-          zonas = await this.zonasRepository.query(
-            `
-SELECT
-  -- Zona
-  r.Id AS id,
-  r.Nombre AS nombre,
-  r.Descripcion AS descripcion,
-  r.Geocerca AS geocerca,
-  r.FechaCreacion AS fechaCreacion,
-  r.FechaActualizacion AS fechaActualizacion,
-  r.Estatus AS estatus,
-
-  -- Cliente
-  c.Id AS idCliente,
-  c.Nombre AS nombreCliente,
-  c.ApellidoPaterno AS apellidoPaternoCliente,
-  c.ApellidoMaterno AS apellidoMaternoCliente,
-  c.Estatus AS estatusCliente
-
-FROM Zonas r
-INNER JOIN Clientes c ON r.IdCliente = c.Id
-INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
-INNER JOIN Usuarios u ON ur.IdUsuario = u.Id
-
-WHERE 
-  ur.IdUsuario = ?       -- 🔹 ID del usuario a filtrar
-  AND ur.Estatus = 1
-  AND r.Id = ?
-
-ORDER BY r.Id DESC;
-
-            `,
-            [idUser, id],
-          );
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          zonas = await this.consultarZonasOne(cliente, id);
           break;
       }
 
@@ -757,17 +573,10 @@ ORDER BY r.Id DESC;
           });
           break;
 
-        case 2:
-          // Usuario administrador - obtiene todas las zonas
+        default:
+          // Cualquier otro rol: filtrar por idCliente
           zonas = await this.zonasRepository.findOne({
             where: { id: id, idCliente: cliente },
-          });
-          break;
-
-        default:
-          // Usuarios normales - solo sus zonas asignadas
-          zonas = await this.zonasRepository.findOne({
-            where: { id: id },
           });
           break;
       }
@@ -842,15 +651,8 @@ ORDER BY r.Id DESC;
           });
           break;
 
-        case 2:
-          // Usuario Administrador - obtiene todas las zonas
-          zonas = await this.zonasRepository.findOne({
-            where: { id: id, idCliente: cliente },
-          });
-          break;
-
         default:
-          // Usuarios normales - solo sus zonas asignadas
+          // Cualquier otro rol: filtrar por idCliente
           zonas = await this.zonasRepository.findOne({
             where: { id: id, idCliente: cliente },
           });
@@ -919,15 +721,8 @@ ORDER BY r.Id DESC;
           });
           break;
 
-        case 2:
-          // Usuario administrador - obtiene todas las zonas
-          zonas = await this.zonasRepository.findOne({
-            where: { id: id, idCliente: cliente },
-          });
-          break;
-
         default:
-          // Usuarios normales - solo sus zonas asignadas
+          // Cualquier otro rol: filtrar por idCliente
           zonas = await this.zonasRepository.findOne({
             where: { id: id, idCliente: cliente },
           });

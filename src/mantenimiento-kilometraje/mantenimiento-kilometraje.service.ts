@@ -124,8 +124,7 @@ export class MantenimientoKilometrajeService {
 
       switch (rol) {
         case 1:
-        case 2:
-          // Consulta de datos paginados Usuario SuperAdministrador/Administrador
+          // Consulta de datos paginados Usuario SuperAdministrador
           data = await this.mantenimientoKilometrajeRepository.query(
             `
 SELECT

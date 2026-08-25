@@ -355,15 +355,9 @@ ORDER BY v.Id DESC;
           );
           break;
 
-        case 2: // Administrador
-        case 8: // Reportes
-        case 10: // Capturista
-          viajesconteos = await this.consultarViajesConteos(cliente);
-          break;
-
         default:
-        case 3: // Operador
-          viajesconteos = await this.consultarViajesConteosCL(cliente);
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          viajesconteos = await this.consultarViajesConteos(cliente);
           break;
       }
 
@@ -709,27 +703,14 @@ LEFT JOIN ConteoPasajeros cp ON cp.Id = vc.IdConteo
   `,
           );
           break;
-        case 2: // Administrador
-        case 8: // Reportes
-        case 10: // Capturista
+        default:
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           viajesconteos = await this.consultarPoscionesPaginado(
             cliente,
             limit,
             offset,
           );
-
           totalResult = await this.consultarTotalPoscionesPaginados(cliente);
-          break;
-
-        default:
-        case 3: // Operador
-          viajesconteos = await this.consultarPoscionesPaginadoCL(
-            cliente,
-            limit,
-            offset,
-          );
-
-          totalResult = await this.consultarTotalPoscionesPaginadosCl(cliente);
           break;
       }
 

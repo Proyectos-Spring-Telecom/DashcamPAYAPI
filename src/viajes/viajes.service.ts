@@ -699,15 +699,9 @@ ORDER BY v.Id DESC;
             `,
           );
           break;
-        case 2:
-        case 8:
-        case 10:
-          viajes = await this.consultarViajesListado(cliente);
-          break;
-
-        case 3:
         default:
-          viajes = await this.consultarViajesListadoCL(cliente);
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          viajes = await this.consultarViajesListado(cliente);
           break;
       }
 
@@ -1149,21 +1143,10 @@ LIMIT ? OFFSET ?;
   `,
           );
           break;
-        case 2: // Administrador
-        case 8: // Reportes
-        case 10: // Capturista
-          // Consulta de datos paginados Usuario Administrador
-          viajes = await this.consultarViajesPaginado(cliente, limit, offset);
-
-          totalResult = await this.consultarTotalRutasPaginados(cliente);
-          break;
-
-        case 3:
         default:
-          // Consulta de datos paginados Usuario Administrador
-          viajes = await this.consultarViajesPaginadoCL(cliente, limit, offset);
-
-          totalResult = await this.consultarTotalRutasPaginadosCL(cliente);
+          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
+          viajes = await this.consultarViajesPaginado(cliente, limit, offset);
+          totalResult = await this.consultarTotalRutasPaginados(cliente);
           break;
       }
 

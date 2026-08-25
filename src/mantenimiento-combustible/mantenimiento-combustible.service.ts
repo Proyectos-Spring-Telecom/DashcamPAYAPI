@@ -119,8 +119,7 @@ export class MantenimientoCombustibleService {
 
       switch (rol) {
         case 1:
-        case 2:
-          // Consulta de datos paginados Usuario SuperAdministrador/Administrador
+          // Consulta de datos paginados Usuario SuperAdministrador
           mantenimientos = await this.mantenimientoCombustibleRepository.query(
             `
 SELECT
@@ -311,8 +310,7 @@ WHERE c.Id IN (${placeholders})
 
       switch (rol) {
         case 1:
-        case 2:
-          // Consulta para SuperAdministrador/Administrador
+          // Consulta para SuperAdministrador
           mantenimientos = await this.mantenimientoCombustibleRepository.query(
             `
 SELECT
