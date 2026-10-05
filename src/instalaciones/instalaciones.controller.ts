@@ -15,6 +15,7 @@ import { InstalacionesService } from './instalaciones.service';
 import { CreateInstalacionesDto } from './dto/create-instalacione.dto';
 import { UpdateInstalacioneDto } from './dto/update-instalacione.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
@@ -30,6 +31,7 @@ import {
 @ApiTags('Instalaciones')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('instalaciones')
 @TenantResource('instalacion')
 export class InstalacionesController {

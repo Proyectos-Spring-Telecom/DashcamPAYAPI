@@ -24,10 +24,12 @@ import {
 } from '@nestjs/swagger';
 import { GetTransaccioneDto } from './dto/get-transacciones.dto';
 import { GetHistoricoRecargasDto } from './dto/get-historico-recargas.dto';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Transacciones')
 @Controller('transacciones')
 @ApiBearerAuth('bearer-token')
+@Roles(1, 2, 3, 9, 11)
 export class TransaccionesController {
   constructor(private readonly transaccionesService: TransaccionesService) {}
 
@@ -36,6 +38,7 @@ export class TransaccionesController {
   // ========================================
 
   @Post('debito')
+  @Roles(1, 2, 3)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   createTransaccionDebito(
     @Body() createTransaccioneDebitoDto: CreateTransaccioneDebitoDto,
@@ -50,6 +53,7 @@ export class TransaccionesController {
   }
 
   @Post('recarga')
+  @Roles(1, 2, 3, 9, 11)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @ApiOperation({
     summary: 'Crea una transacción de recarga',
@@ -72,6 +76,7 @@ export class TransaccionesController {
           numeroSerieMonedero: 'MON-0001',
           numeroSerieValidador: 'DISP-0001',
           idMetodoPago: 1,
+          claveIdempotencia: 'a1b2c3d4-e5f6-47a8-9b0c-1d2e3f4a5b6c',
         },
       },
       transferencia: {
@@ -156,6 +161,8 @@ export class TransaccionesController {
     return this.transaccionesService.createTransaccionRecarga(
       createTransaccioneRecargaDto,
       idUser,
+      Number(req.user.rol),
+      Number(req.user.cliente),
     );
   }
 
@@ -271,15 +278,29 @@ export class TransaccionesController {
   @Get('RECARGA/:id')
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @TenantResource('transaccionRecarga')
-  findOneTransaccioneRecarga(@Param('id', ParseIntPipe) id: number) {
-    return this.transaccionesService.findOneTransaccionRecarga(id);
+  findOneTransaccioneRecarga(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ) {
+    return this.transaccionesService.findOneTransaccionRecarga(
+      id,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get('DEBITO/:id')
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @TenantResource('transaccionDebito')
-  findOneTransaccioneDebito(@Param('id', ParseIntPipe) id: number) {
-    return this.transaccionesService.findOneTransaccionDebito(id);
+  findOneTransaccioneDebito(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ) {
+    return this.transaccionesService.findOneTransaccionDebito(
+      id,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   /*   @Get(':page/:limit')

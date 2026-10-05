@@ -19,6 +19,11 @@ import {
 import { UpdateUsuariosZonasEstatusDto } from './dto/update-usuarioszona-estatus.dto';
 import { Zonas } from 'src/entities/Zonas';
 import { Usuarios } from 'src/entities/Usuarios';
+import {
+  clienteHijosDesdeSp,
+  clientesPermitidos,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
 
 @Injectable()
 export class UsuarioszonasService {
@@ -32,7 +37,16 @@ export class UsuarioszonasService {
     private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
 
-  async create(idUser: number, createUsuariosZonasDto: CreateUsuariosZonasDto) {
+  private async clienteHijos(cliente: number) {
+    return clienteHijosDesdeSp(this.zonasRepository.manager, cliente);
+  }
+
+  async create(
+    idUser: number,
+    createUsuariosZonasDto: CreateUsuariosZonasDto,
+    clienteActor = 0,
+    rol = 1,
+  ) {
     try {
       const usuario = await this.usuariosRepository.findOne({
         where: {
@@ -46,6 +60,16 @@ export class UsuarioszonasService {
         );
       }
       const idUsuarioCliente = usuario.idCliente;
+
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.zonasRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(idUsuarioCliente))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
 
       switch (idUser) {
         case 1:
@@ -131,27 +155,43 @@ export class UsuarioszonasService {
     }
   }
 
-  async findAllList(): Promise<ApiResponseCommon> {
+  async findAllList(cliente = 0, rol = 1): Promise<ApiResponseCommon> {
     try {
-      //Obtenemos ConteoPasajeros
-      const usuarioszonas = await this.usuarioszonasRepository.find({
-        where: { estatus: 1 },
-      });
-      if (usuarioszonas.length === 0) {
-        throw new NotFoundException('UsuariosZonas no encontrado');
+      let whereSql = 'WHERE uz.Estatus = 1';
+      let params: number[] = [];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          return { data: [] };
+        }
+        whereSql += ` AND z.IdCliente IN (${placeholders})`;
+        params = [...ids];
       }
 
-      //Forzamos a cambiar el id a number
-      const data = usuarioszonas.map((item) => ({
+      const usuarioszonas = await this.usuarioszonasRepository.query(
+        `
+SELECT
+  uz.Id AS id,
+  uz.IdUsuario AS idUsuario,
+  uz.IdZona AS idZona,
+  uz.Estatus AS estatus,
+  uz.FechaCreacion AS fechaCreacion,
+  uz.FechaActualizacion AS fechaActualizacion
+FROM UsuariosZonas uz
+INNER JOIN Zonas z ON uz.IdZona = z.Id
+${whereSql}
+        `,
+        params,
+      );
+
+      const data = (usuarioszonas || []).map((item) => ({
         ...item,
         id: Number(item.id),
+        idUsuario: Number(item.idUsuario),
+        idZona: Number(item.idZona),
       }));
 
-      const result: ApiResponseCommon = {
-        data: data,
-      };
-
-      return result;
+      return { data };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -163,29 +203,72 @@ export class UsuarioszonasService {
     }
   }
 
-  async findAll(page: number, limit: number): Promise<ApiResponseCommon> {
+  async findAll(
+    page: number,
+    limit: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiResponseCommon> {
     try {
-      const [data, total] = await this.usuarioszonasRepository.findAndCount({
-        skip: (page - 1) * limit,
-        take: limit,
-      });
+      let whereSql = 'WHERE 1=1';
+      let params: number[] = [];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          return {
+            data: [],
+            paginated: { total: 0, page, lastPage: 0 },
+          };
+        }
+        whereSql += ` AND z.IdCliente IN (${placeholders})`;
+        params = [...ids];
+      }
 
-      //Forzamos a cambiar el id a number
-      const usuarioszonas = data.map((item) => ({
+      const offset = (page - 1) * limit;
+      const data = await this.usuarioszonasRepository.query(
+        `
+SELECT
+  uz.Id AS id,
+  uz.IdUsuario AS idUsuario,
+  uz.IdZona AS idZona,
+  uz.Estatus AS estatus,
+  uz.FechaCreacion AS fechaCreacion,
+  uz.FechaActualizacion AS fechaActualizacion
+FROM UsuariosZonas uz
+INNER JOIN Zonas z ON uz.IdZona = z.Id
+${whereSql}
+ORDER BY uz.Id DESC
+LIMIT ? OFFSET ?
+        `,
+        [...params, limit, offset],
+      );
+
+      const totalResult = await this.usuarioszonasRepository.query(
+        `
+SELECT COUNT(*) AS total
+FROM UsuariosZonas uz
+INNER JOIN Zonas z ON uz.IdZona = z.Id
+${whereSql}
+        `,
+        params,
+      );
+      const total = Number(totalResult?.[0]?.total || 0);
+
+      const usuarioszonas = (data || []).map((item) => ({
         ...item,
         id: Number(item.id),
+        idUsuario: Number(item.idUsuario),
+        idZona: Number(item.idZona),
       }));
 
-      //APi response
-      const result: ApiResponseCommon = {
+      return {
         data: usuarioszonas,
         paginated: {
-          total: total,
+          total,
           page,
-          lastPage: Math.ceil(total / limit),
+          lastPage: Math.ceil(total / limit) || 0,
         },
       };
-      return result;
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -224,17 +307,45 @@ export class UsuarioszonasService {
     }
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, cliente = 0, rol = 1) {
     try {
-      const usuarioszonas = await this.usuarioszonasRepository.findOne({
-        where: { id: id },
-      });
-      if (!usuarioszonas) {
+      let whereSql = 'WHERE uz.Id = ?';
+      let params: number[] = [id];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('usuarioszonas no encontrado');
+        }
+        whereSql += ` AND z.IdCliente IN (${placeholders})`;
+        params = [id, ...ids];
+      }
+
+      const rows = await this.usuarioszonasRepository.query(
+        `
+SELECT
+  uz.Id AS id,
+  uz.IdUsuario AS idUsuario,
+  uz.IdZona AS idZona,
+  uz.Estatus AS estatus,
+  uz.FechaCreacion AS fechaCreacion,
+  uz.FechaActualizacion AS fechaActualizacion
+FROM UsuariosZonas uz
+INNER JOIN Zonas z ON uz.IdZona = z.Id
+${whereSql}
+LIMIT 1
+        `,
+        params,
+      );
+      if (!rows?.length) {
         throw new NotFoundException('usuarioszonas no encontrado');
       }
 
-      //cambiamos el id a number
-      usuarioszonas.id = Number(usuarioszonas.id);
+      const usuarioszonas = {
+        ...rows[0],
+        id: Number(rows[0].id),
+        idUsuario: Number(rows[0].idUsuario),
+        idZona: Number(rows[0].idZona),
+      };
 
       return { data: usuarioszonas };
     } catch (error) {
@@ -256,6 +367,27 @@ export class UsuarioszonasService {
     try {
       // Extraer zonas del DTO
       const { idsZonas, ..._usuarioZonaUpdate } = updateUsuarioszonaDto;
+      if (idsZonas && Array.isArray(idsZonas) && idsZonas.length > 0) {
+        const usuario = await this.usuariosRepository.findOne({
+          where: { id },
+          select: { idCliente: true },
+        });
+        if (!usuario) {
+          throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
+        }
+        for (const zonaId of idsZonas) {
+          const zona = await this.zonasRepository.findOne({
+            where: { id: Number(zonaId) },
+            select: { idCliente: true },
+          });
+          if (!zona) {
+            throw new NotFoundException(`Zona con ID ${zonaId} no encontrada`);
+          }
+          if (Number(usuario.idCliente) !== Number(zona.idCliente)) {
+            throw new NotFoundException(`Zona con ID ${zonaId} no encontrada`);
+          }
+        }
+      }
 
       // ----- ACTUALIZACIÓN DE ZONAS -----
       if (idsZonas && Array.isArray(idsZonas)) {

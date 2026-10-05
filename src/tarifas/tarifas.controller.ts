@@ -16,6 +16,7 @@ import { CreateTarifaDto } from './dto/create-tarifa.dto';
 import { UpdateTarifaDto } from './dto/update-tarifa.dto';
 import { UpdateTarifasEstatusDto } from './dto/update-tarifa-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
@@ -29,6 +30,7 @@ import {
 @ApiTags('Tarifas')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('tarifas')
 @TenantResource('tarifa')
 export class TarifasController {
@@ -123,13 +125,13 @@ export class TarifasController {
     @Body() updateTarifasEstatusDto: UpdateTarifasEstatusDto,
     @Request() req,
   ) {
-    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const _rol = req.user.rol;
     return this.tarifasService.updateEstatus(
       +id,
       +idUser,
       updateTarifasEstatusDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -139,10 +141,14 @@ export class TarifasController {
     @Body() updateTarifaDto: UpdateTarifaDto,
     @Request() req,
   ) {
-    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const _rol = req.user.rol;
-    return this.tarifasService.update(+id, +idUser, updateTarifaDto);
+    return this.tarifasService.update(
+      +id,
+      +idUser,
+      updateTarifaDto,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Delete('eliminado/total/:id')
@@ -155,9 +161,12 @@ export class TarifasController {
 
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req) {
-    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const _rol = req.user.rol;
-    return this.tarifasService.remove(+id, +idUser);
+    return this.tarifasService.remove(
+      +id,
+      +idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

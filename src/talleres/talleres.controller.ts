@@ -14,6 +14,7 @@ import { TalleresService } from './talleres.service';
 import { CreateTallereDto } from './dto/create-tallere.dto';
 import { UpdateTallereDto } from './dto/update-tallere.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
@@ -23,6 +24,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 @ApiBearerAuth('bearer-token')
 @Controller('talleres')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @TenantResource('taller')
 export class TalleresController {
   constructor(private readonly talleresService: TalleresService) {}
@@ -31,7 +33,12 @@ export class TalleresController {
   create(@Body() createTallereDto: CreateTallereDto, @Req() req: any) {
     createTallereDto.idCliente = Number(req.user.cliente);
 
-    return this.talleresService.create(createTallereDto, req.user.userId);
+    return this.talleresService.create(
+      createTallereDto,
+      req.user.userId,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get('list')
@@ -49,8 +56,10 @@ export class TalleresController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.talleresService.findOne(+id);
+  findOne(@Param('id') id: string, @Request() req) {
+    const cliente = req.user.cliente;
+    const rol = req.user.rol;
+    return this.talleresService.findOne(+id, +cliente, +rol);
   }
 
   @Patch(':id')
@@ -59,14 +68,30 @@ export class TalleresController {
     @Body() updateTallereDto: UpdateTallereDto,
     @Req() req,
   ) {
-    return this.talleresService.update(+id, updateTallereDto, req.user.userId);
+    return this.talleresService.update(
+      +id,
+      updateTallereDto,
+      req.user.userId,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
   @Patch('desactivar/:id')
   remove(@Param('id') id: number, @Req() req: any) {
-    return this.talleresService.remove(+id, Number(req.user.userId));
+    return this.talleresService.remove(
+      +id,
+      Number(req.user.userId),
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
   @Patch('activar/:id')
   activar(@Param('id') id: number, @Req() req: any) {
-    return this.talleresService.activar(+id, Number(req.user.userId));
+    return this.talleresService.activar(
+      +id,
+      Number(req.user.userId),
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

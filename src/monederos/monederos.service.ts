@@ -1,5 +1,7 @@
+import { nowDb } from 'src/common/clock';
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
@@ -9,7 +11,7 @@ import { CreateMonederoDto } from './dto/create-monedero.dto';
 import { UpdateMonederoDto } from './dto/update-monedero.dto';
 import { UpdateMonederoEstatusDto } from './dto/update-monedero-estatus.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Monederos } from 'src/entities/Monederos';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { PasajerosService } from 'src/pasajeros/pasajeros.service';
@@ -32,6 +34,11 @@ import { TransaccionesRecarga } from 'src/entities/TransaccionesRecarga';
 import { Pasajeros } from 'src/entities/Pasajeros';
 import { QRCodes } from 'src/entities/QRCodes';
 import * as QRCode from 'qrcode';
+import {
+  clientesPermitidos,
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
 
 @Injectable()
 export class MonederosService {
@@ -48,6 +55,7 @@ export class MonederosService {
     private readonly qrCodesRepository: Repository<QRCodes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
     private readonly pasajerosService: PasajerosService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // ========================================
@@ -56,8 +64,20 @@ export class MonederosService {
   async createMonedero(
     createMonederoDto: CreateMonederoDto,
     idUser: number,
+    clienteActor = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.dataSource,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(createMonederoDto.idCliente))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       // Validar que el numeroSerie no esté duplicado
       const monederoPorSerie = await this.monederoRepository.findOne({
         where: { numeroSerie: createMonederoDto.numeroSerie },
@@ -85,9 +105,7 @@ export class MonederosService {
         return n < 10 ? '0' + n : n;
       }
 
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
 
       const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
@@ -98,12 +116,17 @@ export class MonederosService {
       //Guardamos el monedero
       const newMonedero = this.monederoRepository.create({
         ...createMonederoDto,
+        saldo: 0,
         esVirtual: 0, // Monedero físico creado manualmente
       });
       const monederoSave = await this.monederoRepository.save(newMonedero);
 
       // --- Registro en la bitácora --- SUCCESS
-      const querylogger = { createMonederoDto };
+      const querylogger = {
+        id: Number(monederoSave.id),
+        numeroSerie: monederoSave.numeroSerie,
+        idCliente: monederoSave.idCliente,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Monederos',
         `Se creó un monedero con número de serie: ${monederoSave.numeroSerie}.`,
@@ -117,7 +140,7 @@ export class MonederosService {
       //Creamos la transaccion en la BD
       const newTransaccion = await this.transaccionesrecargaRepository.create({
         idTipoTransaccion: EnumTipoTransaccion.RECARGA,
-        monto: createMonederoDto.saldo,
+        monto: 0,
         fechaHoraFinal: fechaActual,
         numeroSerieMonedero: monederoSave.numeroSerie,
         numeroSerieValidador: null,
@@ -127,7 +150,10 @@ export class MonederosService {
         await this.transaccionesrecargaRepository.save(newTransaccion);
 
       // --- Registro en la bitácora --- SUCCESS
-      const queryloggerTransacciones = { newTransaccion };
+      const queryloggerTransacciones = {
+        numeroSerieMonedero: monederoSave.numeroSerie,
+        idTipoTransaccion: EnumTipoTransaccion.RECARGA,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Transacciones',
         `Se realizo una transaccion de tipo ${EnumTipoTransaccion.RECARGA}`,
@@ -151,7 +177,10 @@ export class MonederosService {
     } catch (error) {
       // -------------   ERROR -------------****-*-*
       // --- Registro en la bitácora --- ERROR
-      const querylogger = { createMonederoDto };
+      const querylogger = {
+        numeroSerie: createMonederoDto.numeroSerie,
+        idCliente: createMonederoDto.idCliente,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Monederos',
         `Se creó un monedero con número de serie: ${createMonederoDto.numeroSerie}.`,
@@ -167,29 +196,13 @@ export class MonederosService {
       }
       throw new InternalServerErrorException({
         message: 'Hubo un error al crear el monedero.',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   // ========================================
@@ -351,6 +364,11 @@ WHERE m.IdPasajero = ? AND m.Estatus = 1
         default:
           // Consulta de datos paginados resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
+          if (!tieneIdsTenant(ids)) {
+            monederos = [];
+            totalResult = [{ total: 0 }];
+            break;
+          }
 
           monederos = await this.monederoRepository.query(
             `
@@ -609,6 +627,11 @@ WHERE m.IdPasajero = ? AND m.Estatus = 1
         default:
           // Consulta de datos paginados resto Usuario - Solo activos
           const { ids, placeholders } = await this.clienteHijos(cliente);
+          if (!tieneIdsTenant(ids)) {
+            monederos = [];
+            totalResult = [{ total: 0 }];
+            break;
+          }
 
           monederos = await this.monederoRepository.query(
             `
@@ -766,18 +789,8 @@ WHERE c.Id IN (${placeholders}) AND m.Estatus = 1
     rol: number,
   ): Promise<ApiResponseCommon> {
     try {
-      console.log('[MONEDEROS LIST] Parámetros recibidos:', {
-        idUser,
-        email,
-        cliente,
-        rol,
-        tipoRol: typeof rol,
-      });
-
       let monederos;
-      // Convertir rol a número para el switch
       const rolNumero = Number(rol);
-      console.log('[MONEDEROS LIST] Rol convertido a número:', rolNumero);
 
       switch (rolNumero) {
         case 1:
@@ -824,30 +837,17 @@ ORDER BY m.Id DESC;
           break;
 
         case 9:
-          console.log('[MONEDEROS LIST] Entró al case 9 (Pasajero)');
-          // Buscar el pasajero por el idUsuario del token JWT
           const pasajeroByUser = await this.monederoRepository.query(
             `SELECT Id FROM Pasajeros WHERE IdUsuario = ?`,
             [idUser],
           );
 
-          console.log(
-            '[MONEDEROS LIST] Resultado búsqueda pasajero:',
-            pasajeroByUser,
-          );
-
           if (!pasajeroByUser || pasajeroByUser.length === 0) {
-            // Si no tiene pasajero asociado, devolver array vacío
-            console.log(
-              '[MONEDEROS LIST] No se encontró pasajero para idUser:',
-              idUser,
-            );
             monederos = [];
             break;
           }
 
           const idPasajero = pasajeroByUser[0].Id;
-          console.log('[MONEDEROS LIST] idPasajero encontrado:', idPasajero);
 
           // Traer TODOS los monederos del pasajero, tenga o no idCliente
           monederos = await this.monederoRepository.query(
@@ -890,23 +890,14 @@ ORDER BY m.Id DESC;
             `,
             [idPasajero],
           );
-
-          console.log(
-            '[MONEDEROS LIST] Cantidad de monederos encontrados:',
-            monederos.length,
-          );
-          console.log(
-            '[MONEDEROS LIST] Primeros 3 monederos:',
-            monederos.slice(0, 3).map((m) => ({
-              id: m.id,
-              idPasajero: m.idPasajero,
-              numeroSerie: m.numeroSerie,
-            })),
-          );
           break;
 
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
+          if (!tieneIdsTenant(ids)) {
+            monederos = [];
+            break;
+          }
 
           monederos = await this.monederoRepository.query(
             `
@@ -981,7 +972,7 @@ ORDER BY m.Id DESC;
   // ========================================
   // 🔹 OBTENER UN MONEDERO POR ID
   // ========================================
-  async findOneMonedero(id: number) {
+  async findOneMonedero(id: number, cliente = 0, rol = 1) {
     try {
       const monedero = await this.monederoRepository.findOne({
         where: { id: id },
@@ -991,6 +982,15 @@ ORDER BY m.Id DESC;
         throw new NotFoundException(
           `El monedero con ID: ${id} no fue encontrado.`,
         );
+      }
+
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(this.dataSource, cliente);
+        if (!permitidos.includes(Number(monedero.idCliente))) {
+          throw new NotFoundException(
+            `El monedero con ID: ${id} no fue encontrado.`,
+          );
+        }
       }
 
       //Cambiamos los datos numericos a number
@@ -1020,16 +1020,30 @@ ORDER BY m.Id DESC;
   // ========================================
   // 🔹 OBTENER MONEDERO POR NUMERO DE SERIE O IDCARD
   // ========================================
-  async findOneMonederoBySerie(NumeroSerie: string) {
+  async findOneMonederoBySerie(
+    NumeroSerie: string,
+    clienteToken?: number,
+    rol?: number,
+  ) {
     try {
       const monedero = await this.monederoRepository.findOne({
         where: [{ numeroSerie: NumeroSerie }, { idCard: NumeroSerie }],
         relations: ['idPasajero2', 'idPasajero2.idUsuario2'],
       });
       if (!monedero) {
-        throw new NotFoundException(
-          `El monedero con número de serie o ID de tarjeta: ${NumeroSerie} no fue encontrado.`,
-        );
+        throw new NotFoundException('El monedero no fue encontrado.');
+      }
+      if (Number(rol) !== 1 && clienteToken != null) {
+        const hijos = await this.clienteHijos(Number(clienteToken));
+        const ids: number[] = Array.isArray((hijos as any).ids)
+          ? (hijos as any).ids
+          : [];
+        if (
+          Number(monedero.idCliente) !== Number(clienteToken) &&
+          !ids.includes(Number(monedero.idCliente))
+        ) {
+          throw new NotFoundException('El monedero no fue encontrado.');
+        }
       }
       //Cambiamos los datos numericos a number
       const monederoResult = {
@@ -1062,6 +1076,8 @@ ORDER BY m.Id DESC;
     id: number,
     idUser: number,
     updateMonederoEstatusDto: UpdateMonederoEstatusDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
       const monedero = await this.monederoRepository.findOne({
@@ -1071,6 +1087,15 @@ ORDER BY m.Id DESC;
         throw new NotFoundException(
           `El monedero con ID: ${id} no fue encontrado.`,
         );
+      }
+
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(this.dataSource, cliente);
+        if (!permitidos.includes(Number(monedero.idCliente))) {
+          throw new NotFoundException(
+            `El monedero con ID: ${id} no fue encontrado.`,
+          );
+        }
       }
 
       //Actualizamos estatus
@@ -1115,10 +1140,25 @@ ORDER BY m.Id DESC;
         error.message,
       );
       if (error instanceof HttpException) {
-        throw error.message;
+        throw error;
       }
       throw new InternalServerErrorException(
         'Hubo un error al actualizar el estatus del monedero.',
+      );
+    }
+  }
+
+  private async assertMonederoTenant(
+    monedero: { idCliente?: number | null },
+    id: number,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const permitidos = await clientesPermitidos(this.dataSource, cliente);
+    if (!permitidos.includes(Number(monedero.idCliente))) {
+      throw new NotFoundException(
+        `El monedero con ID: ${id} no fue encontrado.`,
       );
     }
   }
@@ -1130,6 +1170,8 @@ ORDER BY m.Id DESC;
     id: number,
     idUser: number,
     updateMonederoCatPasajeroDto: UpdateMonederoCatPasajeroDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
       //Buscamos y validamos que exista el monedero
@@ -1141,6 +1183,7 @@ ORDER BY m.Id DESC;
           `El monedero con número de ID: ${id} no fue encontrado.`,
         );
       }
+      await this.assertMonederoTenant(monedero, id, cliente, rol);
 
       //extraemos la variable a actualizar
       const { idTipoPasajero } = updateMonederoCatPasajeroDto;
@@ -1173,6 +1216,8 @@ ORDER BY m.Id DESC;
           idPasajero,
           idUser,
           bodyPasajero,
+          cliente,
+          rol,
         );
       }
 
@@ -1228,8 +1273,10 @@ ORDER BY m.Id DESC;
       }
       const id = Number(monedero.id);
 
-      //Actualizamos saldo
-      await this.monederoRepository.update(id, { saldo: saldo });
+      await this.monederoRepository.query(
+        'UPDATE Monederos SET Saldo = Saldo + ? WHERE Id = ? AND Estatus = 1',
+        [Number(saldo), id],
+      );
 
       // --- Registro en la bitácora --- SUCCESS
       const querylogger = { numeroSerie: numeroSerie, saldo: saldo };
@@ -1271,7 +1318,6 @@ ORDER BY m.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al crear ruta',
-        error: error.message,
       });
     }
   }
@@ -1299,6 +1345,7 @@ ORDER BY m.Id DESC;
     numeroSerie: string,
     monto: number,
     idUser: number,
+    manager?: EntityManager,
   ): Promise<boolean> {
     if (monto < 0) {
       throw new BadRequestException(
@@ -1306,7 +1353,7 @@ ORDER BY m.Id DESC;
       );
     }
 
-    const result = await this.monederoRepository
+    const qb = (manager ?? this.monederoRepository.manager)
       .createQueryBuilder()
       .update(Monederos)
       .set({ saldo: () => 'Saldo - :monto' })
@@ -1315,8 +1362,9 @@ ORDER BY m.Id DESC;
         estatus: EnumEstatusMonederos.ACTIVO,
       })
       .andWhere('Saldo >= :monto')
-      .setParameter('monto', monto)
-      .execute();
+      .setParameter('monto', monto);
+
+    const result = await qb.execute();
 
     const descontado = (result.affected ?? 0) > 0;
 
@@ -1338,6 +1386,52 @@ ORDER BY m.Id DESC;
     return descontado;
   }
 
+  /**
+   * Suma `monto` al saldo de forma atómica (misma fila/lock que el descuento).
+   * @returns true si el monedero activo existía y se incrementó.
+   */
+  async incrementarSaldoAtomico(
+    numeroSerie: string,
+    monto: number,
+    idUser: number,
+    manager?: EntityManager,
+  ): Promise<boolean> {
+    if (monto < 0) {
+      throw new BadRequestException(
+        'El monto a recargar no puede ser negativo.',
+      );
+    }
+
+    const qb = (manager ?? this.monederoRepository.manager)
+      .createQueryBuilder()
+      .update(Monederos)
+      .set({ saldo: () => 'Saldo + :monto' })
+      .where('NumeroSerie = :numeroSerie', { numeroSerie })
+      .andWhere('Estatus = :estatus', {
+        estatus: EnumEstatusMonederos.ACTIVO,
+      })
+      .setParameter('monto', monto);
+
+    const result = await qb.execute();
+    const incrementado = (result.affected ?? 0) > 0;
+
+    const querylogger = { numeroSerie, monto };
+    await this.bitacoraLogger.logToBitacora(
+      'Monederos',
+      incrementado
+        ? `Incremento atómico de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`
+        : `Incremento atómico RECHAZADO (monedero inactivo o inexistente) de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`,
+      'UPDATE',
+      querylogger,
+      idUser,
+      EnumModulos.MONEDEROS,
+      incrementado ? EstatusEnumBitcora.SUCCESS : EstatusEnumBitcora.ERROR,
+      incrementado ? undefined : 'Monedero no disponible',
+    );
+
+    return incrementado;
+  }
+
   // ========================================
   // 🔹 ACTUALIZAR MONEDERO
   // ========================================
@@ -1345,6 +1439,8 @@ ORDER BY m.Id DESC;
     id: number,
     idUser: number,
     updateMonederoDto: UpdateMonederoDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
       const monedero = await this.monederoRepository.findOne({
@@ -1355,6 +1451,7 @@ ORDER BY m.Id DESC;
           `El monedero con ID: ${id} no fue encontrado.`,
         );
       }
+      await this.assertMonederoTenant(monedero, id, cliente, rol);
 
       // Validar que el numeroSerie no esté duplicado (solo si se está actualizando)
       if (
@@ -1402,7 +1499,7 @@ ORDER BY m.Id DESC;
 
           if (pasajeroAsociado) {
             throw new BadRequestException(
-              `El monedero con número de serie ${monedero.numeroSerie} ya está asignado al pasajero ${pasajeroAsociado.nombre} ${pasajeroAsociado.apellidoPaterno} (ID: ${pasajeroAsociado.id}).`,
+              'El monedero ya está asignado a otro pasajero.',
             );
           } else {
             throw new BadRequestException(
@@ -1426,7 +1523,7 @@ ORDER BY m.Id DESC;
 
           if (pasajero) {
             throw new BadRequestException(
-              `El pasajero ${pasajero.nombre} ${pasajero.apellidoPaterno} (ID: ${pasajero.id}) ya tiene un monedero activo asignado (Número de serie: ${monederoExistente.numeroSerie}, ID: ${monederoExistente.id}). Un pasajero no puede tener dos monederos activos.`,
+              'El pasajero ya tiene un monedero activo.',
             );
           } else {
             throw new BadRequestException(
@@ -1435,6 +1532,9 @@ ORDER BY m.Id DESC;
           }
         }
       }
+
+      // N-07: idCliente ya no está en el DTO. Si el body lo manda,
+      // el ValidationPipe lo rechaza antes de llegar aquí.
 
       //Actualizamos monedero
       const monederoData =
@@ -1481,7 +1581,6 @@ ORDER BY m.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar monedero',
-        error: error.message,
       });
     }
   }
@@ -1489,7 +1588,7 @@ ORDER BY m.Id DESC;
   // ========================================
   // 🔹 ELIMINADO LOGICO DE MONEDERO
   // ========================================
-  async removeMonedero(id: number, idUser: number) {
+  async removeMonedero(id: number, idUser: number, cliente = 0, rol = 1) {
     try {
       const monedero = await this.monederoRepository.findOne({
         where: { id: id },
@@ -1499,6 +1598,7 @@ ORDER BY m.Id DESC;
           `El monedero con ID: ${id} no fue encontrado.`,
         );
       }
+      await this.assertMonederoTenant(monedero, id, cliente, rol);
 
       //Eliminamos de manera logica
       await this.monederoRepository.update(id, {
@@ -1552,95 +1652,153 @@ ORDER BY m.Id DESC;
   async reportarExtravio(
     idUser: number,
     updateMonederoExtravioDto: UpdateMonederoExtravioDto,
+    clienteActor = 0,
+    rolActor = 0,
+    emailActor = '',
   ) {
     try {
       const { correo, numeroSerie } = updateMonederoExtravioDto;
-      //Buscamos el pasajero por correo y validamos que exista
+      const correoNorm = String(correo || '').trim().toLowerCase();
+      const emailJwt = String(emailActor || '').trim().toLowerCase();
+
+      if (rolActor === 9) {
+        if (!emailJwt || correoNorm !== emailJwt) {
+          throw new ForbiddenException('No autorizado.');
+        }
+      }
+
       const pasajero =
         await this.pasajerosService.findOnePasajeroCorreo(correo);
       if (!pasajero) {
-        throw new NotFoundException(
-          `El pasajero con correo: ${correo} no fue encontrado.`,
-        );
+        throw new NotFoundException('El monedero no fue encontrado.');
       }
 
-      //Buscamos monedero asociado al pasajero
       const monedero = await this.monederoRepository.findOne({
         where: { idPasajero: pasajero.id, estatus: EstatusEnum.ACTIVO },
       });
       if (!monedero) {
-        throw new NotFoundException(
-          `No se encontro un monedero asociado al pasajero con ID: ${pasajero.id}`,
-        );
+        throw new NotFoundException('El monedero no fue encontrado.');
       }
 
-      //Buscamos el nuevo monedero
       const nuevoMonedero = await this.monederoRepository.findOne({
         where: { numeroSerie: numeroSerie },
       });
       if (!nuevoMonedero) {
-        throw new NotFoundException(
-          `No se encontro un monedero asociado al pasajero con ID: ${pasajero.id}`,
+        throw new NotFoundException('El monedero no fue encontrado.');
+      }
+
+      if (Number(monedero.id) === Number(nuevoMonedero.id)) {
+        throw new BadRequestException(
+          'El monedero destino debe ser distinto al actual.',
         );
       }
-      //Agregamos la fecha actual
-      function pad(n: number) {
-        return n < 10 ? '0' + n : n;
+
+      if (nuevoMonedero.idPasajero != null) {
+        throw new BadRequestException(
+          'El monedero destino no está disponible.',
+        );
       }
 
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      if (Number(rolActor) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.dataSource,
+          clienteActor,
+        );
+        const origenOk = permitidos.includes(Number(monedero.idCliente));
+        const destinoOk = permitidos.includes(Number(nuevoMonedero.idCliente));
+        if (!origenOk || !destinoOk) {
+          throw new NotFoundException('El monedero no fue encontrado.');
+        }
+      }
 
-      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const fechaDesfasada = nowDb();
+      const saldoTraspaso = Number(monedero.saldo || 0);
+      const idOrigen = Number(monedero.id);
+      const idDestino = Number(nuevoMonedero.id);
 
-      //Actualizamos los datos del monedero extraviado al nuevo monedero
-      nuevoMonedero.saldo = monedero.saldo;
-      nuevoMonedero.fechaActivacion = fechaDesfasada;
-      nuevoMonedero.idPasajero = monedero.idPasajero;
-      nuevoMonedero.idCliente = monedero.idCliente;
-      nuevoMonedero.idTipoPasajero = monedero.idTipoPasajero;
-      nuevoMonedero.estatus = EnumEstatusMonederos.ACTIVO;
+      await this.dataSource.transaction(async (manager) => {
+        const ids = [idOrigen, idDestino].sort((a, b) => a - b);
+        await manager.query(
+          'SELECT Id FROM Monederos WHERE Id IN (?, ?) FOR UPDATE',
+          ids,
+        );
 
-      await this.monederoRepository.update(nuevoMonedero.id, nuevoMonedero);
+        const repo = manager.getRepository(Monederos);
+        const origen = await repo.findOne({ where: { id: idOrigen } });
+        const destino = await repo.findOne({ where: { id: idDestino } });
 
-      await this.monederoRepository.update(monedero.id, {
-        estatus: EnumEstatusMonederos.INACTIVO,
-        idPasajero: null,
-        saldo: 0,
+        if (
+          !origen ||
+          Number(origen.estatus) !== EnumEstatusMonederos.ACTIVO ||
+          Number(origen.idPasajero) !== Number(pasajero.id)
+        ) {
+          throw new NotFoundException('El monedero no fue encontrado.');
+        }
+        if (!destino || destino.idPasajero != null) {
+          throw new BadRequestException(
+            'El monedero destino no está disponible.',
+          );
+        }
+
+        const saldoLocked = Number(origen.saldo || 0);
+        await repo.update(idDestino, {
+          saldo: Number(destino.saldo || 0) + saldoLocked,
+          fechaActivacion: fechaDesfasada,
+          idPasajero: origen.idPasajero,
+          idCliente: origen.idCliente,
+          idTipoPasajero: origen.idTipoPasajero,
+          estatus: EnumEstatusMonederos.ACTIVO,
+        });
+        const baja = await repo.update(idOrigen, {
+          estatus: EnumEstatusMonederos.INACTIVO,
+          idPasajero: null,
+          saldo: 0,
+        });
+        if ((baja.affected ?? 0) === 0) {
+          throw new BadRequestException(
+            'No se pudo completar el traspaso del monedero.',
+          );
+        }
       });
 
-      // --- Registro en la bitácora --- SUCCESS
-      const querylogger = { nuevoMonedero };
+      const querylogger = {
+        idOrigen,
+        idDestino,
+        numeroSerieDestino: nuevoMonedero.numeroSerie,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Monederos',
-        `Se realizo baja del monedero con numero de serie: ${monedero.numeroSerie} y se añadio el nuevo monedero con numero de serie: ${nuevoMonedero.numeroSerie}.`,
-        'DELETE',
+        `Extravío: baja ${monedero.numeroSerie} y alta ${nuevoMonedero.numeroSerie}.`,
+        'UPDATE',
         querylogger,
         idUser,
         EnumModulos.MONEDEROS,
+        EstatusEnumBitcora.SUCCESS,
       );
 
-      //API response
       const result: ApiCrudResponse = {
         status: 'success',
         message: 'Monedero recuperado de manera correcta correctamente.',
         data: {
-          id: Number(nuevoMonedero.id),
-          nombre: `${nuevoMonedero.numeroSerie} ${nuevoMonedero.saldo} ` || '',
+          id: idDestino,
+          nombre:
+            `${nuevoMonedero.numeroSerie} ${saldoTraspaso} ` || '',
         },
       };
       return result;
     } catch (error) {
-      // --- Registro en la bitácora --- SUCCESS
-      const querylogger = { updateMonederoExtravioDto };
+      const querylogger = {
+        numeroSerie: updateMonederoExtravioDto.numeroSerie,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Monederos',
-        `Se realizo baja del monedero y se registro el nuevo con numero de serie: ${updateMonederoExtravioDto.numeroSerie}.`,
-        'DELETE',
+        `Error al reportar extravío del monedero ${updateMonederoExtravioDto.numeroSerie}.`,
+        'UPDATE',
         querylogger,
         idUser,
         EnumModulos.MONEDEROS,
+        EstatusEnumBitcora.ERROR,
+        error?.message,
       );
       if (error instanceof HttpException) {
         throw error;
@@ -1807,11 +1965,8 @@ ORDER BY m.Id DESC;
         throw error;
       }
 
-      // Proporcionar más información sobre el error
-      const errorMessage =
-        error instanceof Error ? error.message : 'Error desconocido';
       throw new InternalServerErrorException(
-        `Hubo un error al generar el código QR del monedero: ${errorMessage}`,
+        'Hubo un error al generar el código QR del monedero.',
       );
     }
   }

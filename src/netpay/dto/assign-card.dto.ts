@@ -55,17 +55,6 @@ export class AssignCardDto {
   preAuth?: boolean = false;
 
   @ApiPropertyOptional({
-    description:
-      'CVV2 de la tarjeta. Solo se reenvía a NetPay para asignar el token; nunca se almacena.',
-    example: '123',
-    maxLength: 4,
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(4)
-  cvv2?: string;
-
-  @ApiPropertyOptional({
     description: 'Nombre del titular de la tarjeta',
     example: 'Juan',
     maxLength: 100,

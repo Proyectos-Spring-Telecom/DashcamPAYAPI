@@ -1,4 +1,10 @@
 import {
+  clienteHijosDesdeSp,
+  clientesPermitidos,
+  invalidateClientesPermitidos,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -18,6 +24,7 @@ import {
   EstatusEnumBitcora,
 } from 'src/common/ApiResponse';
 import { CatpasajeroService } from 'src/cattiposasajeros/catpasajero.service';
+import { forbidTenantMove } from 'src/common/tenant/forbid-tenant-move';
 import {
   EnumModulos,
   EnumTipoDescuento,
@@ -39,8 +46,24 @@ export class ClientesService {
   async createCliente(
     createClienteDto: CreateClienteDto,
     idUser: number,
+    clienteActor = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      if (
+        Number(rol) !== 1 &&
+        createClienteDto.idPadre != null &&
+        createClienteDto.idPadre !== undefined
+      ) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(createClienteDto.idPadre))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       //Buscamos al cliente y verificamos
       const clienteCreate = await this.clienteRepository.findOne({
         where: {
@@ -56,6 +79,7 @@ export class ClientesService {
       //Creamos el nuevo cliente
       const clienteData = await this.clienteRepository.create(createClienteDto);
       const clienteCreado = await this.clienteRepository.save(clienteData);
+      invalidateClientesPermitidos();
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { createClienteDto };
@@ -79,7 +103,12 @@ export class ClientesService {
       };
 
       //consumimos el servicio crear catpasajero estandas
-      await this.catpasajeroService.create(idUser, bodyCatPasajero);
+      await this.catpasajeroService.create(
+        idUser,
+        bodyCatPasajero,
+        clienteActor,
+        rol,
+      );
 
       //Api response
       const result: ApiCrudResponse = {
@@ -110,51 +139,23 @@ export class ClientesService {
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar crear un cliente.',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes padre e hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   private async clienteHijosPag(cliente: number) {
-    const result = await this.clienteRepository.query(
-      'CALL spGetClientes(?);',
-      [cliente],
+    const ids = (await clientesPermitidos(this.clienteRepository.manager, cliente)).filter(
+      (id) => id !== Number(cliente),
     );
-
-    const rows = result?.[0] ?? [];
-
-    // Construir ids y quitar el cliente padre
-    const ids = rows
-      .map((row: any) => Number(row.Id))
-      .filter((id) => !isNaN(id) && id !== cliente); // 👈 QUITAR EL CLIENTE PADRE
-
     if (ids.length === 0) {
       return { ids: [], placeholders: '' };
     }
-
-    const placeholders = ids.map(() => '?').join(', ');
-
-    return { ids, placeholders };
+    return { ids, placeholders: ids.map(() => '?').join(', ') };
   }
 
   // ========================================
@@ -220,8 +221,14 @@ FROM Clientes
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijosPag(cliente);
+          if (!tieneIdsTenant(ids)) {
+            clientes = [];
+            totalResult = [{ total: 0 }];
+            break;
+          }
           clientes = await this.clienteRepository.query(
             `
 SELECT
@@ -329,6 +336,7 @@ ORDER BY c.Id ASC;
           );
           break;
 
+        case 3:
         default:
           // Usuarios normales - solo sus zonas asignadas
           if (!cliente) {
@@ -337,6 +345,10 @@ ORDER BY c.Id ASC;
             );
           }
           const { ids, placeholders } = await this.clienteHijos(cliente);
+          if (!tieneIdsTenant(ids)) {
+            clientes = [];
+            break;
+          }
           clientes = await this.clienteRepository.query(
             `
 SELECT
@@ -387,6 +399,9 @@ ORDER BY c.Id ASC;
   ): Promise<ApiResponseCommon> {
     try {
       const { ids, placeholders } = await this.clienteHijos(cliente);
+      if (!tieneIdsTenant(ids)) {
+        return { data: [] };
+      }
       const clientes = await this.clienteRepository.query(
         `
 SELECT
@@ -450,7 +465,6 @@ ORDER BY Id ASC
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al obtener el listado de clientes.',
-        error: error.message,
       });
     }
   }
@@ -458,17 +472,29 @@ ORDER BY Id ASC
   // ========================================
   // 🔹 OBTENER UN CLIENTE
   // ========================================
-  async getOneCliente(id: number) {
+  async getOneCliente(id: number, cliente = 0, rol = 1) {
     try {
-      const cliente = await this.clienteRepository.findOne({
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          cliente,
+        );
+        if (!permitidos.includes(Number(id))) {
+          throw new NotFoundException(
+            `El cliente con ID: ${id} no fue encontrado.`,
+          );
+        }
+      }
+
+      const row = await this.clienteRepository.findOne({
         where: { id: id },
       });
-      if (!cliente) {
+      if (!row) {
         throw new NotFoundException(
           `El cliente con ID: ${id} no fue encontrado.`,
         );
       }
-      return { data: cliente };
+      return { data: row };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -486,8 +512,22 @@ ORDER BY Id ASC
     id: number,
     idUser: number,
     updateClienteDto: UpdateClienteDto,
+    clienteActor = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(id))) {
+          throw new NotFoundException(
+            `El cliente con ID: ${id} no fue encontrado.`,
+          );
+        }
+      }
+
       //Buscamos al cliente y verificamos
       const Cliente = await this.clienteRepository.findOne({
         where: { id: id },
@@ -497,9 +537,16 @@ ORDER BY Id ASC
           `El cliente con ID: ${id} no fue encontrado.`,
         );
       }
+      forbidTenantMove(
+        Cliente.idPadre,
+        updateClienteDto as any,
+        'idPadre',
+        'Cliente no encontrado',
+      );
 
       //Actualizamos datos del cliente
       await this.clienteRepository.update(id, updateClienteDto);
+      invalidateClientesPermitidos();
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updateClienteDto };
@@ -546,7 +593,6 @@ ORDER BY Id ASC
       }
       throw new InternalServerErrorException({
         message: `Error al actualizar la información del cliente con ID: ${id}`,
-        error: error.message,
       });
     }
   }
@@ -557,20 +603,34 @@ ORDER BY Id ASC
   async updateClienteStatus(
     id: number,
     idUser: number,
-    cliente: number,
+    clienteActor: number,
     updateClienteEstatusDto: UpdateClienteEstatusDto,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(id))) {
+          throw new NotFoundException(`Cliente con ID: ${id} no encontrado`);
+        }
+      }
+
       //Buscamos al cliente y verificamos
-      const cliente = await this.clienteRepository.findOne({
+      const clienteRow = await this.clienteRepository.findOne({
         where: { id: id },
       });
-      if (!cliente) {
+      if (!clienteRow) {
         throw new NotFoundException(`Cliente con ID: ${id} no encontrado`);
       }
 
       //Obtenemos los clientes hijos
       const { ids, placeholders } = await this.clienteHijos(id);
+      if (!tieneIdsTenant(ids)) {
+        throw new NotFoundException(`Cliente con ID: ${id} no encontrado`);
+      }
 
       //Obtenemos el valor de estatus
       const estatus = updateClienteEstatusDto.estatus;
@@ -579,10 +639,10 @@ ORDER BY Id ASC
       await this.clienteRepository.query(
         `
         UPDATE Clientes
-        SET Estatus = ${estatus}
-        WHERE Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+        SET Estatus = ?
+        WHERE Id IN (${placeholders})
         `,
-        [...ids],
+        [estatus, ...ids],
       );
 
       //-----Registro en la bitacora----- SUCCESS
@@ -604,7 +664,7 @@ ORDER BY Id ASC
         estatus: { estatus: estatus },
         data: {
           id: id,
-          nombre: `${cliente.nombre} ${cliente.apellidoPaterno} ` || '',
+          nombre: `${clienteRow.nombre} ${clienteRow.apellidoPaterno} ` || '',
         },
       };
       return result;
@@ -626,7 +686,6 @@ ORDER BY Id ASC
       }
       throw new InternalServerErrorException({
         message: `Error al cambiar el estatus del cliente con ID: ${id}.`,
-        error: error.message,
       });
     }
   }
@@ -637,9 +696,22 @@ ORDER BY Id ASC
   async removeCliente(
     id: number,
     idUser: number,
-    _cliente: number,
+    clienteActor: number,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(id))) {
+          throw new NotFoundException(
+            `El cliente con ID: ${id} no fue encontrado.`,
+          );
+        }
+      }
+
       //Buscamos al cliente y verificamos
       const clienteEliminar = await this.clienteRepository.findOne({
         where: { id: id },
@@ -652,6 +724,11 @@ ORDER BY Id ASC
 
       //Obtenemos los clientes hijos
       const { ids, placeholders } = await this.clienteHijos(id);
+      if (!tieneIdsTenant(ids)) {
+        throw new NotFoundException(
+          `El cliente con ID: ${id} no fue encontrado.`,
+        );
+      }
 
       //Hacemos eliminado logico al cliente padre e hijos
       await this.clienteRepository.query(
@@ -705,7 +782,6 @@ ORDER BY Id ASC
       }
       throw new InternalServerErrorException({
         message: `Error al eliminar el cliente con ID: ${id}.`,
-        error: error.message,
       });
     }
   }

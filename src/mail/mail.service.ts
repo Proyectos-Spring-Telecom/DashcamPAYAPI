@@ -2,10 +2,17 @@
 
 import { Injectable } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import { escapeHtml } from 'src/common/html-escape';
 
 @Injectable()
 export class MailService {
   private transporter: nodemailer.Transporter;
+
+  private frontendBaseUrl(): string {
+    return (
+      process.env.FRONTEND_BASE_URL || 'https://dashcampay.com/dev'
+    ).replace(/\/$/, '');
+  }
 
   constructor() {
     const smtpPassword =
@@ -36,7 +43,9 @@ export class MailService {
     token: string,
     codigo: string,
   ) {
-    const _url = `https://dashcampay.com/dev/login/verify?token=${token}`;
+    const safeName = escapeHtml(name);
+    const safeCodigo = escapeHtml(codigo);
+    const _url = `${this.frontendBaseUrl()}/login/verify?token=${encodeURIComponent(token)}`;
     await this.transporter.sendMail({
       from: `<${process.env.E_MAIL}>`,
       to,
@@ -71,7 +80,7 @@ export class MailService {
                     <tr>
                         <td style="padding: 0 2rem; " align="center">
                             <h5 style="color: #1F5AA8; font-size: 30px; text-align:center">
-                                ¡Bienvenido, ${name}!
+                                ¡Bienvenido, ${safeName}!
                             </h5>
                             <p
                                 style="font-family: 'Open Sans', sans-serif; font-size: 16px; text-align: center; margin-top: -30px;">
@@ -82,7 +91,7 @@ export class MailService {
                                 <tr>
                                     <td
                                         style="background-color:#A6CE39; color:#ffffff; font-size:28px; font-weight:bold; padding:18px 25px; border-radius:10px; letter-spacing:8px; font-family:monospace;">
-                                        ${codigo}
+                                        ${safeCodigo}
                                     </td>
                                 </tr>
                             </table>
@@ -140,7 +149,7 @@ export class MailService {
   }
 
   async sendResetPasswordEmail(to: string, name: string, token: string) {
-    const url = `https://dashcampay.com/dev/signup?token=${token}`;
+    const url = `${this.frontendBaseUrl()}/signup?token=${encodeURIComponent(token)}`;
 
     await this.transporter.sendMail({
       from: ` <${process.env.E_MAIL}>`,

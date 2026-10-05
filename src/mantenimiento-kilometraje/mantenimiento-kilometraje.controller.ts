@@ -22,12 +22,14 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Mantenimiento kilometraje')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('mantenimiento-kilometraje')
 @TenantResource('mantenimientoKilometraje')
 export class MantenimientoKilometrajeController {
@@ -66,6 +68,8 @@ export class MantenimientoKilometrajeController {
     return await this.mantenimientoKilometrajeService.create(
       createMantenimientoKilometrajeDto,
       idUser,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -191,6 +195,8 @@ export class MantenimientoKilometrajeController {
       id,
       updateMantenimientoKilometrajeDto,
       idUser,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -223,7 +229,12 @@ export class MantenimientoKilometrajeController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.mantenimientoKilometrajeService.desactivar(id, idUser);
+    return await this.mantenimientoKilometrajeService.desactivar(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Patch(':id/activar')
@@ -259,6 +270,11 @@ export class MantenimientoKilometrajeController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.mantenimientoKilometrajeService.activar(id, idUser);
+    return await this.mantenimientoKilometrajeService.activar(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

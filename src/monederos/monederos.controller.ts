@@ -30,10 +30,12 @@ import {
   ApiResponse,
   ApiQuery,
 } from '@nestjs/swagger';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Monederos')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 9, 11)
 @Controller('monederos')
 export class MonederosController {
   constructor(private readonly monederosService: MonederosService) {}
@@ -43,6 +45,7 @@ export class MonederosController {
   // ========================================
 
   @Post('reporte/extravio')
+  @Roles(1, 2, 9, 11)
   reportarExtravio(
     @Body() updateMonederoExtravioDto: UpdateMonederoExtravioDto,
     @Request() req,
@@ -51,13 +54,22 @@ export class MonederosController {
     return this.monederosService.reportarExtravio(
       +idUser,
       updateMonederoExtravioDto,
+      Number(req.user.cliente),
+      Number(req.user.rol),
+      String(req.user.email || ''),
     );
   }
 
   @Post()
+  @Roles(1, 2, 11)
   createMonedero(@Body() createMonederoDto: CreateMonederoDto, @Request() req) {
     const idUser = req.user.userId;
-    return this.monederosService.createMonedero(createMonederoDto, idUser);
+    return this.monederosService.createMonedero(
+      createMonederoDto,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   // ========================================
@@ -101,11 +113,16 @@ export class MonederosController {
   }
 
   @Get('numero/serie/:numeroSerie')
+  @TenantResource({ resolver: 'monederoBySerie', idParam: 'numeroSerie' })
   findOneMonederoBySerie(
     @Param('numeroSerie') numeroSerie: string,
-    @Request() _req,
+    @Request() req,
   ) {
-    return this.monederosService.findOneMonederoBySerie(numeroSerie);
+    return this.monederosService.findOneMonederoBySerie(
+      numeroSerie,
+      Number(req.user?.cliente),
+      Number(req.user?.rol),
+    );
   }
 
   @Get('paginados/activos')
@@ -177,8 +194,12 @@ export class MonederosController {
 
   @Get(':id')
   @TenantResource('monedero')
-  findOneMonedero(@Param('id', ParseIntPipe) id: number, @Request() _req) {
-    return this.monederosService.findOneMonedero(id);
+  findOneMonedero(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.monederosService.findOneMonedero(
+      id,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   // ========================================
@@ -186,6 +207,7 @@ export class MonederosController {
   // ========================================
 
   @Put(':id')
+  @Roles(1, 2, 11)
   @TenantResource('monedero')
   updateMonedero(
     @Param('id', ParseIntPipe) id: number,
@@ -193,7 +215,13 @@ export class MonederosController {
     @Request() req,
   ) {
     const idUser = req.user.userId;
-    return this.monederosService.updateMonedero(id, idUser, updateMonederoDto);
+    return this.monederosService.updateMonedero(
+      id,
+      idUser,
+      updateMonederoDto,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   // ========================================
@@ -201,6 +229,7 @@ export class MonederosController {
   // ========================================
 
   @Patch('tipo/pasajero/:id')
+  @Roles(1, 2, 11)
   @TenantResource('monedero')
   updateMonederoTipoPasajero(
     @Param('id', ParseIntPipe) id: number,
@@ -212,10 +241,13 @@ export class MonederosController {
       id,
       idUser,
       updateMonederoCatPasajeroDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
   @Patch('estatus/:id')
+  @Roles(1, 2, 11)
   @TenantResource('monedero')
   updateMonederoEstatus(
     @Param('id', ParseIntPipe) id: number,
@@ -227,6 +259,8 @@ export class MonederosController {
       id,
       idUser,
       updateMonederoEstatusDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -235,9 +269,15 @@ export class MonederosController {
   // ========================================
 
   @Delete(':id')
+  @Roles(1, 2)
   @TenantResource('monedero')
   removeMonedero(@Param('id', ParseIntPipe) id: number, @Request() req) {
     const idUser = req.user.userId;
-    return this.monederosService.removeMonedero(id, idUser);
+    return this.monederosService.removeMonedero(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

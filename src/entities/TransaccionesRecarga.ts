@@ -2,6 +2,9 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { applySchema } from 'src/common/apply-schema.decorator';
 
 @applySchema
+@Index('UQ_TransaccionesRecarga_ClaveIdempotencia', ['claveIdempotencia'], {
+  unique: true,
+})
 @Index(
   'FK_TransaccionesRecargas_CatTiposTransacciones_idx',
   ['idTipoTransaccion'],
@@ -30,6 +33,14 @@ export class TransaccionesRecarga {
 
   @Column('decimal', { name: 'Monto', precision: 10, scale: 2 })
   monto: number;
+
+  @Column('decimal', {
+    name: 'MontoReembolsado',
+    precision: 10,
+    scale: 2,
+    default: () => "'0.00'",
+  })
+  montoReembolsado: number;
 
   @Column('decimal', {
     name: 'LatitudFinal',
@@ -84,4 +95,11 @@ export class TransaccionesRecarga {
 
   @Column('varchar', { name: 'ReferenceIdNetPay', nullable: true, length: 150 })
   referenceIdNetPay: string | null;
+
+  @Column('varchar', {
+    name: 'ClaveIdempotencia',
+    length: 100,
+    nullable: true,
+  })
+  claveIdempotencia: string | null;
 }

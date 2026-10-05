@@ -1,7 +1,11 @@
+import { clienteHijosDesdeSp, tieneIdsTenant } from 'src/common/tenant/ownership-resolvers';
 import {
+  BadRequestException,
+  ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   Inject,
   forwardRef,
@@ -26,6 +30,7 @@ import { MonitoreoService } from 'src/monitoreo/monitoreo.service';
 
 @Injectable()
 export class PosicionesService {
+  private readonly logger = new Logger(PosicionesService.name);
   constructor(
     @InjectRepository(Posiciones)
     private readonly posicionesRepository: Repository<Posiciones>,
@@ -47,9 +52,84 @@ export class PosicionesService {
   // ========================================
   async create(
     createPosicionesDto: CreatePosicionesDto,
+    actor: { userId: number; cliente: number; rol: number },
   ): Promise<ApiCrudResponse> {
     try {
-      //Creamos la posicion sin cargar relaciones
+      const lat = Number(createPosicionesDto.latitud);
+      const lon = Number(createPosicionesDto.longitud);
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lon) ||
+        (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001) ||
+        Math.abs(lat) > 90 ||
+        Math.abs(lon) > 180
+      ) {
+        throw new BadRequestException('Coordenadas GPS inválidas');
+      }
+
+      const usuario = await this.usuariosRepository.findOne({
+        where: { id: actor.userId },
+        select: ['id', 'validadorId', 'idCliente'],
+      });
+      if (!usuario) {
+        throw new ForbiddenException('No autorizado');
+      }
+
+      let serie = String(createPosicionesDto.numeroSerieValidador || '').trim();
+      if (Number(actor.rol) === 3) {
+        if (!usuario.validadorId) {
+          throw new ForbiddenException(
+            'El operador no tiene validador asignado.',
+          );
+        }
+        if (serie && serie !== usuario.validadorId) {
+          throw new ForbiddenException(
+            'El validador no coincide con el asignado.',
+          );
+        }
+        serie = usuario.validadorId;
+      }
+
+      const cuando = new Date(createPosicionesDto.fechaHora);
+      const delta = cuando.getTime() - Date.now();
+      if (
+        Number.isNaN(cuando.getTime()) ||
+        delta > 5 * 60 * 1000 ||
+        delta < -30 * 60 * 1000
+      ) {
+        throw new BadRequestException('La marca de tiempo GPS no es válida');
+      }
+
+      const previa = await this.posicionesRepository.findOne({
+        where: {
+          numeroSerieValidador: serie,
+          fechaHora: createPosicionesDto.fechaHora,
+        },
+      });
+      if (previa) {
+        return {
+          status: 'success',
+          message: 'Posicion creada correctamente',
+          data: {
+            id: Number(previa.id),
+            nombre: `${Number(previa.id)} ${serie}`,
+          },
+        };
+      }
+
+      const validador = await this.validadoresRepository.findOne({
+        where: { numeroSerie: serie },
+      });
+      if (!validador) {
+        throw new NotFoundException('Validador no encontrado');
+      }
+      if (Number(actor.rol) !== 1) {
+        const { ids } = await this.clienteHijos(Number(actor.cliente));
+        if (!ids.includes(Number(validador.idCliente))) {
+          throw new NotFoundException('Validador no encontrado');
+        }
+      }
+
       const newPosicion = this.posicionesRepository.create({
         exactitud: createPosicionesDto.exactitud,
         estado: createPosicionesDto.estado,
@@ -58,7 +138,7 @@ export class PosicionesService {
         latitud: createPosicionesDto.latitud,
         longitud: createPosicionesDto.longitud,
         fechaHora: createPosicionesDto.fechaHora,
-        numeroSerieValidador: createPosicionesDto.numeroSerieValidador,
+        numeroSerieValidador: serie,
       });
       const posicionSave = await this.posicionesRepository.save(newPosicion, {
         reload: false,
@@ -66,16 +146,10 @@ export class PosicionesService {
 
       // 🔥 NUEVO: Emitir actualización completa de unidad en tiempo real a usuarios conectados
       try {
-        // Obtener el validador para obtener el idCliente
-        const validador = await this.validadoresRepository.findOne({
-          where: { numeroSerie: posicionSave.numeroSerieValidador },
-        });
-
-        if (validador && this.monitoreoGateway && this.monitoreoService) {
-          // Obtener los datos completos de la unidad (igual formato que obtenerUnidades)
+        if (this.monitoreoGateway && this.monitoreoService) {
           const unidadCompleta =
             await this.monitoreoService.obtenerUnidadPorValidador(
-              posicionSave.numeroSerieValidador,
+              serie,
               validador.idCliente,
             );
 
@@ -89,20 +163,8 @@ export class PosicionesService {
         }
       } catch (wsError) {
         // No fallar la creación si hay error en WebSocket
-        console.error('Error al emitir actualización WebSocket:', wsError);
+        this.logger.error('Error al emitir actualización WebSocket');
       }
-
-      // Registro en la bitácora----- SUCCESS
-      const querylogger = { createPosicionesDto };
-      await this.bitacoraLogger.logToBitacora(
-        'Posiciones',
-        `Se creó una Posicion con Numero de serie Validador: ${posicionSave.numeroSerieValidador}`,
-        'CREATE',
-        querylogger,
-        1,
-        24,
-        EstatusEnumBitcora.SUCCESS,
-      );
 
       //APis Response
       const result: ApiCrudResponse = {
@@ -117,26 +179,24 @@ export class PosicionesService {
       return result;
     } catch (error) {
       // Registro en la bitácora----- ERROR
-      console.log(error);
-      const querylogger = { createPosicionesDto };
+      const querylogger = {
+        numeroSerieValidador: createPosicionesDto.numeroSerieValidador,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Posiciones',
-        `Se creó una Posicion con Numero de serie Validador: ${createPosicionesDto.numeroSerieValidador}`,
+        'Error al crear la posición',
         'CREATE',
         querylogger,
-        1,
+        actor.userId,
         24,
         EstatusEnumBitcora.ERROR,
-        error.message,
+        'Error al crear Posicion',
       );
 
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new InternalServerErrorException({
-        message: 'Error al crear Posicion',
-        error,
-      });
+      throw new InternalServerErrorException('Error al crear Posicion');
     }
   }
 
@@ -206,22 +266,7 @@ export class PosicionesService {
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   private async consultarPoscionesPaginado(
@@ -406,6 +451,7 @@ INNER JOIN Clientes c
   `,
           );
           break;
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           posiciones = await this.consultarPoscionesPaginado(
@@ -561,6 +607,7 @@ ORDER BY p.Id DESC
         `,
           );
           break;
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           posiciones = await this.consultarPosciones(cliente);
@@ -587,8 +634,23 @@ ORDER BY p.Id DESC
     }
   }
 
-  async findOne(id: number): Promise<ApiResponseCommon> {
+  async findOne(
+    id: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiResponseCommon> {
     try {
+      let whereSql = 'WHERE p.Id = ?';
+      let params: Array<number> = [id];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Datos de posicion no encontrado');
+        }
+        whereSql += ` AND d.IdCliente IN (${placeholders})`;
+        params = [id, ...ids];
+      }
+
       const query = `
       SELECT
         p.Id AS id,
@@ -618,10 +680,10 @@ ORDER BY p.Id DESC
         ON p.NumeroSerieValidador = d.NumeroSerie
       INNER JOIN Clientes c
         ON d.IdCliente = c.Id
-      WHERE p.Id = ?;
+      ${whereSql};
     `;
 
-      const posiciones = await this.posicionesRepository.query(query, [id]);
+      const posiciones = await this.posicionesRepository.query(query, params);
 
       if (!posiciones || posiciones.length === 0) {
         throw new NotFoundException('Datos de posicion no encontrado');

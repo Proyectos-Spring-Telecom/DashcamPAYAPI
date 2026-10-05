@@ -1,4 +1,9 @@
 import {
+  clienteHijosDesdeSp,
+  clientesPermitidos,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -42,8 +47,29 @@ export class OperadoresService {
   async createOperador(
     createOperadoreDto: CreateOperadoreDto,
     idUser: number,
+    clienteActor = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      const usuarioTarget = await this.usuariosRepository.findOne({
+        where: { id: createOperadoreDto.idUsuario },
+        select: { id: true, idCliente: true },
+      });
+      if (!usuarioTarget) {
+        throw new NotFoundException(
+          `Usuario con ID ${createOperadoreDto.idUsuario} no encontrado`,
+        );
+      }
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(usuarioTarget.idCliente))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       const operadorExistente = await this.licenciasRepository.findOne({
         where: { numeroLicencia: createOperadoreDto.numeroLicencia },
       });
@@ -135,29 +161,13 @@ export class OperadoresService {
       }
       throw new InternalServerErrorException({
         message: `Ha ocurrido un error durante el proceso de creación del operador.`,
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   // ========================================
@@ -268,6 +278,7 @@ INNER JOIN Usuarios u ON o.IdUsuario = u.Id
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
           // Consulta de datos paginados resto Usuario
@@ -393,7 +404,6 @@ AND u.Estatus = 1
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener la paginación de los operadores.',
-        error: error.message,
       });
     }
   }
@@ -450,6 +460,7 @@ ORDER BY o.Id DESC;
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
           operadores = await this.operadoresRepository.query(
@@ -519,7 +530,6 @@ ORDER BY o.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener el listado de los operadores.',
-        error: error.message,
       });
     }
   }
@@ -605,7 +615,6 @@ ORDER BY o.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener operadores por cliente',
-        error: error.message,
       });
     }
   }
@@ -694,9 +703,12 @@ ORDER BY o.Id DESC
           );
           break;
 
+        case 3:
         default:
-          const { ids, placeholders: _placeholders } =
-            await this.clienteHijos(cliente);
+          const { ids, placeholders } = await this.clienteHijos(cliente);
+          if (!tieneIdsTenant(ids)) {
+            throw new NotFoundException(`Operador con ID ${id} no encontrado.`);
+          }
           // Consulta de datos paginados resto Usuario
           operador = await this.operadoresRepository.query(
             `
@@ -745,7 +757,8 @@ LEFT JOIN Licencias l ON l.IdOperador = o.Id
 LEFT JOIN CatTipoLicencia ctl ON l.IdTipoLicencia = ctl.Id
 LEFT JOIN CatCategoriaLicencia ccl ON l.IdCategoriaLicencia = ccl.Id
 
-WHERE o.Id = ?   -- filtra un operador específico
+WHERE o.Id = ?
+  AND u.IdCliente IN (${placeholders})
 
 GROUP BY
   o.Id,
@@ -769,7 +782,7 @@ GROUP BY
 
 ORDER BY o.Id DESC
         `,
-            [...ids, id],
+            [id, ...ids],
           );
           break;
       }
@@ -795,8 +808,32 @@ ORDER BY o.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener operador.',
-        error: error.message,
       });
+    }
+  }
+
+  private async assertOperadorTenant(
+    id: number,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids, placeholders } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids)) {
+      throw new NotFoundException(`Operador con id: ${id} no encontrado`);
+    }
+    const rows = await this.operadoresRepository.query(
+      `
+SELECT o.Id
+FROM Operadores o
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+WHERE o.Id = ? AND u.IdCliente IN (${placeholders})
+LIMIT 1
+      `,
+      [id, ...ids],
+    );
+    if (!rows?.length) {
+      throw new NotFoundException(`Operador con id: ${id} no encontrado`);
     }
   }
 
@@ -807,8 +844,11 @@ ORDER BY o.Id DESC
     id: number,
     idUser: number,
     updateOperadorStatusDto: UpdateOperadorStatusDto,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertOperadorTenant(id, cliente, rol);
       const operador = await this.operadoresRepository.findOne({
         where: { id: id },
       });
@@ -861,7 +901,6 @@ ORDER BY o.Id DESC
       }
       throw new InternalServerErrorException({
         message: ' Error al actualizar el estatus al operador.',
-        error: error.message,
       });
     }
   }
@@ -873,13 +912,14 @@ ORDER BY o.Id DESC
     id: number,
     idUser: number,
     updateOperadoreDto: UpdateOperadoreDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
+      await this.assertOperadorTenant(id, cliente, rol);
       const operador = await this.operadoresRepository.findOne({
         where: { id: id },
       });
-      console.log(operador?.idUsuario, { fotoPerfil: updateOperadoreDto.foto });
-
       if (!operador) {
         throw new NotFoundException(`Operador con id: ${id} no encontrado`);
       }
@@ -899,8 +939,27 @@ ORDER BY o.Id DESC
         operador.foto = updateOperadoreDto.foto;
       if (updateOperadoreDto.estatus !== undefined)
         operador.estatus = updateOperadoreDto.estatus;
-      if (updateOperadoreDto.idUsuario !== undefined)
+      if (
+        updateOperadoreDto.idUsuario !== undefined &&
+        Number(updateOperadoreDto.idUsuario) !== Number(operador.idUsuario)
+      ) {
+        const actual = await this.usuariosRepository.findOne({
+          where: { id: operador.idUsuario },
+          select: { idCliente: true },
+        });
+        const destino = await this.usuariosRepository.findOne({
+          where: { id: updateOperadoreDto.idUsuario },
+          select: { idCliente: true },
+        });
+        if (
+          !actual ||
+          !destino ||
+          Number(actual.idCliente) !== Number(destino.idCliente)
+        ) {
+          throw new NotFoundException(`Operador con id: ${id} no encontrado`);
+        }
         operador.idUsuario = updateOperadoreDto.idUsuario;
+      }
       await this.operadoresRepository.save(operador);
       // Sincronizar la foto en Usuarios.FotoPerfil usando el idUsuario del operador
       if (
@@ -953,7 +1012,6 @@ ORDER BY o.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar al operador.',
-        error: error.message,
       });
     }
   }
@@ -961,8 +1019,9 @@ ORDER BY o.Id DESC
   // ========================================
   // 🔹 ELIMINAR OPERADOR
   // ========================================
-  async removeOperador(id: number, idUser: number) {
+  async removeOperador(id: number, idUser: number, cliente = 0, rol = 1) {
     try {
+      await this.assertOperadorTenant(id, cliente, rol);
       const operador = await this.operadoresRepository.findOne({
         where: { id: id },
       });
@@ -1013,7 +1072,6 @@ ORDER BY o.Id DESC
       throw new InternalServerErrorException({
         message:
           'Ha ocurrido un error durante el proceso de eliminación del operador.',
-        error: error.message,
       });
     }
   }

@@ -1,11 +1,23 @@
-import { Controller, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
-import { ApiBearerAuth } from '@nestjs/swagger';
+import { Public } from './guard/public.decorator';
+import { ApiExcludeEndpoint } from '@nestjs/swagger';
 
-@ApiBearerAuth('bearer-token')
-@UseGuards(JwtAuthGuard)
 @Controller()
 export class AppController {
   constructor(private readonly appService: AppService) {}
+
+  @Public()
+  @Get('health/live')
+  @ApiExcludeEndpoint()
+  live() {
+    return { status: 'ok' };
+  }
+
+  @Public()
+  @Get('health/ready')
+  @ApiExcludeEndpoint()
+  ready() {
+    return this.appService.ready();
+  }
 }

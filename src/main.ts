@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpStringResponseFilter } from './utils/http-string-response.filter';
+import { ClampPageLimitInterceptor } from './common/clamp-page-limit.interceptor';
 import { SocketIOAdapter } from './common/socket-io.adapter';
 import helmet from 'helmet';
 import basicAuth from 'express-basic-auth';
@@ -53,6 +54,7 @@ async function bootstrap() {
   }
 
   app.useGlobalFilters(new HttpStringResponseFilter());
+  app.useGlobalInterceptors(new ClampPageLimitInterceptor());
 
   // Configurar CORS — solo orígenes autorizados (PCI DSS Req. 1.3 / 6.4.3)
   // Los orígenes se leen de la variable de entorno CORS_ORIGINS (separados por coma).
@@ -205,6 +207,7 @@ async function bootstrap() {
     }),
   );
 
+  app.enableShutdownHooks();
   await app.listen(process.env.PORT ?? 3000);
 }
 void bootstrap();

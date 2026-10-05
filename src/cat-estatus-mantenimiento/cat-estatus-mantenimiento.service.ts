@@ -143,7 +143,7 @@ export class CatEstatusMantenimientoService {
         throw error;
       }
       throw new BadRequestException(
-        error.message || 'Error al obtener los estatus de mantenimiento',
+        'Error al obtener los estatus de mantenimiento',
       );
     }
   }
@@ -309,7 +309,6 @@ export class CatEstatusMantenimientoService {
       }
       throw new InternalServerErrorException({
         message: 'Error al eliminar el estatus de mantenimiento.',
-        error: error.message,
       });
     }
   }

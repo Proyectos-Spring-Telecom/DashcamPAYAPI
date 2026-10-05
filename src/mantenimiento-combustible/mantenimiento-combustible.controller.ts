@@ -22,12 +22,14 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Mantenimiento combustible')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('mantenimiento-combustible')
 @TenantResource('mantenimientoCombustible')
 export class MantenimientoCombustibleController {
@@ -66,6 +68,8 @@ export class MantenimientoCombustibleController {
     return await this.mantenimientoCombustibleService.create(
       createMantenimientoCombustibleDto,
       idUser,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -191,6 +195,8 @@ export class MantenimientoCombustibleController {
       id,
       updateMantenimientoCombustibleDto,
       idUser,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -223,7 +229,12 @@ export class MantenimientoCombustibleController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.mantenimientoCombustibleService.desactivar(id, idUser);
+    return await this.mantenimientoCombustibleService.desactivar(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Patch(':id/activar')
@@ -259,6 +270,11 @@ export class MantenimientoCombustibleController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.mantenimientoCombustibleService.activar(id, idUser);
+    return await this.mantenimientoCombustibleService.activar(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

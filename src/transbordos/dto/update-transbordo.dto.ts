@@ -1,4 +1,7 @@
-import { PartialType } from '@nestjs/swagger';
+import { OmitType, PartialType } from '@nestjs/swagger';
 import { CreateTransbordoDto } from './create-transbordo.dto';
 
-export class UpdateTransbordoDto extends PartialType(CreateTransbordoDto) {}
+/** N-07: el tenant no se mueve en el PATCH. */
+export class UpdateTransbordoDto extends PartialType(
+  OmitType(CreateTransbordoDto, ['idCliente'] as const),
+) {}

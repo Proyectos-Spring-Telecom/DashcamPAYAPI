@@ -1,7 +1,9 @@
+import { clienteHijosDesdeSp, tieneIdsTenant } from 'src/common/tenant/ownership-resolvers';
 import {
   HttpException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { CreateViajestransaccioneDto } from './dto/create-viajestransaccione.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -29,8 +31,29 @@ export class ViajestransaccionesService {
   async create(
     idUser: number,
     createViajestransaccioneDto: CreateViajestransaccioneDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Viaje no encontrado');
+        }
+        const rows = await this.viajestransaccionesRepository.query(
+          `
+SELECT v.Id
+FROM Viajes v
+WHERE v.Id = ? AND v.IdCliente IN (${placeholders})
+LIMIT 1
+          `,
+          [createViajestransaccioneDto.idViaje, ...ids],
+        );
+        if (!rows?.length) {
+          throw new NotFoundException('Viaje no encontrado');
+        }
+      }
+
       const newViajeTransacciones =
         await this.viajestransaccionesRepository.create(
           createViajestransaccioneDto,
@@ -80,29 +103,13 @@ export class ViajestransaccionesService {
       }
       throw new InternalServerErrorException({
         message: `Se produjo un error al crear el viajestransaccion.`,
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   // Consultar posiciones para roles que usan clientes hijos
@@ -168,8 +175,8 @@ INNER JOIN Zonas reg ON r.IdZona = reg.Id
 
 -- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
 LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
-LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
-LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = COALESCE(td.IdTransaccionOrigen, td.Id)
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = COALESCE(tr.IdTransaccionOrigen, tr.Id)
 
 WHERE c.Id IN (${placeholders})
 
@@ -259,8 +266,8 @@ INNER JOIN Zonas reg ON r.IdZona = reg.Id
 
 -- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
 LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
-LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
-LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = COALESCE(td.IdTransaccionOrigen, td.Id)
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = COALESCE(tr.IdTransaccionOrigen, tr.Id)
 
 WHERE c.Id = ?
 
@@ -354,8 +361,8 @@ INNER JOIN Zonas reg ON r.IdZona = reg.Id
 
 -- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
 LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
-LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
-LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = COALESCE(td.IdTransaccionOrigen, td.Id)
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = COALESCE(tr.IdTransaccionOrigen, tr.Id)
 
 WHERE v.Estatus = 1  -- Filtra los viajes activos
 
@@ -384,6 +391,7 @@ ORDER BY v.Id DESC;
               `,
           );
           break;
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           viajestransacciones =
@@ -411,7 +419,6 @@ ORDER BY v.Id DESC;
       throw new InternalServerErrorException({
         message:
           'Ocurrió un error al intentar obtener un listado de viajestransacciones.',
-        error: error.message,
       });
     }
   }
@@ -481,8 +488,8 @@ INNER JOIN Zonas reg ON r.IdZona = reg.Id
 
 -- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
 LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
-LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
-LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = COALESCE(td.IdTransaccionOrigen, td.Id)
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = COALESCE(tr.IdTransaccionOrigen, tr.Id)
 
 WHERE c.Id IN (${placeholders})
 
@@ -530,8 +537,8 @@ INNER JOIN Zonas reg ON r.IdRegion = reg.Id
 
 -- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
 LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
-LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
-LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = COALESCE(td.IdTransaccionOrigen, td.Id)
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = COALESCE(tr.IdTransaccionOrigen, tr.Id)
 
 WHERE c.Id IN (${placeholders})
 `;
@@ -602,8 +609,8 @@ INNER JOIN Zonas reg ON r.IdZona = reg.Id
 
 -- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
 LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
-LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
-LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = COALESCE(td.IdTransaccionOrigen, td.Id)
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = COALESCE(tr.IdTransaccionOrigen, tr.Id)
 
 WHERE c.Id = ?
 
@@ -650,8 +657,8 @@ INNER JOIN Zonas reg ON r.IdZona = reg.Id
 
 -- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
 LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
-LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
-LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = COALESCE(td.IdTransaccionOrigen, td.Id)
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = COALESCE(tr.IdTransaccionOrigen, tr.Id)
 
 WHERE c.Id = ?
 `;
@@ -732,8 +739,8 @@ INNER JOIN Zonas reg ON r.IdZona = reg.Id
 
 -- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
 LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
-LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
-LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = COALESCE(td.IdTransaccionOrigen, td.Id)
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = COALESCE(tr.IdTransaccionOrigen, tr.Id)
 
 
 
@@ -776,13 +783,14 @@ INNER JOIN Zonas reg ON r.IdZona = reg.Id
 
 -- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
 LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
-LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
-LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = COALESCE(td.IdTransaccionOrigen, td.Id)
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = COALESCE(tr.IdTransaccionOrigen, tr.Id)
 
 
   `,
           );
           break;
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           viajestransacciones =
@@ -823,13 +831,23 @@ LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
       throw new InternalServerErrorException({
         message:
           'Ocurrió un error al intentar obtener un listado de viajestransacciones.',
-        error: error.message,
       });
     }
   }
 
-  async findOneViajes(id: number) {
+  async findOneViajes(id: number, cliente = 0, rol = 1) {
     try {
+      let whereSql = 'WHERE v.Id = ?';
+      let params: Array<number> = [id];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Viaje no encontrado');
+        }
+        whereSql += ` AND v.IdCliente IN (${placeholders})`;
+        params = [id, ...ids];
+      }
+
       const viajestransacciones =
         await this.viajestransaccionesRepository.query(
           `
@@ -891,10 +909,10 @@ INNER JOIN Zonas reg ON r.IdZona = reg.Id
 
 -- Transacciones relacionadas al viaje (usamos LEFT JOIN para permitir que los viajes sin transacciones también aparezcan)
 LEFT JOIN ViajesTransacciones vt ON vt.IdViaje = v.Id
-LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = td.Id
-LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = tr.Id
+LEFT JOIN HistoricoTransaccionesDebito td ON vt.IdTransaccionDebito = COALESCE(td.IdTransaccionOrigen, td.Id)
+LEFT JOIN HistoricoTransaccionesRecarga tr ON vt.IdTransaccionRecarga = COALESCE(tr.IdTransaccionOrigen, tr.Id)
 
-WHERE v.Id = ?
+${whereSql}
 
 GROUP BY
     v.Id,
@@ -918,8 +936,11 @@ GROUP BY
 
 ORDER BY v.Id DESC
               `,
-          [id],
+          params,
         );
+      if (!viajestransacciones?.length) {
+        throw new NotFoundException('Viaje no encontrado');
+      }
       const _data = viajestransacciones.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
@@ -941,13 +962,23 @@ ORDER BY v.Id DESC
       throw new InternalServerErrorException({
         message:
           'Ocurrió un error al intentar obtener un listado de viajestransacciones.',
-        error: error.message,
       });
     }
   }
 
-  async findOneTransacciones(id: number) {
+  async findOneTransacciones(id: number, cliente = 0, rol = 0) {
     try {
+      let whereSql = 'WHERE t.Id = ?';
+      let params: Array<number> = [id];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Transacción no encontrada');
+        }
+        whereSql += ` AND v.IdCliente IN (${placeholders})`;
+        params = [id, ...ids];
+      }
+
       const viajestransacciones =
         await this.viajestransaccionesRepository.query(
           `
@@ -973,11 +1004,14 @@ SELECT
 FROM ViajesTransacciones vt
 INNER JOIN Viajes v ON v.Id = vt.IdViaje
 INNER JOIN Transacciones t ON t.Id = vt.IdTransaccion
-WHERE t.Id = ?
+${whereSql}
 ORDER BY v.Id DESC;
               `,
-          [id],
+          params,
         );
+      if (!viajestransacciones?.length) {
+        throw new NotFoundException('Transacción no encontrada');
+      }
       const data = viajestransacciones.map((item) => ({
         ...item,
         idViaje: Number(item.idViaje),
@@ -999,7 +1033,6 @@ ORDER BY v.Id DESC;
       throw new InternalServerErrorException({
         message:
           'Ocurrió un error al intentar obtener un listado de viajestransacciones.',
-        error: error.message,
       });
     }
   }

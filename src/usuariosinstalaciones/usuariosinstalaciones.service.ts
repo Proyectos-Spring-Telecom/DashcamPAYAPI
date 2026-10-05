@@ -19,6 +19,11 @@ import {
   EstatusEnumBitcora,
 } from 'src/common/ApiResponse';
 import { UpdateUsuariosInstalacionesEstatusDto } from './dto/update-usuariosinstalacione-estatus.dto';
+import {
+  clienteHijosDesdeSp,
+  clientesPermitidos,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
 
 @Injectable()
 export class UsuariosinstalacionesService {
@@ -32,9 +37,15 @@ export class UsuariosinstalacionesService {
     private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
 
+  private async clienteHijos(cliente: number) {
+    return clienteHijosDesdeSp(this.instalacionesRepository.manager, cliente);
+  }
+
   async create(
     idUser: number,
     createUsuariosInstalacionesDto: CreateUsuariosInstalacionesDto,
+    clienteActor = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
       const usuario = await this.usuariosRepository.findOne({
@@ -49,6 +60,16 @@ export class UsuariosinstalacionesService {
         );
       }
       const idUsuarioCliente = usuario.idCliente;
+
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.instalacionesRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(idUsuarioCliente))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
 
       switch (idUser) {
         case 1:
@@ -138,24 +159,44 @@ export class UsuariosinstalacionesService {
     }
   }
 
-  async findAllList(): Promise<ApiResponseCommon> {
+  async findAllList(cliente = 0, rol = 1): Promise<ApiResponseCommon> {
     try {
-      const usuariosinstalaciones =
-        await this.usuariosinstalacionesRepository.find({
-          where: { estatus: 1 },
-        });
+      let whereSql = 'WHERE ui.Estatus = 1';
+      let params: number[] = [];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          return { data: [] };
+        }
+        whereSql += ` AND i.IdCliente IN (${placeholders})`;
+        params = [...ids];
+      }
 
-      //Forzamos a cambiar el id a number
-      const data = usuariosinstalaciones.map((item) => ({
+      const usuariosinstalaciones =
+        await this.usuariosinstalacionesRepository.query(
+          `
+SELECT
+  ui.Id AS id,
+  ui.IdUsuario AS idUsuario,
+  ui.IdInstalacion AS idInstalacion,
+  ui.Estatus AS estatus,
+  ui.FechaCreacion AS fechaCreacion,
+  ui.FechaActualizacion AS fechaActualizacion
+FROM UsuariosInstalaciones ui
+INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
+${whereSql}
+          `,
+          params,
+        );
+
+      const data = (usuariosinstalaciones || []).map((item) => ({
         ...item,
         id: Number(item.id),
+        idUsuario: Number(item.idUsuario),
+        idInstalacion: Number(item.idInstalacion),
       }));
 
-      const result: ApiResponseCommon = {
-        data: data,
-      };
-
-      return result;
+      return { data };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -166,36 +207,78 @@ export class UsuariosinstalacionesService {
     }
   }
 
-  async findAll(page: number, limit: number): Promise<ApiResponseCommon> {
+  async findAll(
+    page: number,
+    limit: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiResponseCommon> {
     try {
-      const [data, total] =
-        await this.usuariosinstalacionesRepository.findAndCount({
-          skip: (page - 1) * limit,
-          take: limit,
-        });
+      let whereSql = 'WHERE 1=1';
+      let params: number[] = [];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          return {
+            data: [],
+            paginated: { total: 0, page, lastPage: 0 },
+          };
+        }
+        whereSql += ` AND i.IdCliente IN (${placeholders})`;
+        params = [...ids];
+      }
 
-      //Forzamos a cambiar el id a number
-      const usuariosinstalaciones = data.map((item) => ({
+      const offset = (page - 1) * limit;
+      const data = await this.usuariosinstalacionesRepository.query(
+        `
+SELECT
+  ui.Id AS id,
+  ui.IdUsuario AS idUsuario,
+  ui.IdInstalacion AS idInstalacion,
+  ui.Estatus AS estatus,
+  ui.FechaCreacion AS fechaCreacion,
+  ui.FechaActualizacion AS fechaActualizacion
+FROM UsuariosInstalaciones ui
+INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
+${whereSql}
+ORDER BY ui.Id DESC
+LIMIT ? OFFSET ?
+        `,
+        [...params, limit, offset],
+      );
+
+      const totalResult = await this.usuariosinstalacionesRepository.query(
+        `
+SELECT COUNT(*) AS total
+FROM UsuariosInstalaciones ui
+INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
+${whereSql}
+        `,
+        params,
+      );
+      const total = Number(totalResult?.[0]?.total || 0);
+
+      const usuariosinstalaciones = (data || []).map((item) => ({
         ...item,
         id: Number(item.id),
+        idUsuario: Number(item.idUsuario),
+        idInstalacion: Number(item.idInstalacion),
       }));
 
-      //APi response
-      const result: ApiResponseCommon = {
+      return {
         data: usuariosinstalaciones,
         paginated: {
-          total: total,
+          total,
           page,
-          lastPage: Math.ceil(total / limit),
+          lastPage: Math.ceil(total / limit) || 0,
         },
       };
-      return result;
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: 'Error al obtener Paginado UsuariosZonas',
+        message: 'Error al obtener Paginado UsuariosInstalaciones',
         error,
       });
     }
@@ -228,17 +311,45 @@ export class UsuariosinstalacionesService {
     }
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, cliente = 0, rol = 1) {
     try {
-      const usuarioinstalacion =
-        await this.usuariosinstalacionesRepository.findOne({
-          where: { id: id },
-        });
-      if (!usuarioinstalacion) {
+      let whereSql = 'WHERE ui.Id = ?';
+      let params: number[] = [id];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('usuarioinstalacion no encontrado');
+        }
+        whereSql += ` AND i.IdCliente IN (${placeholders})`;
+        params = [id, ...ids];
+      }
+
+      const rows = await this.usuariosinstalacionesRepository.query(
+        `
+SELECT
+  ui.Id AS id,
+  ui.IdUsuario AS idUsuario,
+  ui.IdInstalacion AS idInstalacion,
+  ui.Estatus AS estatus,
+  ui.FechaCreacion AS fechaCreacion,
+  ui.FechaActualizacion AS fechaActualizacion
+FROM UsuariosInstalaciones ui
+INNER JOIN Instalaciones i ON ui.IdInstalacion = i.Id
+${whereSql}
+LIMIT 1
+        `,
+        params,
+      );
+      if (!rows?.length) {
         throw new NotFoundException('usuarioinstalacion no encontrado');
       }
-      //cambiamos el id a number
-      usuarioinstalacion.id = Number(usuarioinstalacion.id);
+
+      const usuarioinstalacion = {
+        ...rows[0],
+        id: Number(rows[0].id),
+        idUsuario: Number(rows[0].idUsuario),
+        idInstalacion: Number(rows[0].idInstalacion),
+      };
 
       return { data: usuarioinstalacion };
     } catch (error) {
@@ -246,7 +357,7 @@ export class UsuariosinstalacionesService {
         throw error;
       }
       throw new InternalServerErrorException({
-        message: 'Error al obtener UsuariosZonas Por ID',
+        message: 'Error al obtener UsuariosInstalaciones Por ID',
         error,
       });
     }
@@ -261,6 +372,35 @@ export class UsuariosinstalacionesService {
       // Extraer instalaciones del DTO
       const { idsInstalaciones, ..._usuarioInstalacionUpdate } =
         updateUsuariosinstalacioneDto;
+      if (
+        idsInstalaciones &&
+        Array.isArray(idsInstalaciones) &&
+        idsInstalaciones.length > 0
+      ) {
+        const usuario = await this.usuariosRepository.findOne({
+          where: { id },
+          select: { idCliente: true },
+        });
+        if (!usuario) {
+          throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
+        }
+        for (const instalacionId of idsInstalaciones) {
+          const instalacion = await this.instalacionesRepository.findOne({
+            where: { id: Number(instalacionId) },
+            select: { idCliente: true },
+          });
+          if (!instalacion) {
+            throw new NotFoundException(
+              `Instalación con ID ${instalacionId} no encontrada`,
+            );
+          }
+          if (Number(usuario.idCliente) !== Number(instalacion.idCliente)) {
+            throw new NotFoundException(
+              `Instalación con ID ${instalacionId} no encontrada`,
+            );
+          }
+        }
+      }
 
       // ----- ACTUALIZACIÓN DE INSTALACIONES -----
       if (idsInstalaciones && Array.isArray(idsInstalaciones)) {

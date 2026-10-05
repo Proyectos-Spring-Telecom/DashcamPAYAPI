@@ -1,7 +1,9 @@
+import { nowDb } from 'src/common/clock';
 import {
   HttpException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
@@ -18,11 +20,18 @@ export class HistoricoinstalacionesService {
   ) {}
 
   findAll() {
-    return `This action returns all historicoinstalaciones`;
+    // Listado HTTP stub: no expone datos hasta implementar consulta tenant.
+    return { data: [] };
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} historicoinstalacione`;
+  async findOne(id: number) {
+    const row = await this.historicoInstalacionesRepository.findOne({
+      where: { id },
+    });
+    if (!row) {
+      throw new NotFoundException('Histórico no encontrado');
+    }
+    return { data: row };
   }
 
   //Crear un historico
@@ -83,7 +92,6 @@ export class HistoricoinstalacionesService {
       }
       throw new InternalServerErrorException({
         message: `Ocurrió un problema al intentar crear historico de la instalación con ID: ${idInstalacion}.`,
-        error: error.message,
       });
     }
   }
@@ -120,9 +128,7 @@ export class HistoricoinstalacionesService {
         return n < 10 ? '0' + n : n;
       }
 
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
 
       const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
@@ -183,7 +189,6 @@ export class HistoricoinstalacionesService {
 
       throw new InternalServerErrorException({
         message: `Error al actualizar el histórico de la instalación con ID: ${instalacion.idInstalacion}.`,
-        error: error.message,
       });
     }
   }

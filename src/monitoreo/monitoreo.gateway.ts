@@ -1,3 +1,4 @@
+import { clienteHijosDesdeSp } from 'src/common/tenant/ownership-resolvers';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -14,6 +15,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConnectedUsers } from 'src/entities/ConnectedUsers';
 import { Clientes } from 'src/entities/Clientes';
+import { Usuarios } from 'src/entities/Usuarios';
+import {
+  isMissingTokenVersionColumn,
+  isTokenVersionAccepted,
+} from 'src/auth/token-version';
 
 interface AuthenticatedSocket extends Socket {
   userId?: number;
@@ -57,18 +63,17 @@ export class MonitoreoGateway
     private readonly connectedUsersRepository: Repository<ConnectedUsers>,
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
+    @InjectRepository(Usuarios)
+    private readonly usuariosRepository: Repository<Usuarios>,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
-      // Autenticaci?n JWT desde query params o auth headers
-      const token =
-        client.handshake.auth?.token ||
-        client.handshake.query?.token?.toString();
+      const token = client.handshake.auth?.token;
 
-      if (!token) {
+      if (!token || typeof token !== 'string') {
         this.logger.warn(
-          `Conexi?n rechazada: sin token - SocketId: ${client.id}`,
+          `Conexión rechazada: sin token - SocketId: ${client.id}`,
         );
         client.disconnect();
         return;
@@ -77,7 +82,49 @@ export class MonitoreoGateway
       // Verificar y decodificar JWT
       const payload = this.jwtService.verify(token, {
         secret: this.configService.get<string>('JWT_SECRET'),
+        algorithms: ['HS256'],
       });
+
+      if (payload?.typ != null && payload.typ !== 'access') {
+        this.logger.warn(
+          `Conexión rechazada: token de propósito ${payload.typ} - SocketId: ${client.id}`,
+        );
+        client.disconnect();
+        return;
+      }
+
+      let user: Pick<Usuarios, 'id' | 'tokenVersion' | 'estatus'> | null;
+      try {
+        user = await this.usuariosRepository.findOne({
+          where: { id: payload.id },
+          select: ['id', 'tokenVersion', 'estatus'],
+        });
+      } catch (error) {
+        if (!isMissingTokenVersionColumn(error)) {
+          throw error;
+        }
+        user = await this.usuariosRepository.findOne({
+          where: { id: payload.id },
+          select: ['id', 'estatus'],
+        });
+        if (user) {
+          user.tokenVersion = 0;
+        }
+      }
+      if (!user || user.estatus !== 1) {
+        this.logger.warn(
+          `Conexión rechazada: usuario inválido - SocketId: ${client.id}`,
+        );
+        client.disconnect();
+        return;
+      }
+      if (!isTokenVersionAccepted(payload.tv, Number(user.tokenVersion ?? 0))) {
+        this.logger.warn(
+          `Conexión rechazada: sesión invalidada - SocketId: ${client.id}`,
+        );
+        client.disconnect();
+        return;
+      }
 
       // Asignar datos del usuario al socket
       client.userId = payload.id;
@@ -390,21 +437,6 @@ export class MonitoreoGateway
    * Funci?n para obtener los clientes hijos (igual que en MonitoreoService)
    */
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer ?ndice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { ids: [cliente], placeholders: '?' }; // Al menos el cliente mismo
-    }
-
-    // Construir el query din?mico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 }

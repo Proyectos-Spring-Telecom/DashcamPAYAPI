@@ -1,4 +1,8 @@
 import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -44,30 +48,44 @@ export class MantenimientoVehicularService {
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
+  }
 
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { ids: [], placeholders: '' }; // No hay clientes que consultar
+  private async assertMantenimientoTenantViaInstalacion(
+    idInstalacion: number | null | undefined,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids) || idInstalacion == null) {
+      throw new NotFoundException('Mantenimiento vehicular no encontrado');
     }
-
-    // Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    const instalacion = await this.instalacionesRepository.findOne({
+      where: { id: Number(idInstalacion) },
+    });
+    if (
+      !instalacion ||
+      !ids.includes(Number(instalacion.idCliente))
+    ) {
+      throw new NotFoundException('Mantenimiento vehicular no encontrado');
+    }
   }
 
   async create(
     createMantenimientoVehicularDto: CreateMantenimientoVehicularDto,
     idUser: number,
     notaServicioFile?: Express.Multer.File,
+    idCliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertMantenimientoTenantViaInstalacion(
+        createMantenimientoVehicularDto.idInstalacion,
+        idCliente,
+        rol,
+      );
+
       // Validar claves foráneas si se proporcionan
       if (
         createMantenimientoVehicularDto.idEstatus !== undefined &&
@@ -134,7 +152,8 @@ export class MantenimientoVehicularService {
           notaServicioFile,
           'NotasServicioMantenimiento',
           idUser,
-          33, // ID del módulo de mantenimiento vehicular
+          33,
+          Number(idCliente) || 0,
         );
         notaServicioUrl = uploadResult.url;
       }
@@ -262,6 +281,7 @@ INNER JOIN Clientes c ON i.IdCliente = c.Id
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(idCliente);
           if (ids.length === 0) {
@@ -395,7 +415,7 @@ WHERE c.Id IN (${placeholders})
         throw error;
       }
       throw new BadRequestException(
-        error.message || 'Error al obtener los mantenimientos vehiculares',
+        'Error al obtener los mantenimientos vehiculares',
       );
     }
   }
@@ -453,6 +473,7 @@ WHERE mv.Id = ?
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(idCliente);
           if (ids.length === 0) {
@@ -577,6 +598,8 @@ AND mv.Id = ?
     id: number,
     updateMantenimientoVehicularDto: UpdateMantenimientoVehicularDto,
     idUser: number,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
       const mantenimiento = await this.mantenimientoVehicularRepository.findOne(
@@ -587,6 +610,11 @@ AND mv.Id = ?
       if (!mantenimiento) {
         throw new NotFoundException('Mantenimiento vehicular no encontrado');
       }
+      await this.assertMantenimientoTenantViaInstalacion(
+        mantenimiento.idInstalacion,
+        cliente,
+        rol,
+      );
 
       // Validar claves foráneas si se proporcionan
       if (
@@ -700,7 +728,12 @@ AND mv.Id = ?
     }
   }
 
-  async desactivar(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async desactivar(
+    id: number,
+    idUser: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
       const mantenimiento = await this.mantenimientoVehicularRepository.findOne(
         {
@@ -711,6 +744,11 @@ AND mv.Id = ?
       if (!mantenimiento) {
         throw new NotFoundException('Mantenimiento vehicular no encontrado');
       }
+      await this.assertMantenimientoTenantViaInstalacion(
+        mantenimiento.idInstalacion,
+        cliente,
+        rol,
+      );
 
       await this.mantenimientoVehicularRepository.update(id, { estatus: 0 });
 
@@ -755,12 +793,16 @@ AND mv.Id = ?
       }
       throw new InternalServerErrorException({
         message: 'Error al desactivar el mantenimiento vehicular.',
-        error: error.message,
       });
     }
   }
 
-  async activar(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async activar(
+    id: number,
+    idUser: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
       const mantenimiento = await this.mantenimientoVehicularRepository.findOne(
         {
@@ -771,6 +813,11 @@ AND mv.Id = ?
       if (!mantenimiento) {
         throw new NotFoundException('Mantenimiento vehicular no encontrado');
       }
+      await this.assertMantenimientoTenantViaInstalacion(
+        mantenimiento.idInstalacion,
+        cliente,
+        rol,
+      );
 
       if (mantenimiento.estatus === 1) {
         throw new BadRequestException(
@@ -821,7 +868,6 @@ AND mv.Id = ?
       }
       throw new InternalServerErrorException({
         message: 'Error al activar el mantenimiento vehicular.',
-        error: error.message,
       });
     }
   }
@@ -830,6 +876,8 @@ AND mv.Id = ?
     idUser: number,
     idMantenimiento: number,
     estatus: number,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
       const mantenimiento = await this.mantenimientoVehicularRepository.findOne(
@@ -841,6 +889,11 @@ AND mv.Id = ?
       if (!mantenimiento) {
         throw new NotFoundException('Mantenimiento vehicular no encontrado');
       }
+      await this.assertMantenimientoTenantViaInstalacion(
+        mantenimiento.idInstalacion,
+        cliente,
+        rol,
+      );
 
       await this.mantenimientoVehicularRepository.update(idMantenimiento, {
         idEstatus: estatus,
@@ -886,7 +939,6 @@ AND mv.Id = ?
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar el estatus del mantenimiento vehicular.',
-        error: error.message,
       });
     }
   }

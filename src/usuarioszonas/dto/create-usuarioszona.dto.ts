@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsIn, IsInt, IsNotEmpty, IsNumber } from 'class-validator';
+import { IsArray, ArrayMaxSize, IsIn, IsInt, IsNotEmpty, IsNumber } from 'class-validator';
 
 export class CreateUsuariosZonasDto {
   @IsInt({ message: 'estatus debe ser un número entero' })
@@ -24,6 +24,7 @@ export class CreateUsuariosZonasDto {
   })
   @IsNotEmpty()
   @IsArray()
+  @ArrayMaxSize(100, { message: 'No se permiten más de 100 zonas' })
   @IsNumber({}, { each: true })
   idsZonas: number[];
 }

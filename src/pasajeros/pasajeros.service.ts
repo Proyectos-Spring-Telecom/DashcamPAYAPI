@@ -1,3 +1,8 @@
+import { nowDb } from 'src/common/clock';
+import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
 import {
   BadRequestException,
   HttpException,
@@ -32,6 +37,7 @@ import { UpdatePasajeroEstadoSolicitudDto } from './dto/update-pasajeros-estado-
 import { UpdatePasajeroCustomerIdDto } from './dto/update-pasajero-customer-id.dto';
 import { S3Service } from 'src/s3/s3.service';
 import { NetpayService } from 'src/netpay/netpay.service';
+import { randomInt } from 'crypto';
 
 @Injectable()
 export class PasajerosService {
@@ -64,7 +70,7 @@ export class PasajerosService {
       // Generar número de serie aleatorio con formato MON-XXXX donde XXXX son números aleatorios
       // Usar timestamp y número aleatorio para mayor unicidad
       const timestamp = Date.now().toString().slice(-6); // Últimos 6 dígitos del timestamp
-      const numeroAleatorio = Math.floor(1000 + Math.random() * 9000); // Número entre 1000 y 9999
+      const numeroAleatorio = randomInt(1000, 10000);
       numeroSerie = `MON-${timestamp}-${numeroAleatorio}`;
 
       // Verificar si ya existe
@@ -92,6 +98,7 @@ export class PasajerosService {
     idUser: number,
     cliente: number,
     documentacionFile?: Express.Multer.File,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
       // Subir imagen/documento a S3 si se proporciona
@@ -102,6 +109,7 @@ export class PasajerosService {
           'Pasajeros',
           idUser,
           EnumModulos.PASAJEROS,
+          Number(cliente) || 0,
         );
         documentacionUrl = uploadResult.url;
       }
@@ -134,9 +142,7 @@ export class PasajerosService {
         numeroSerieMonedero = await this.generarNumeroSerieUnico();
 
         // Crear nuevo monedero con el número de serie generado
-        const ahora = new Date();
-        const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-        const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+        const fechaDesfasada = nowDb();
 
         const nuevoMonedero = this.monederosRepository.create({
           numeroSerie: numeroSerieMonedero,
@@ -175,6 +181,18 @@ export class PasajerosService {
           );
         }
 
+        if (Number(rol) !== 1) {
+          const { ids } = await this.clienteHijos(cliente);
+          if (
+            !tieneIdsTenant(ids) ||
+            !ids.includes(Number(monederos.idCliente))
+          ) {
+            throw new NotFoundException(
+              `No se encontró el monedero con número de serie ${numeroSerieMonedero}.`,
+            );
+          }
+        }
+
         // Validar que el monedero no esté asignado a otro pasajero
         if (monederos.idPasajero) {
           // Verificar que el pasajero asociado realmente existe
@@ -184,7 +202,7 @@ export class PasajerosService {
 
           if (pasajeroAsociado) {
             throw new BadRequestException(
-              `El monedero con número de serie ${numeroSerieMonedero} ya está asignado al pasajero ${pasajeroAsociado.nombre} ${pasajeroAsociado.apellidoPaterno} (ID: ${pasajeroAsociado.id}).`,
+              'El monedero ya está asignado a otro pasajero.',
             );
           } else {
             throw new BadRequestException(
@@ -248,29 +266,7 @@ export class PasajerosService {
       });
       const pasajeroSave = await this.pasajeroRepository.save(newPasajero);
 
-      // Crear customer en NetPay si el pasajero tiene correo
-      console.log(
-        '[PASAJEROS] Verificando si se debe crear customer en NetPay...',
-      );
-      console.log(
-        '[PASAJEROS] createPasajeroDto.correo:',
-        createPasajeroDto.correo,
-      );
-      console.log(
-        '[PASAJEROS] Tipo de correo:',
-        typeof createPasajeroDto.correo,
-      );
-      console.log('[PASAJEROS] Correo es truthy?', !!createPasajeroDto.correo);
-      console.log(
-        '[PASAJEROS] Correo existe?',
-        createPasajeroDto.correo !== undefined &&
-          createPasajeroDto.correo !== null,
-      );
-
       if (createPasajeroDto.correo) {
-        console.log(
-          '[PASAJEROS] Entrando al bloque de creación de customer en NetPay',
-        );
         try {
           // Combinar apellidos para lastName
           const lastName = createPasajeroDto.apellidoMaterno
@@ -278,9 +274,7 @@ export class PasajerosService {
             : createPasajeroDto.apellidoPaterno;
 
           // Generar número aleatorio de 10 dígitos para identifier
-          const randomIdentifier = Math.floor(
-            1000000000 + Math.random() * 9000000000,
-          ).toString();
+          const randomIdentifier = randomInt(1000000000, 10000000000).toString();
 
           const customerResponse = await this.netpayService.createCustomer({
             firstName: createPasajeroDto.nombre,
@@ -295,46 +289,17 @@ export class PasajerosService {
           const customerId =
             customerResponse?.id || customerResponse?.customerId;
 
-          console.log(
-            '[PASAJEROS] Respuesta completa de NetPay:',
-            JSON.stringify(customerResponse, null, 2),
-          );
-          console.log('[PASAJEROS] customerId extraído:', customerId);
-          console.log('[PASAJEROS] pasajeroSave.id:', pasajeroSave.id);
-          console.log('[PASAJEROS] userSave.id:', userSave.id);
-          console.log('[PASAJEROS] pasajeroSave antes de actualizar:', {
-            id: pasajeroSave.id,
-            idUsuario: pasajeroSave.idUsuario,
-            customerIdNetPay: pasajeroSave.customerIdNetPay,
-          });
-
           if (customerId) {
             const updateData = {
               customerIdNetPay: customerId,
               idUsuario: userSave.id, // Asegurar que idUsuario esté actualizado
             };
 
-            console.log('[PASAJEROS] Datos a actualizar:', updateData);
-
             const updateResult = await this.pasajeroRepository.update(
               pasajeroSave.id,
               updateData,
             );
 
-            console.log('[PASAJEROS] Resultado de update:', updateResult);
-
-            // Verificar que se actualizó correctamente
-            const pasajeroActualizado = await this.pasajeroRepository.findOne({
-              where: { id: pasajeroSave.id },
-            });
-
-            console.log('[PASAJEROS] Pasajero después de actualizar:', {
-              id: pasajeroActualizado?.id,
-              idUsuario: pasajeroActualizado?.idUsuario,
-              customerIdNetPay: pasajeroActualizado?.customerIdNetPay,
-            });
-
-            // Actualizar el objeto pasajeroSave para reflejar el cambio
             pasajeroSave.customerIdNetPay = customerId;
             pasajeroSave.idUsuario = userSave.id;
 
@@ -354,20 +319,11 @@ export class PasajerosService {
               EstatusEnumBitcora.SUCCESS,
             );
           } else {
-            console.error(
-              '[PASAJEROS] ERROR: No se obtuvo customerId de la respuesta de NetPay',
-            );
-            console.error(
-              '[PASAJEROS] Respuesta completa:',
-              JSON.stringify(customerResponse, null, 2),
-            );
-
-            // Si no se obtuvo el customerId, registrar advertencia
             await this.bitacoraLogger.logToBitacora(
               'Pasajeros',
-              `Se creó el customer en NetPay pero no se obtuvo el customerId. Respuesta: ${JSON.stringify(customerResponse)}`,
+              `Se creó el customer en NetPay pero no se obtuvo el customerId.`,
               'CREATE',
-              { pasajeroId: pasajeroSave.id, customerResponse },
+              { pasajeroId: pasajeroSave.id },
               idUser,
               EnumModulos.PASAJEROS,
               EstatusEnumBitcora.ERROR,
@@ -396,9 +352,7 @@ export class PasajerosService {
         return n < 10 ? '0' + n : n;
       }
 
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
 
       const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
@@ -419,7 +373,7 @@ export class PasajerosService {
 
       if (monederoExistente && monederoExistente.id !== monederos.id) {
         throw new BadRequestException(
-          `El pasajero ${pasajeroSave.nombre} ${pasajeroSave.apellidoPaterno} (ID: ${pasajeroSave.id}) ya tiene un monedero activo asignado (Número de serie: ${monederoExistente.numeroSerie}, ID: ${monederoExistente.id}). Un pasajero no puede tener dos monederos activos.`,
+          'El pasajero ya tiene un monedero activo.',
         );
       }
 
@@ -448,7 +402,9 @@ export class PasajerosService {
       );
 
       //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { createPasajeroDto };
+      const { passwordHash: _pwdPasajero, ...pasajeroSinHash } =
+        createPasajeroDto;
+      const querylogger = { ...pasajeroSinHash };
       await this.bitacoraLogger.logToBitacora(
         'Pasajeros',
         `Se ha creado un pasajero con el nombre: ${createPasajeroDto.nombre}.`,
@@ -472,7 +428,9 @@ export class PasajerosService {
       return result;
     } catch (error) {
       //-----Registro en la bitacora----- ERROR
-      const querylogger = { createPasajeroDto };
+      const { passwordHash: _pwdPasajeroErr, ...pasajeroSinHashErr } =
+        createPasajeroDto;
+      const querylogger = { ...pasajeroSinHashErr };
       await this.bitacoraLogger.logToBitacora(
         'Pasajeros',
         `Se ha creado un pasajero con el nombre: ${createPasajeroDto.nombre}.`,
@@ -565,22 +523,7 @@ export class PasajerosService {
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   // ========================================
@@ -657,6 +600,7 @@ LEFT JOIN CatTiposPasajeros ct
           );
           break;
 
+        case 3:
         default:
           //Resto de usuarios
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -804,6 +748,7 @@ ORDER BY p.Id DESC;
           );
           break;
 
+        case 3:
         default:
           //Resto de usuarios
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -871,17 +816,43 @@ ORDER BY p.Id DESC;
   // ========================================
   // 🔹 OBTENEMOS PASAJEROS POR ID
   // ========================================
-  async findOnePasajero(id: number) {
+  async findOnePasajero(id: number, cliente = 0, rol = 1) {
     try {
-      const pasajeroExistente = await this.pasajeroRepository.findOne({
-        where: { id: id },
-      });
-      if (!pasajeroExistente) {
+      if (Number(rol) === 1) {
+        const pasajeroExistente = await this.pasajeroRepository.findOne({
+          where: { id: id },
+        });
+        if (!pasajeroExistente) {
+          throw new NotFoundException(
+            `No se encontró un pasajero con ID: ${id}.`,
+          );
+        }
+        return { data: pasajeroExistente };
+      }
+
+      const { ids, placeholders } = await this.clienteHijos(cliente);
+      if (!tieneIdsTenant(ids)) {
         throw new NotFoundException(
           `No se encontró un pasajero con ID: ${id}.`,
         );
       }
-      return { data: pasajeroExistente };
+
+      const rows = await this.pasajeroRepository.query(
+        `
+SELECT p.*
+FROM Pasajeros p
+INNER JOIN Monederos m ON m.IdPasajero = p.Id
+WHERE p.Id = ? AND m.IdCliente IN (${placeholders})
+LIMIT 1
+        `,
+        [id, ...ids],
+      );
+      if (!rows?.length) {
+        throw new NotFoundException(
+          `No se encontró un pasajero con ID: ${id}.`,
+        );
+      }
+      return { data: rows[0] };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -901,9 +872,7 @@ ORDER BY p.Id DESC;
         where: { correo: correo },
       });
       if (!pasajeroExistente) {
-        throw new NotFoundException(
-          `No se encontró un pasajero con ID: ${correo}.`,
-        );
+        throw new NotFoundException('Recurso no encontrado');
       }
       return pasajeroExistente;
     } catch (error) {
@@ -1146,6 +1115,35 @@ GROUP BY p.Id, u.Id, u.UserName, p.Nombre, p.ApellidoPaterno, p.ApellidoMaterno;
     }
   }
 
+  private async assertPasajeroEnTenant(
+    id: number,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids, placeholders } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids)) {
+      throw new NotFoundException(
+        `No se encontró un pasajero con ID: ${id}.`,
+      );
+    }
+    const rows = await this.pasajeroRepository.query(
+      `
+SELECT p.Id
+FROM Pasajeros p
+INNER JOIN Monederos m ON m.IdPasajero = p.Id
+WHERE p.Id = ? AND m.IdCliente IN (${placeholders})
+LIMIT 1
+      `,
+      [id, ...ids],
+    );
+    if (!rows?.length) {
+      throw new NotFoundException(
+        `No se encontró un pasajero con ID: ${id}.`,
+      );
+    }
+  }
+
   // ========================================
   // 🔹 ACTUALIZAR ESTATUS DEL PASAJERO
   // ========================================
@@ -1153,8 +1151,11 @@ GROUP BY p.Id, u.Id, u.UserName, p.Nombre, p.ApellidoPaterno, p.ApellidoMaterno;
     id: number,
     updatePasajeroEstatusDto: UpdatePasajeroEstatusDto,
     idUser: number,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
+      await this.assertPasajeroEnTenant(id, cliente, rol);
       const pasajero = await this.pasajeroRepository.findOne({
         where: { id: id },
       });
@@ -1219,8 +1220,11 @@ GROUP BY p.Id, u.Id, u.UserName, p.Nombre, p.ApellidoPaterno, p.ApellidoMaterno;
     id: number,
     updatePasajeroEstadoSolicitudDto: UpdatePasajeroEstadoSolicitudDto,
     idUser: number,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
+      await this.assertPasajeroEnTenant(id, cliente, rol);
       const pasajero = await this.pasajeroRepository.findOne({
         where: { id: id },
       });
@@ -1314,8 +1318,11 @@ GROUP BY p.Id, u.Id, u.UserName, p.Nombre, p.ApellidoPaterno, p.ApellidoMaterno;
     id: number,
     idUser: number,
     updatePasajeroDto: UpdatePasajeroDto,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertPasajeroEnTenant(id, cliente, rol);
       const pasajero = await this.pasajeroRepository.findOne({
         where: { id: id },
       });
@@ -1377,8 +1384,9 @@ GROUP BY p.Id, u.Id, u.UserName, p.Nombre, p.ApellidoPaterno, p.ApellidoMaterno;
   // ========================================
   // 🔹 ELIMINADO LOGICO DEL PASAJERO
   // ========================================
-  async removePasajero(id: number, idUser: number) {
+  async removePasajero(id: number, idUser: number, cliente = 0, rol = 1) {
     try {
+      await this.assertPasajeroEnTenant(id, cliente, rol);
       const pasajero = await this.pasajeroRepository.findOne({
         where: { id: id },
       });
@@ -1443,8 +1451,11 @@ GROUP BY p.Id, u.Id, u.UserName, p.Nombre, p.ApellidoPaterno, p.ApellidoMaterno;
     id: number,
     updatePasajeroCustomerIdDto: UpdatePasajeroCustomerIdDto,
     idUser: number,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertPasajeroEnTenant(id, cliente, rol);
       const pasajero = await this.pasajeroRepository.findOne({
         where: { id: id },
       });
@@ -1455,6 +1466,14 @@ GROUP BY p.Id, u.Id, u.UserName, p.Nombre, p.ApellidoPaterno, p.ApellidoMaterno;
       }
 
       const { customerIdNetPay } = updatePasajeroCustomerIdDto;
+      if (customerIdNetPay) {
+        const otroPasajero = await this.pasajeroRepository.findOne({
+          where: { customerIdNetPay },
+        });
+        if (otroPasajero && Number(otroPasajero.id) !== Number(id)) {
+          throw new BadRequestException('CustomerIdNetPay ya asignado');
+        }
+      }
       await this.pasajeroRepository.update(id, { customerIdNetPay });
 
       //-----Registro en la bitacora----- SUCCESS

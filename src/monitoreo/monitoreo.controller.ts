@@ -12,6 +12,7 @@ import { MonitoreoService } from './monitoreo.service';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
+import { Roles } from 'src/guard/roles.decorator';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -23,6 +24,7 @@ import { RecorridoMonitoreoDto } from './dto/recorrido-monitoreo.dto';
 @ApiTags('Monitoreo')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3)
 @Controller('monitoreo')
 export class MonitoreoController {
   constructor(private readonly monitoreoService: MonitoreoService) {}
@@ -50,12 +52,13 @@ export class MonitoreoController {
     @Request() req,
   ) {
     const cliente = req.user.cliente;
-    const _idUser = req.user.userId;
+    const idUser = req.user.userId;
     const rol = req.user.rol;
     return this.monitoreoService.monitoreoRecorrido(
       recorridoMonitoreoDto,
       +cliente,
       +rol,
+      +idUser,
     );
   }
 
@@ -68,6 +71,8 @@ export class MonitoreoController {
   @ApiResponse({ status: 401, description: 'No autorizado' })
   obtenerUnidades(@Request() req) {
     const cliente = req.user.cliente;
-    return this.monitoreoService.obtenerUnidades(+cliente);
+    const rol = req.user.rol;
+    const idUser = req.user.userId;
+    return this.monitoreoService.obtenerUnidades(+cliente, +rol, +idUser);
   }
 }

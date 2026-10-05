@@ -148,7 +148,7 @@ export class CatReferenciaServicioService {
         throw error;
       }
       throw new BadRequestException(
-        error.message || 'Error al obtener las referencias de servicio',
+        'Error al obtener las referencias de servicio',
       );
     }
   }
@@ -316,7 +316,6 @@ export class CatReferenciaServicioService {
       }
       throw new InternalServerErrorException({
         message: 'Error al eliminar la referencia de servicio.',
-        error: error.message,
       });
     }
   }

@@ -1,11 +1,20 @@
+import { nowDb } from 'src/common/clock';
+import {
+  clienteHijosDesdeSp,
+  clientesPermitidos,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import { ROLES_CONOCIDOS } from 'src/guard/roles.decorator';
 //Servicio usuario
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { forbidTenantMove } from 'src/common/tenant/forbid-tenant-move';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Usuarios } from 'src/entities/Usuarios';
@@ -28,8 +37,10 @@ import { JwtService } from '@nestjs/jwt';
 import { Clientes } from 'src/entities/Clientes';
 import { EnumModulos, EstatusEnum } from 'src/common/estatus.enum';
 import { Validadores } from 'src/entities/Validadores';
+import { Operadores } from 'src/entities/Operadores';
 import { UpdateUsuarioValidadorDto } from './dto/update-usuario-validador.dto';
 import { S3Service } from 'src/s3/s3.service';
+import { AuthService } from 'src/auth/auth.service';
 
 @Injectable()
 export class UsuariosService {
@@ -42,31 +53,54 @@ export class UsuariosService {
     private usuariosPermisosRepository: Repository<UsuariosPermisos>,
     @InjectRepository(Validadores)
     private validadoresRepository: Repository<Validadores>,
+    @InjectRepository(Operadores)
+    private readonly operadoresRepository: Repository<Operadores>,
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
     private readonly emailService: MailService,
     private readonly jwtService: JwtService,
     private readonly s3Service: S3Service,
+    private readonly authService: AuthService,
   ) {}
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
+  }
 
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
+  /** PIN / validador: solo admin, objetivo = operador activo del tenant. */
+  private async assertAsignacionPinValidador(
+    usuario: Usuarios,
+    rolActor: number,
+    clienteActor: number,
+  ): Promise<void> {
+    if (![1, 2].includes(Number(rolActor))) {
+      throw new ForbiddenException(
+        'Solo administración puede asignar PIN o validador.',
+      );
     }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    if (Number(usuario.idRol) !== 3) {
+      throw new BadRequestException(
+        'Solo se puede asignar PIN o dispositivo a usuarios operador.',
+      );
+    }
+    const operador = await this.operadoresRepository.findOne({
+      where: { idUsuario: usuario.id },
+    });
+    if (!operador || Number(operador.estatus) !== 1) {
+      throw new BadRequestException(
+        'El operador debe existir y estar activo.',
+      );
+    }
+    if (Number(rolActor) !== 1 && clienteActor) {
+      const hijos = await this.clienteHijos(clienteActor);
+      const permitidos = hijos?.ids ?? [];
+      if (!permitidos.includes(Number(usuario.idCliente))) {
+        throw new NotFoundException(
+          `Usuario con nombre de usuario: ${usuario.userName} no encontrado.`,
+        );
+      }
+    }
   }
 
   // Obtener todos los usuarios con paginación
@@ -133,8 +167,14 @@ LIMIT ? OFFSET ?;
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
+          if (!tieneIdsTenant(ids)) {
+            usuarios = [];
+            totalResult = [{ total: 0 }];
+            break;
+          }
           // Consulta de datos paginados resto Usuario
           usuarios = await this.usuarioRepository.query(
             `
@@ -212,7 +252,6 @@ AND u.Id != ?
     } catch (error) {
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al obtener la paginación de usuarios.',
-        error: error.message,
       });
     }
   }
@@ -264,9 +303,14 @@ ORDER BY u.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Consulta de datos listado resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
+          if (!tieneIdsTenant(ids)) {
+            usuarios = [];
+            break;
+          }
           usuarios = await this.usuarioRepository.query(
             `
 SELECT
@@ -324,7 +368,6 @@ ORDER BY u.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al obtener el listado de usuarios.',
-        error: error.message,
       });
     }
   }
@@ -367,7 +410,6 @@ ORDER BY u.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al obtener los usuarios por roles.',
-        error: error.message,
       });
     }
   }
@@ -375,11 +417,22 @@ ORDER BY u.Id DESC;
   //Obtener usuarios por cliente
   async getAllListUsuariosCliente(
     id: number,
-    cliente: number,
+    clienteActor: number,
+    rol = 1,
   ): Promise<ApiResponseCommon> {
     try {
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(id))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       const usuarios = await this.usuarioRepository.find({
-        where: { estatus: 1, idCliente: cliente },
+        where: { estatus: 1, idCliente: id },
       });
       if (usuarios.length === 0) {
         throw new NotFoundException('No se encontraron usuarios.');
@@ -398,7 +451,6 @@ ORDER BY u.Id DESC;
       throw new InternalServerErrorException({
         message:
           'Se produjo un error al intentar obtener los usuarios asociados al cliente.',
-        error: error.message,
       });
     }
   }
@@ -448,9 +500,15 @@ ORDER BY u.Id DESC
           );
           break;
 
+        case 3:
         default:
           // Consulta de datos paginados resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
+          if (!tieneIdsTenant(ids)) {
+            throw new NotFoundException(
+              `No se encontró un usuario con ID: ${id}.`,
+            );
+          }
           usuarioData = await this.usuarioRepository.query(
             `
 SELECT
@@ -519,7 +577,6 @@ ORDER BY u.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al obtener al usuario.',
-        error: error.message,
       });
     }
   }
@@ -529,9 +586,10 @@ ORDER BY u.Id DESC
     userName: string,
     idUser: number,
     updateUsuarioOperadorDto: UpdateUsuarioOperadorDto,
+    rolActor = 0,
+    clienteActor = 0,
   ): Promise<ApiCrudResponse> {
     try {
-      //Buscamos al usuario
       const usuario = await this.usuarioRepository.findOne({
         where: { userName: updateUsuarioOperadorDto.userName },
       });
@@ -541,41 +599,30 @@ ORDER BY u.Id DESC
           `Usuario con nombre de usuario: ${updateUsuarioOperadorDto.userName} no encontrado.`,
         );
       }
+      await this.assertAsignacionPinValidador(usuario, rolActor, clienteActor);
 
-      //encriptamos la contraseña
       const pinPassword = await bcrypt.hash(
         updateUsuarioOperadorDto.codigohash,
         10,
       );
-      updateUsuarioOperadorDto.codigohash = pinPassword;
 
-      //Agregamos le fecha de la actualizacion
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
 
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-
+      const fechaDesfasada = nowDb();
       const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
       const bodyOperador = {
-        userName: updateUsuarioOperadorDto.userName,
         codigoHash: pinPassword,
         actualizacionCodigo: fechaActual,
       };
 
-      //Agregamos el pin al updateUsuarioOperadorDto
-      const _newPin = await this.usuarioRepository.update(
-        usuario.id,
-        bodyOperador,
-      );
+      await this.usuarioRepository.update(usuario.id, bodyOperador);
 
-      //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { updateUsuarioOperadorDto };
+      const querylogger = { idUsuarioObjetivo: Number(usuario.id) };
       await this.bitacoraLogger.logToBitacora(
         'Usuarios',
-        `El PIN ha sido generado para el usuario con ID: ${idUser}.`,
+        `El PIN ha sido generado para el usuario con ID: ${usuario.id}.`,
         'UPDATE',
         querylogger,
         idUser,
@@ -583,7 +630,6 @@ ORDER BY u.Id DESC
         EstatusEnumBitcora.SUCCESS,
       );
 
-      //Api response
       const result: ApiCrudResponse = {
         status: 'success',
         message: 'El PIN ha sido creado correctamente.',
@@ -594,11 +640,12 @@ ORDER BY u.Id DESC
       };
       return result;
     } catch (error) {
-      //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { updateUsuarioOperadorDto };
+      const querylogger = {
+        idUsuarioObjetivoUserName: updateUsuarioOperadorDto?.userName,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Usuarios',
-        `El PIN ha sido generado para el usuario con ID: ${idUser}.`,
+        `Error al generar PIN (actor ${idUser}).`,
         'UPDATE',
         querylogger,
         idUser,
@@ -611,7 +658,6 @@ ORDER BY u.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al crear el PIN del usuario.',
-        error: error.message,
       });
     }
   }
@@ -621,9 +667,10 @@ ORDER BY u.Id DESC
     userName: string,
     idUser: number,
     updateUsuarioValidadorDto: UpdateUsuarioValidadorDto,
+    rolActor = 0,
+    clienteActor = 0,
   ): Promise<ApiCrudResponse> {
     try {
-      //Buscamos al usuario
       const usuario = await this.usuarioRepository.findOne({
         where: { userName: updateUsuarioValidadorDto.userName },
       });
@@ -632,14 +679,24 @@ ORDER BY u.Id DESC
           `Usuario con nombre de usuario: ${updateUsuarioValidadorDto.userName} no encontrado.`,
         );
       }
+      await this.assertAsignacionPinValidador(usuario, rolActor, clienteActor);
 
       const dispositivo = await this.validadoresRepository.findOne({
         where: { numeroSerie: updateUsuarioValidadorDto.validadorId },
       });
-      if (!dispositivo) {
+      if (!dispositivo || Number(dispositivo.estatus) !== 1) {
         throw new NotFoundException(
           `Validador numero de serie: ${updateUsuarioValidadorDto.validadorId} no fue encontrado.`,
         );
+      }
+      if (Number(rolActor) !== 1 && clienteActor) {
+        const hijos = await this.clienteHijos(clienteActor);
+        const permitidos = hijos?.ids ?? [];
+        if (!permitidos.includes(Number(dispositivo.idCliente))) {
+          throw new NotFoundException(
+            `Validador numero de serie: ${updateUsuarioValidadorDto.validadorId} no fue encontrado.`,
+          );
+        }
       }
 
       const usuariosOperadorDevice = await this.usuarioRepository.find({
@@ -650,8 +707,8 @@ ORDER BY u.Id DESC
 
       if (usuariosOperadorDevice.length > 0) {
         await Promise.all(
-          usuariosOperadorDevice.map((usuario) =>
-            this.usuarioRepository.update(usuario.id, {
+          usuariosOperadorDevice.map((u) =>
+            this.usuarioRepository.update(u.id, {
               validadorId: null,
             }),
           ),
@@ -662,14 +719,13 @@ ORDER BY u.Id DESC
         validadorId: updateUsuarioValidadorDto.validadorId,
       };
 
-      //Agregamos el dispositivo al usuario
-      const _newPin = await this.usuarioRepository.update(
-        usuario.id,
-        bodyOperador,
-      );
+      await this.usuarioRepository.update(usuario.id, bodyOperador);
 
       //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { updateUsuarioValidadorDto };
+      const querylogger = {
+        idUsuarioObjetivo: Number(usuario.id),
+        validadorId: updateUsuarioValidadorDto.validadorId,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Usuarios',
         `El deviceId ha sido actualizado para el usuario con ID: ${usuario.id}.`,
@@ -691,11 +747,13 @@ ORDER BY u.Id DESC
       };
       return result;
     } catch (error) {
-      //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { updateUsuarioValidadorDto };
+      const querylogger = {
+        idUsuarioObjetivoUserName: updateUsuarioValidadorDto?.userName,
+        validadorId: updateUsuarioValidadorDto?.validadorId,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Usuarios',
-        `El validadorId ha sido actualizado para el usuario con ID: ${idUser}.`,
+        `Error al actualizar validador (actor ${idUser}).`,
         'UPDATE',
         querylogger,
         idUser,
@@ -707,8 +765,7 @@ ORDER BY u.Id DESC
         throw error;
       }
       throw new InternalServerErrorException({
-        message: 'Error al crear el PIN del usuario.',
-        error: error.message,
+        message: 'Error al actualizar el validador del usuario.',
       });
     }
   }
@@ -717,8 +774,27 @@ ORDER BY u.Id DESC
   async createUsuario(
     createUsuarioDto: CreateUsuarioDto,
     idUser: string,
+    rolActor: number,
+    clienteActor: number,
   ): Promise<ApiCrudResponse> {
     try {
+      const rolNuevo = Number(createUsuarioDto.idRol);
+      if (rolNuevo === 1 && Number(rolActor) !== 1) {
+        throw new ForbiddenException('No autorizado.');
+      }
+      if (!ROLES_CONOCIDOS.includes(rolNuevo)) {
+        throw new BadRequestException('Rol no válido.');
+      }
+      if (Number(rolActor) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(createUsuarioDto.idCliente))) {
+          throw new NotFoundException('Cliente no encontrado.');
+        }
+      }
+
       const existUsuario = await this.usuarioRepository.findOne({
         //Buscamos si existe usuario
         where: { userName: createUsuarioDto.userName },
@@ -770,7 +846,9 @@ ORDER BY u.Id DESC
             ); */
 
       //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { createUsuarioDto };
+      const { passwordHash: _pwdCreate, ...usuarioSinHashBitacora } =
+        createUsuarioDto;
+      const querylogger = { ...usuarioSinHashBitacora };
       await this.bitacoraLogger.logToBitacora(
         'Usuarios',
         `Se ha creado un usuario con nombre: ${createUsuarioDto.nombre}.`,
@@ -796,8 +874,9 @@ ORDER BY u.Id DESC
       };
       return result;
     } catch (error) {
-      //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { createUsuarioDto };
+      const { passwordHash: _pwdErr, ...usuarioSinHashBitacoraErr } =
+        createUsuarioDto;
+      const querylogger = { ...usuarioSinHashBitacoraErr };
       await this.bitacoraLogger.logToBitacora(
         'Usuarios',
         `Se ha creado un usuario con nombre: ${createUsuarioDto.nombre}.`,
@@ -813,7 +892,6 @@ ORDER BY u.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar crear el usuario.',
-        error: error.message,
       });
     }
   }
@@ -832,45 +910,39 @@ ORDER BY u.Id DESC
         throw new NotFoundException(`No se encontró un usuario con ID: ${id}.`);
       }
       if (
-        updateUsuarioContrasena.passwordNueva ===
+        updateUsuarioContrasena.passwordNueva !==
         updateUsuarioContrasena.passwordNuevaConfirmacion
       ) {
-        if (
-          !usuario ||
-          !(await bcrypt.compare(
-            updateUsuarioContrasena.passwordActual,
-            usuario.passwordHash,
-          ))
-        ) {
-          throw new BadRequestException({
-            message: 'Entré a verificar los valores y no son iguales.',
-          });
-        }
-        const hashedPassword = await bcrypt.hash(
-          updateUsuarioContrasena.passwordNueva,
-          10,
-        ); //encriptamos la contraseña
-        updateUsuarioContrasena.passwordNueva = hashedPassword;
+        throw new BadRequestException(
+          'La contraseña nueva y su confirmación no coinciden.',
+        );
       }
-      //Agregamos le fecha de la actualizacion
+      if (
+        !(await bcrypt.compare(
+          updateUsuarioContrasena.passwordActual,
+          usuario.passwordHash,
+        ))
+      ) {
+        throw new BadRequestException('La contraseña actual no es correcta.');
+      }
+      const hashedPassword = await bcrypt.hash(
+        updateUsuarioContrasena.passwordNueva,
+        10,
+      );
+
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
 
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
 
       const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
-      //actualiza en usuario contraseña
       await this.usuarioRepository.update(id, {
-        passwordHash: updateUsuarioContrasena.passwordNueva,
-      });
-
-      await this.usuarioRepository.update(id, {
+        passwordHash: hashedPassword,
         actualizacionPassword: fechaActual,
       });
+      await this.authService.bumpTokenVersion(Number(id));
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { id: id };
@@ -912,7 +984,6 @@ ORDER BY u.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar la contraseña.',
-        error: error.message,
       });
     }
   }
@@ -922,6 +993,8 @@ ORDER BY u.Id DESC
     id: number,
     updateUsuarioDto: UpdateUsuarioDto,
     idUser: string,
+    rolActor?: number,
+    clienteActor = 0,
   ): Promise<ApiCrudResponse> {
     try {
       const usuario = await this.usuarioRepository.findOne({
@@ -930,15 +1003,38 @@ ORDER BY u.Id DESC
       if (!usuario) {
         throw new NotFoundException(`No se encontró un usuario con ID: ${id}.`);
       }
-
-      if (updateUsuarioDto.idCliente) {
-        const cliente = await this.clientesService.getOneCliente(
-          Number(updateUsuarioDto.idCliente),
+      if (Number(usuario.idRol) === 1 && Number(rolActor) !== 1) {
+        throw new NotFoundException(`No se encontró un usuario con ID: ${id}.`);
+      }
+      if (Number(rolActor) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
         );
-        if (!cliente)
-          throw new BadRequestException(
-            'No se encontró el cliente especificado.',
+        if (!permitidos.includes(Number(usuario.idCliente))) {
+          throw new NotFoundException(
+            `No se encontró un usuario con ID: ${id}.`,
           );
+        }
+      }
+
+      forbidTenantMove(
+        usuario.idCliente,
+        updateUsuarioDto as any,
+        'idCliente',
+        'Usuario no encontrado',
+      );
+      const esPropio = Number(id) === Number(idUser);
+      if (esPropio) {
+        delete updateUsuarioDto.idRol;
+        delete updateUsuarioDto.permisosIds;
+      }
+      if (
+        updateUsuarioDto.idRol !== undefined &&
+        Number(updateUsuarioDto.idRol) === 1 &&
+        Number(rolActor) !== 1
+      ) {
+        delete updateUsuarioDto.idRol;
       }
       updateUsuarioDto.emailConfirmado = EstatusEnum.ACTIVO;
 
@@ -1061,7 +1157,6 @@ ORDER BY u.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar el usuario.',
-        error: error.message,
       });
     }
   }
@@ -1071,6 +1166,8 @@ ORDER BY u.Id DESC
     id: number,
     updateUsuarioEstatusDto: UpdateUsuarioEstatusDto,
     idUser: number,
+    clienteActor = 0,
+    rolActor = 1,
   ): Promise<ApiCrudResponse> {
     try {
       const usuario = await this.usuarioRepository.findOne({
@@ -1078,6 +1175,17 @@ ORDER BY u.Id DESC
       });
       if (!usuario) {
         throw new NotFoundException(`No se encontró un usuario con ID: ${id}.`);
+      }
+      if (Number(rolActor) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(usuario.idCliente))) {
+          throw new NotFoundException(
+            `No se encontró un usuario con ID: ${id}.`,
+          );
+        }
       }
       const { estatus } = updateUsuarioEstatusDto;
 
@@ -1133,19 +1241,34 @@ ORDER BY u.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'No se pudo actualizar el estatus del usuario.',
-        error: error.message,
       });
     }
   }
 
   //Eliminamos usuario
-  async deleteUsuario(id: number, idUser: string): Promise<ApiCrudResponse> {
+  async deleteUsuario(
+    id: number,
+    idUser: string,
+    clienteActor = 0,
+    rolActor = 1,
+  ): Promise<ApiCrudResponse> {
     try {
       const usuario = await this.usuarioRepository.findOne({
         where: { id: id },
       });
       if (!usuario) {
         throw new NotFoundException(`No se encontró un usuario con ID: ${id}.`);
+      }
+      if (Number(rolActor) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(usuario.idCliente))) {
+          throw new NotFoundException(
+            `No se encontró un usuario con ID: ${id}.`,
+          );
+        }
       }
       //Se hacer eliminado logico
       //Cambiamos el estatus del usuario a 0
@@ -1195,7 +1318,6 @@ ORDER BY u.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Hubo un problema al intentar eliminar el usuario.',
-        error: error.message,
       });
     }
   }
@@ -1237,7 +1359,7 @@ ORDER BY u.Id DESC
           );
         } catch (error) {
           // No fallar si no se puede eliminar la foto anterior
-          console.warn('Error al eliminar foto anterior:', error);
+          console.warn('Error al eliminar foto anterior');
         }
       }
 
@@ -1247,6 +1369,7 @@ ORDER BY u.Id DESC
         'Usuarios',
         idUser,
         EnumModulos.USUARIOS,
+        Number(usuario.idCliente) || 0,
       );
 
       // Actualizar el campo fotoPerfil en la base de datos
@@ -1267,7 +1390,7 @@ ORDER BY u.Id DESC
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = {
-        data: `UPDATE Usuarios SET FotoPerfil = '${uploadResult.url}' WHERE Id = ${idUser}`,
+        data: 'UPDATE Usuarios SET FotoPerfil = ? WHERE Id = ?',
       };
       await this.bitacoraLogger.logToBitacora(
         'Usuarios',
@@ -1309,7 +1432,6 @@ ORDER BY u.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Hubo un problema al intentar subir la foto de perfil.',
-        error: error.message,
       });
     }
   }

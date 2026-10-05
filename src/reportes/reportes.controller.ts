@@ -14,10 +14,12 @@ import {
 } from '@nestjs/swagger';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Reportes')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2, 3, 11)
 @Controller('reportes')
 export class ReportesController {
   constructor(private readonly reportesService: ReportesService) {}
@@ -49,9 +51,11 @@ export class ReportesController {
     @Request() req,
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
+    const rol = req.user.rol;
     return await this.reportesService.recaudacionDiariaPorRuta(
       filtros,
       Number(cliente),
+      Number(rol),
     );
   }
 
@@ -82,9 +86,11 @@ export class ReportesController {
     @Request() req,
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
+    const rol = req.user.rol;
     return await this.reportesService.recaudacionPorOperador(
       filtros,
       Number(cliente),
+      Number(rol),
     );
   }
 
@@ -115,9 +121,11 @@ export class ReportesController {
     @Request() req,
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
+    const rol = req.user.rol;
     return await this.reportesService.recaudacionPorVehiculo(
       filtros,
       Number(cliente),
+      Number(rol),
     );
   }
 
@@ -148,9 +156,11 @@ export class ReportesController {
     @Request() req,
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
+    const rol = req.user.rol;
     return await this.reportesService.recaudacionPorDispositivo(
       filtros,
       Number(cliente),
+      Number(rol),
     );
   }
 

@@ -1,3 +1,5 @@
+import { nowDb } from 'src/common/clock';
+import { clienteHijosDesdeSp } from 'src/common/tenant/ownership-resolvers';
 import {
   HttpException,
   Injectable,
@@ -51,22 +53,7 @@ export class MonitoreoService {
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   private async consultarVarianteListado(cliente: number) {
@@ -96,7 +83,7 @@ INNER JOIN Zonas r ON ru.IdZona = r.Id
 LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
 
-WHERE c.Id IN (${cliente})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+WHERE c.Id IN (?)   -- cliente del token (parametrizado)
   AND c.Estatus = 1
   AND ru.Estatus = 1         -- Solo rutas activas
   AND r.Estatus = 1          -- Solo zonas activas
@@ -107,13 +94,52 @@ ORDER BY d.Id DESC;
     return this.usuarioszonasRepository.query(query, [cliente]);
   }
 
+  private async consultarVarianteListadoPorZonasUsuario(
+    cliente: number,
+    idUsuario: number,
+  ) {
+    const query = `
+  SELECT 
+    d.Id AS id,
+    d.Nombre AS nombreVariante,
+    d.PuntoInicio AS puntoInicio,
+    d.PuntoFin AS puntoFin,
+    d.RecorridoDetallado AS recorridoDetallado,
+    d.RecorridoInterpolar AS recorridoInterpolar,
+    d.DistanciaKm AS distanciaKm,
+    d.FechaCreacion AS fechaCreacionVariante,
+    d.Estatus AS estatusVariante,
+    c.Id AS idCliente,
+    c.Nombre AS nombreCliente,
+    c.ApellidoPaterno AS apellidoPaternoCliente,
+    c.ApellidoMaterno AS apellidoMaternoCliente,
+    c.Estatus AS estatusCliente
+FROM Variantes d
+INNER JOIN Rutas ru ON d.IdRuta = ru.Id
+INNER JOIN Zonas r ON ru.IdZona = r.Id
+LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
+INNER JOIN Clientes c ON r.IdCliente = c.Id
+WHERE c.Id IN (?)
+  AND r.Id IN (
+    SELECT uz.IdZona FROM UsuariosZonas uz
+    WHERE uz.IdUsuario = ? AND uz.Estatus = 1
+  )
+  AND c.Estatus = 1
+  AND ru.Estatus = 1
+  AND r.Estatus = 1
+  AND d.Estatus = 1
+ORDER BY d.Id DESC;
+    `;
+    return this.usuarioszonasRepository.query(query, [cliente, idUsuario]);
+  }
+
   // ========================================
   // 🔹 OBTENER EL MAPA DE MONITOREO
   // ========================================
   async monitoreoListado(idUser: number, cliente: number, rol: number) {
     try {
       let data;
-      let ultimaPosicion;
+      let ultimaPosicion: any[] = [];
       switch (rol) {
         case 1:
           // Consulta de datos paginados Usuario SuperAdministrador
@@ -151,10 +177,23 @@ WHERE ru.Estatus = 1         -- Solo rutas activas
 ORDER BY d.Id DESC;
       `,
           );
+          ultimaPosicion = await this.ultimaPosicion();
+          break;
+
+        case 2:
+          data = await this.consultarVarianteListado(cliente);
+          ultimaPosicion = await this.ultimaPosicion(cliente);
+          break;
+
+        case 3:
+          data = await this.consultarVarianteListadoPorZonasUsuario(
+            cliente,
+            idUser,
+          );
+          ultimaPosicion = await this.ultimaPosicion(cliente, idUser);
           break;
 
         default:
-          // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           data = await this.consultarVarianteListado(cliente);
           ultimaPosicion = await this.ultimaPosicion(cliente);
           break;
@@ -183,14 +222,13 @@ ORDER BY d.Id DESC;
       return { variantes, posicion };
     } catch (error) {
       if (error instanceof HttpException) throw error;
-      throw new InternalServerErrorException({
-        message: 'Error al obtener listado variantes',
-        error: error.message,
-      });
+      throw new InternalServerErrorException(
+        'Error al obtener listado variantes',
+      );
     }
   }
 
-  private async ultimaPosicion(cliente: number) {
+  private async ultimaPosicion(cliente?: number, idUsuarioZonas?: number) {
     const query = `
 SELECT
     up.Id AS id,
@@ -237,14 +275,31 @@ INNER JOIN Vehiculos v ON i.IdVehiculo = v.Id AND i.IdCliente = v.IdCliente
 INNER JOIN Clientes cli ON i.IdCliente = cli.Id
 INNER JOIN UltimaPosicion up ON d.NumeroSerie = up.NumeroSerieValidador
     
-WHERE cli.Id IN (${cliente})   -- 🔹 aquí colocas el/los ID(s) del cliente que quieres consultar
-AND i.Estatus = 1  -- Solo instalaciones activas
+WHERE i.Estatus = 1  -- Solo instalaciones activas
 AND cli.Estatus = 1
+${cliente != null ? 'AND cli.Id IN (?)' : ''}
+${
+  idUsuarioZonas != null
+    ? `AND EXISTS (
+  SELECT 1
+  FROM Turnos t
+  INNER JOIN Viajes vi ON vi.IdTurno = t.Id AND vi.Estatus = 1
+  INNER JOIN Variantes va ON va.Id = vi.IdVariante
+  INNER JOIN Rutas ru ON ru.Id = va.IdRuta
+  INNER JOIN UsuariosZonas uz
+    ON uz.IdZona = ru.IdZona AND uz.IdUsuario = ? AND uz.Estatus = 1
+  WHERE t.IdInstalacion = i.Id
+)`
+    : ''
+}
 
 ORDER BY up.Id DESC;
 
     `;
-    return this.usuarioszonasRepository.query(query);
+    const params: number[] = [];
+    if (cliente != null) params.push(cliente);
+    if (idUsuarioZonas != null) params.push(idUsuarioZonas);
+    return this.usuarioszonasRepository.query(query, params);
   }
 
   // ========================================
@@ -252,16 +307,15 @@ ORDER BY up.Id DESC;
   // ========================================
   async monitoreoRecorrido(
     recorridoMonitoreoDto: RecorridoMonitoreoDto,
-    _cliente: number,
-    _rol: number,
+    cliente: number,
+    rol: number,
+    idUser: number,
   ) {
     try {
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
       // Solo la fecha del momento
       const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
       const { NumeroSerieValidador } = recorridoMonitoreoDto;
@@ -328,6 +382,21 @@ AND up.FechaHora <= ?
 AND up.NumeroSerieValidador = ?
 AND i.Estatus = 1
 AND d.Estatus = 1
+${Number(rol) !== 1 ? 'AND cli.Id IN (?)' : ''}
+${
+  Number(rol) === 3
+    ? `AND EXISTS (
+  SELECT 1
+  FROM Turnos t
+  INNER JOIN Viajes vi ON vi.IdTurno = t.Id AND vi.Estatus = 1
+  INNER JOIN Variantes va ON va.Id = vi.IdVariante
+  INNER JOIN Rutas ru ON ru.Id = va.IdRuta
+  INNER JOIN UsuariosZonas uz
+    ON uz.IdZona = ru.IdZona AND uz.IdUsuario = ? AND uz.Estatus = 1
+  WHERE t.IdInstalacion = i.Id
+)`
+    : ''
+}
 
 GROUP BY up.Id, up.Exactitud, up.Estado, up.Velocidad, up.Direccion, 
          up.Latitud, up.Longitud, up.FechaHora, up.FHRegistro, up.NumeroSerieValidador,
@@ -337,9 +406,17 @@ GROUP BY up.Id, up.Exactitud, up.Estado, up.Velocidad, up.Direccion,
 
 ORDER BY up.FechaHora ASC
       `,
-        [fechaInicio, fechaFin, NumeroSerieValidador],
+        (() => {
+          const params: Array<string | number> = [
+            fechaInicio,
+            fechaFin,
+            NumeroSerieValidador,
+          ];
+          if (Number(rol) !== 1) params.push(cliente);
+          if (Number(rol) === 3) params.push(idUser);
+          return params;
+        })(),
       );
-      console.log(recorridoMonitoreo);
       const posicion = recorridoMonitoreo.map((item) => ({
         ...item,
         id: Number(item.id),
@@ -355,19 +432,17 @@ ORDER BY up.FechaHora ASC
 
       return { posicion };
     } catch (error) {
-      console.log(error);
       if (error instanceof HttpException) throw error;
-      throw new InternalServerErrorException({
-        message: 'Error al obtener el recorrido del dispositivo',
-        error: error.message,
-      });
+      throw new InternalServerErrorException(
+        'Error al obtener el recorrido del dispositivo',
+      );
     }
   }
 
   // ========================================
   // 🔹 OBTENER UNIDADES DE MONITOREO
   // ========================================
-  async obtenerUnidades(cliente: number) {
+  async obtenerUnidades(cliente: number, rol = 0, idUser = 0) {
     try {
       const { ids, placeholders } = await this.clienteHijos(cliente);
 
@@ -485,6 +560,20 @@ WHERE c.Id IN (${placeholders})
   AND i.Estatus = 1
   AND v.Estatus = 1
   AND val.Estatus = 1
+${
+  Number(rol) === 3
+    ? `AND EXISTS (
+  SELECT 1
+  FROM Turnos t
+  INNER JOIN Viajes vi ON vi.IdTurno = t.Id AND vi.Estatus = 1
+  INNER JOIN Variantes va ON va.Id = vi.IdVariante
+  INNER JOIN Rutas ru ON ru.Id = va.IdRuta
+  INNER JOIN UsuariosZonas uz
+    ON uz.IdZona = ru.IdZona AND uz.IdUsuario = ? AND uz.Estatus = 1
+  WHERE t.IdInstalacion = i.Id
+)`
+    : ''
+}
 
 GROUP BY 
   v.Id, v.Placa, v.Modelo,
@@ -499,7 +588,9 @@ GROUP BY
 ORDER BY v.Id ASC, p.FechaHora DESC;
       `;
 
-      const resultados = await this.clienteRepository.query(query, [...ids]);
+      const params = [...(ids ?? [])];
+      if (Number(rol) === 3) params.push(idUser);
+      const resultados = await this.clienteRepository.query(query, params);
 
       // Eliminar duplicados por vehículo, tomando la instalación con la posición más reciente
       const unidadesUnicas = new Map<number, any>();
@@ -595,10 +686,9 @@ ORDER BY v.Id ASC, p.FechaHora DESC;
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new InternalServerErrorException({
-        message: 'Error al obtener las unidades de monitoreo.',
-        error: error.message,
-      });
+      throw new InternalServerErrorException(
+        'Error al obtener las unidades de monitoreo.',
+      );
     }
   }
 

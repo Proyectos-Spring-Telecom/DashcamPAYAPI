@@ -1,5 +1,7 @@
+import { formatFechaDb, nowDb } from 'src/common/clock';
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
@@ -40,6 +42,9 @@ import { LoggerService } from 'src/common/logger.service';
 import { Validadores } from 'src/entities/Validadores';
 import { createHash, randomInt, randomUUID } from 'crypto';
 import { IsNull } from 'typeorm';
+import { JwtTyp } from './jwt-types';
+import { SecurityFlags } from 'src/common/security-flags';
+import { isMissingTokenVersionColumn } from './token-version';
 
 @Injectable()
 export class AuthService {
@@ -71,11 +76,206 @@ export class AuthService {
     private readonly loggerService: LoggerService,
   ) {}
 
+  private purposeSecret(): string {
+    const secret =
+      process.env.JWT_PURPOSE_SECRET || process.env.JWT_SECRET || '';
+    if (!secret) {
+      throw new InternalServerErrorException(
+        'JWT_PURPOSE_SECRET / JWT_SECRET no configurado',
+      );
+    }
+    return secret;
+  }
+
+  private signPurposeToken(
+    userId: number,
+    email: string,
+    typ: typeof JwtTyp.EMAIL_CONFIRM | typeof JwtTyp.PWD_RESET,
+  ): string {
+    return this.jwtService.sign(
+      { id: userId, email, typ },
+      {
+        secret: this.purposeSecret(),
+        expiresIn: process.env.JWT_CONFIRMACION || '15m',
+        algorithm: 'HS256',
+      },
+    );
+  }
+
+  private extractBearer(authorization?: string): string | null {
+    if (!authorization) return null;
+    const [scheme, token] = authorization.split(' ');
+    if (!scheme || scheme.toLowerCase() !== 'bearer' || !token) {
+      return null;
+    }
+    return token;
+  }
+
+  private verifyPurposeOrAccessToken(token: string): {
+    id?: number;
+    email?: string;
+    typ?: string;
+  } {
+    try {
+      return this.jwtService.verify(token, {
+        secret: this.purposeSecret(),
+        algorithms: ['HS256'],
+      });
+    } catch {
+      try {
+        return this.jwtService.verify(token, {
+          secret: process.env.JWT_SECRET,
+          algorithms: ['HS256'],
+        });
+      } catch {
+        throw new UnauthorizedException('Token inválido o expirado');
+      }
+    }
+  }
+
+  private assertPasswordChangeAuthorized(
+    loginAuthResetDto: LoginAuthResetDto,
+    authorization?: string,
+  ): void {
+    if (loginAuthResetDto.codigo) {
+      return;
+    }
+    const token = this.extractBearer(authorization);
+    if (!token) {
+      throw new UnauthorizedException(
+        'Se requiere token de restablecimiento o código OTP',
+      );
+    }
+    const payload = this.verifyPurposeOrAccessToken(token);
+    const email = String(payload.email || '').toLowerCase();
+    const target = String(loginAuthResetDto.userName || '').toLowerCase();
+    if (payload.typ === JwtTyp.EMAIL_CONFIRM) {
+      throw new UnauthorizedException('Token no válido para esta ruta');
+    }
+    if (email !== target) {
+      throw new ForbiddenException(
+        'No se puede cambiar la contraseña de otro usuario',
+      );
+    }
+    // Solo token de propósito pwd_reset (o OTP en body). ACCESS no basta.
+    if (payload.typ !== JwtTyp.PWD_RESET) {
+      throw new UnauthorizedException('Token no válido para esta ruta');
+    }
+  }
+
+  private async otpMatches(plain: string, stored: string): Promise<boolean> {
+    if (!stored) return false;
+    // Solo hashes bcrypt (OTP ya se almacena hasheado).
+    if (!stored.startsWith('$2')) {
+      return false;
+    }
+    return bcrypt.compare(plain, stored);
+  }
+
+  private async consumeResetOtp(userId: number, codigo: string): Promise<void> {
+    const registro = await this.codigoAutenticacioRepository.findOne({
+      where: {
+        idUsuario: userId,
+        tipo: TipoCodigoAutenticacion.RECUPERACION_CONTRASENA,
+        usado: EstatusEnum.ACTIVO,
+      },
+      order: { id: 'DESC' },
+    });
+    if (!registro || !(await this.otpMatches(codigo, registro.codigo))) {
+      throw new BadRequestException('Código inválido o ya usado');
+    }
+    if (new Date() > registro.fechaExpiracion) {
+      await this.codigoAutenticacioRepository.update(registro.id, {
+        usado: EstatusEnum.INACTIVO,
+        estatus: EstatusEnum.INACTIVO,
+      });
+      throw new BadRequestException('El código ha expirado');
+    }
+    await this.codigoAutenticacioRepository.update(registro.id, {
+      usado: EstatusEnum.INACTIVO,
+      estatus: EstatusEnum.INACTIVO,
+      fechaUso: this.formatFechaLocal(new Date()),
+    });
+  }
+
+  private static readonly CREDENCIALES_INVALIDAS = 'Credenciales invalidas';
+
+  /** Hash de relleno (coste 10) para que un usuario inexistente tarde lo mismo que uno real. */
+  private static readonly DUMMY_PASSWORD_HASH =
+    '$2b$10$Zjm72KPXp/0t766cyNivIubmMZeI6YYb7Ayu0C05NBcZjZjyhXWdO';
+
+  private throwCredencialesInvalidas(): never {
+    throw new UnauthorizedException(AuthService.CREDENCIALES_INVALIDAS);
+  }
+
+  private async burnPasswordTime(plain: string): Promise<void> {
+    await bcrypt.compare(plain, AuthService.DUMMY_PASSWORD_HASH);
+  }
+
+  private assertNotLocked(user: Usuarios): void {
+    if (!user.bloqueadoHasta) return;
+    if (new Date(user.bloqueadoHasta) > new Date()) {
+      throw new UnauthorizedException(
+        'Cuenta bloqueada temporalmente por múltiples intentos fallidos. Intenta más tarde.',
+      );
+    }
+  }
+
+  private async recordFailedLogin(user: Usuarios): Promise<void> {
+    const maxIntentos = Number(process.env.MAX_LOGIN_ATTEMPTS ?? 10);
+    const lockoutMin = Number(process.env.LOCKOUT_MINUTES ?? 30);
+    const nuevosIntentos = (user.intentosFallidos ?? 0) + 1;
+    const updateData: { intentosFallidos: number; bloqueadoHasta?: string } = {
+      intentosFallidos: nuevosIntentos,
+    };
+    if (nuevosIntentos >= maxIntentos) {
+      const bloqueadoHasta = new Date(
+        Date.now() + lockoutMin * 60 * 1000,
+      );
+      updateData.bloqueadoHasta = this.formatFechaLocal(bloqueadoHasta);
+    }
+    await this.usuariosRepository.update(user.id, updateData);
+  }
+
+  async bumpTokenVersion(userId: number): Promise<void> {
+    try {
+      await this.usuariosRepository.increment({ id: userId }, 'tokenVersion', 1);
+    } catch (error) {
+      if (!isMissingTokenVersionColumn(error)) {
+        throw error;
+      }
+    }
+    await this.refreshSessionsRepository.update(
+      { idUsuario: userId, revokedAt: IsNull() },
+      { revokedAt: new Date() },
+    );
+  }
+
+  private async currentTokenVersion(userId: number): Promise<number> {
+    try {
+      const user = await this.usuariosRepository.findOne({
+        where: { id: userId },
+        select: ['id', 'tokenVersion'],
+      });
+      return Number(user?.tokenVersion ?? 0);
+    } catch (error) {
+      if (isMissingTokenVersionColumn(error)) {
+        return 0;
+      }
+      throw error;
+    }
+  }
+
   private async generateTokens(
     payload: Record<string, unknown>,
     userId: number,
   ): Promise<{ token: string; refreshToken: string }> {
-    const token = this.jwtService.sign(payload);
+    const tv = await this.currentTokenVersion(userId);
+    const token = this.jwtService.sign({
+      ...payload,
+      typ: JwtTyp.ACCESS,
+      tv,
+    });
 
     const jti = randomUUID();
     const refreshToken = this.jwtService.sign(
@@ -83,6 +283,7 @@ export class AuthService {
       {
         secret: process.env.JWT_REFRESH_SECRET,
         expiresIn: process.env.JWT_REFRESH_EXPIRES ?? '7d',
+        algorithm: 'HS256',
       },
     );
 
@@ -108,10 +309,11 @@ export class AuthService {
   }
 
   private formatFechaDesfasada(): string {
-    const ahora = new Date();
-    const desfaseMs = -6 * 60 * 60 * 1000;
-    const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-    return `${fechaDesfasada.getFullYear()}-${this.padFecha(fechaDesfasada.getMonth() + 1)}-${this.padFecha(fechaDesfasada.getDate())} ${this.padFecha(fechaDesfasada.getHours())}:${this.padFecha(fechaDesfasada.getMinutes())}:${this.padFecha(fechaDesfasada.getSeconds())}`;
+    return formatFechaDb();
+  }
+
+  private formatFechaLocal(fecha: Date): string {
+    return `${fecha.getFullYear()}-${this.padFecha(fecha.getMonth() + 1)}-${this.padFecha(fecha.getDate())} ${this.padFecha(fecha.getHours())}:${this.padFecha(fecha.getMinutes())}:${this.padFecha(fecha.getSeconds())}`;
   }
 
   private fetchOperadorDatosByUserId(userId: number) {
@@ -316,7 +518,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
       // Generar número de serie aleatorio con formato MON-XXXX donde XXXX son números aleatorios
       // Usar timestamp y número aleatorio para mayor unicidad
       const timestamp = Date.now().toString().slice(-6); // Últimos 6 dígitos del timestamp
-      const numeroAleatorio = Math.floor(1000 + Math.random() * 9000); // Número entre 1000 y 9999
+      const numeroAleatorio = randomInt(1000, 10000);
       numeroSerie = `MON-${timestamp}-${numeroAleatorio}`;
 
       // Verificar si ya existe
@@ -345,6 +547,18 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
       let idClienteMonedero: number | null = null;
       let numeroSerieMonedero: string;
 
+      const assertClienteActivo = async (idCliente: number) => {
+        const rows = await this.monederosRepository.manager.query(
+          'SELECT Id, Estatus FROM Clientes WHERE Id = ? LIMIT 1',
+          [idCliente],
+        );
+        if (!rows?.length || Number(rows[0].Estatus) !== 1) {
+          throw new BadRequestException(
+            'El cliente no está disponible para registro.',
+          );
+        }
+      };
+
       // Si no se proporciona numeroSerieMonedero, generar uno aleatorio único y crear el monedero
       if (!createAltaPasajaroDto.numeroSerieMonedero) {
         // Validar que idCliente sea obligatorio cuando no se envía numeroSerieMonedero
@@ -354,13 +568,13 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
           );
         }
 
+        await assertClienteActivo(Number(createAltaPasajaroDto.idCliente));
+
         // Generar número de serie aleatorio único
         numeroSerieMonedero = await this.generarNumeroSerieUnico();
 
         // Crear nuevo monedero con el número de serie generado
-        const ahora = new Date();
-        const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-        const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+        const fechaDesfasada = nowDb();
 
         const nuevoMonedero = this.monederosRepository.create({
           numeroSerie: numeroSerieMonedero,
@@ -401,6 +615,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         );
       } else {
         // Si se proporciona numeroSerieMonedero, buscar el monedero existente y obtener su idCliente
+        // (el idCliente del body se ignora: manda el del monedero)
         numeroSerieMonedero = createAltaPasajaroDto.numeroSerieMonedero;
         monederos = await this.monederoService.findOneMonederoBySerie(
           createAltaPasajaroDto.numeroSerieMonedero,
@@ -415,7 +630,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
 
           if (pasajeroAsociado) {
             throw new BadRequestException(
-              `El monedero con número de serie ${createAltaPasajaroDto.numeroSerieMonedero} ya está asignado al pasajero ${pasajeroAsociado.nombre} ${pasajeroAsociado.apellidoPaterno} (ID: ${pasajeroAsociado.id}).`,
+              'El monedero ya está asignado a otro pasajero.',
             );
           } else {
             throw new BadRequestException(
@@ -426,6 +641,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
 
         // Obtener el idCliente del monedero previamente registrado
         idClienteMonedero = monederos.data.idCliente;
+        await assertClienteActivo(Number(idClienteMonedero));
       }
 
       const existUsuario = await this.usuariosRepository.findOne({
@@ -512,9 +728,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
             : createAltaPasajaroDto.apellidoPaterno;
 
           // Generar número aleatorio de 10 dígitos para identifier
-          const randomIdentifier = Math.floor(
-            1000000000 + Math.random() * 9000000000,
-          ).toString();
+          const randomIdentifier = randomInt(1000000000, 10000000000).toString();
 
           this.loggerService.debug('AuthService', 'Creating NetPay customer', {
             email: createAltaPasajaroDto.correo,
@@ -567,14 +781,13 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
             this.loggerService.error(
               'AuthService',
               'NetPay customer created but customerId not found',
-              customerResponse,
             );
 
             await this.bitacoraLogger.logToBitacora(
               'Pasajeros',
-              `Se creó el customer en NetPay pero no se obtuvo el customerId. Respuesta: ${JSON.stringify(customerResponse)}`,
+              `Se creó el customer en NetPay pero no se obtuvo el customerId.`,
               'CREATE',
-              { pasajeroId: pasajero.data.id, customerResponse },
+              { pasajeroId: pasajero.data.id },
               Number(userSave.id),
               21,
               EstatusEnumBitcora.ERROR,
@@ -612,16 +825,11 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         );
       }
 
-      //armamos el payload para el token
-      const payload = {
-        id: userSave.id,
-        email: userSave.userName,
-      };
-
-      //creamos el token
-      const token = this.jwtService.sign(payload, {
-        expiresIn: `${process.env.JWT_CONFIRMACION}`,
-      });
+      const token = this.signPurposeToken(
+        Number(userSave.id),
+        userSave.userName,
+        JwtTyp.EMAIL_CONFIRM,
+      );
 
       //Llamamos la funcion que nos genera el codigo
       const codigo = await this.generarCodigo(
@@ -652,9 +860,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         function pad(n: number) {
           return n < 10 ? '0' + n : n;
         }
-        const ahora = new Date();
-        const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-        const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+        const fechaDesfasada = nowDb();
 
         const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
@@ -670,7 +876,13 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
       }
 
       //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { createAltaPasajaroDto };
+      const {
+        passwordHash: _pwdAlta,
+        ...altaSinPassword
+      } = createAltaPasajaroDto as typeof createAltaPasajaroDto & {
+        passwordHash?: string;
+      };
+      const querylogger = { ...altaSinPassword };
       await this.bitacoraLogger.logToBitacora(
         'Usuarios',
         `Se ha creado un usuario con nombre: ${userSave.nombre}.`,
@@ -711,7 +923,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
   async singInPin(loginAuthPin: LoginAuthPinDto) {
     try {
       // Buscar por usuario/correo (activo, email confirmado, cliente activo).
-      // El validadorId puede diferir: tras validar el PIN se reasigna al dispositivo del request.
+      // Con ENFORCE_PIN_BINDING el dispositivo debe coincidir con el asignado por admin.
       const user = await this.usuariosRepository.findOne({
         relations: ['idRol2', 'idCliente2', 'idCliente2.idPadre2'],
         where: {
@@ -724,19 +936,21 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         },
       });
 
-      if (user?.idCliente2?.estatus === 0) {
-        throw new UnauthorizedException(
-          'Acceso denegado: el cliente ha sido dado de baja.',
-        );
-      }
-      if (!user) {
-        throw new NotFoundException('No se encontró al usuario.');
+      if (!user || user.idCliente2?.estatus === 0 || Number(user.idRol) !== 3) {
+        await this.burnPasswordTime(loginAuthPin.codigohash);
+        this.throwCredencialesInvalidas();
       }
 
-      const pinValid =
-        user.codigoHash &&
-        (await bcrypt.compare(loginAuthPin.codigohash, user.codigoHash));
+      this.assertNotLocked(user);
+
+      const pinValid = user.codigoHash
+        ? await bcrypt.compare(loginAuthPin.codigohash, user.codigoHash)
+        : false;
+      if (!user.codigoHash) {
+        await this.burnPasswordTime(loginAuthPin.codigohash);
+      }
       if (!pinValid) {
+        await this.recordFailedLogin(user);
         try {
           await this.bitacoraLogger.logToBitacora(
             'Autenticación',
@@ -751,18 +965,23 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         } catch {
           /* el log no debe interrumpir el login */
         }
-        throw new UnauthorizedException('Credenciales invalidas');
+        this.throwCredencialesInvalidas();
       }
 
-      // Si el dispositivo del request no coincide con el asignado, reasignarlo (igual que PATCH actualizar/validador)
-      if (user.validadorId !== loginAuthPin.validadorId) {
+      if (SecurityFlags.pinBinding()) {
+        if (
+          !user.validadorId ||
+          user.validadorId !== loginAuthPin.validadorId
+        ) {
+          this.throwCredencialesInvalidas();
+        }
+      } else if (user.validadorId !== loginAuthPin.validadorId) {
+        // Compatible (flag off): reasigna dispositivo en login.
         const dispositivo = await this.validadoresRepository.findOne({
           where: { numeroSerie: loginAuthPin.validadorId },
         });
         if (!dispositivo) {
-          throw new NotFoundException(
-            `Validador numero de serie: ${loginAuthPin.validadorId} no fue encontrado.`,
-          );
+          this.throwCredencialesInvalidas();
         }
 
         const usuariosConDispositivo = await this.usuariosRepository.find({
@@ -778,18 +997,23 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
 
         await this.usuariosRepository.update(user.id, {
           validadorId: loginAuthPin.validadorId,
-          ultimoLogin: this.formatFechaDesfasada(),
         });
         user.validadorId = loginAuthPin.validadorId;
-      } else {
-        await this.usuariosRepository.update(user.id, {
-          ultimoLogin: this.formatFechaDesfasada(),
-        });
       }
 
+      await this.usuariosRepository.update(user.id, {
+        ultimoLogin: this.formatFechaDesfasada(),
+        intentosFallidos: 0,
+        bloqueadoHasta: null,
+      });
+
       const operador = await this.fetchOperadorDatosByUserId(user.id);
-      if (!operador?.length || !operador[0]) {
-        throw new NotFoundException('No se encontró información del operador.');
+      if (
+        !operador?.length ||
+        !operador[0]?.idOperador ||
+        Number(operador[0].estatusOperador) !== 1
+      ) {
+        this.throwCredencialesInvalidas();
       }
 
       const payload = {
@@ -843,44 +1067,22 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         },
       });
       if (!user) {
-        throw new NotFoundException('No se encontró al usuario.');
+        await this.burnPasswordTime(loginAuthDto.password);
+        this.throwCredencialesInvalidas();
       }
 
-      if (user.bloqueadoHasta) {
-        const ahora = new Date();
-        const desfaseMs = -6 * 60 * 60 * 1000;
-        const ahoraDesfasado = new Date(ahora.getTime() + desfaseMs);
-        if (new Date(user.bloqueadoHasta) > ahoraDesfasado) {
-          throw new UnauthorizedException(
-            'Cuenta bloqueada temporalmente por múltiples intentos fallidos. Intenta más tarde.',
-          );
-        }
-      }
+      this.assertNotLocked(user);
 
-      const passwordValid = await bcrypt.compare(
-        loginAuthDto.password,
-        user.passwordHash,
-      );
+      const passwordValid = user.passwordHash?.startsWith('$2')
+        ? await bcrypt.compare(loginAuthDto.password, user.passwordHash)
+        : false;
+      if (!user.passwordHash?.startsWith('$2')) {
+        await this.burnPasswordTime(loginAuthDto.password);
+      }
       if (!passwordValid) {
-        const maxIntentos = Number(process.env.MAX_LOGIN_ATTEMPTS ?? 10);
-        const lockoutMin = Number(process.env.LOCKOUT_MINUTES ?? 30);
         const nuevosIntentos = (user.intentosFallidos ?? 0) + 1;
-
-        const ahora = new Date();
-        const desfaseMs = -6 * 60 * 60 * 1000;
-        const ahoraDesfasado = new Date(ahora.getTime() + desfaseMs);
-
-        const updateData: {
-          intentosFallidos: number;
-          bloqueadoHasta?: string;
-        } = { intentosFallidos: nuevosIntentos };
-        if (nuevosIntentos >= maxIntentos) {
-          const bloqueadoHasta = new Date(
-            ahoraDesfasado.getTime() + lockoutMin * 60 * 1000,
-          );
-          updateData.bloqueadoHasta = `${bloqueadoHasta.getFullYear()}-${this.padFecha(bloqueadoHasta.getMonth() + 1)}-${this.padFecha(bloqueadoHasta.getDate())} ${this.padFecha(bloqueadoHasta.getHours())}:${this.padFecha(bloqueadoHasta.getMinutes())}:${this.padFecha(bloqueadoHasta.getSeconds())}`;
-        }
-        await this.usuariosRepository.update(user.id, updateData);
+        const maxIntentos = Number(process.env.MAX_LOGIN_ATTEMPTS ?? 10);
+        await this.recordFailedLogin(user);
 
         try {
           if (nuevosIntentos >= maxIntentos) {
@@ -969,11 +1171,35 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
   // ========================================
   async verifyUser(codigoPasajeroAutenticacion: CodigoPasajeroAutenticacion) {
     try {
+      const filtro: {
+        tipo: number;
+        usado: number;
+        idUsuario?: number;
+      } = {
+        tipo: TipoCodigoAutenticacion.CONFIRMACION_CORREO,
+        usado: EstatusEnum.ACTIVO,
+      };
+
+      if (codigoPasajeroAutenticacion.userName) {
+        const dueño = await this.usuariosRepository.findOne({
+          where: { userName: codigoPasajeroAutenticacion.userName },
+        });
+        if (!dueño) {
+          throw new BadRequestException('Usuario no encontrado');
+        }
+        filtro.idUsuario = dueño.id;
+      } else {
+        this.loggerService.warn(
+          'AuthService',
+          'verify sin userName (modo compatible)',
+        );
+        if (SecurityFlags.verifyUserName()) {
+          throw new BadRequestException('El campo userName es obligatorio');
+        }
+      }
+
       const registro = await this.codigoAutenticacioRepository.findOne({
-        where: {
-          tipo: TipoCodigoAutenticacion.CONFIRMACION_CORREO,
-          usado: EstatusEnum.ACTIVO,
-        },
+        where: filtro,
         order: { id: 'DESC' },
       });
 
@@ -981,11 +1207,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         throw new BadRequestException('Código inválido o ya usado');
       }
 
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000;
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-
-      if (fechaDesfasada > registro.fechaExpiracion) {
+      if (new Date() > registro.fechaExpiracion) {
         await this.codigoAutenticacioRepository.update(registro.id, {
           usado: EstatusEnum.INACTIVO,
           estatus: EstatusEnum.INACTIVO,
@@ -993,7 +1215,12 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         throw new BadRequestException('El código ha expirado');
       }
 
-      if (codigoPasajeroAutenticacion.codigo !== registro.codigo) {
+      if (
+        !(await this.otpMatches(
+          codigoPasajeroAutenticacion.codigo,
+          registro.codigo,
+        ))
+      ) {
         const maxIntentos = Number(process.env.OTP_MAX_ATTEMPTS ?? 5);
         const nuevosIntentos = (registro.intentos ?? 0) + 1;
 
@@ -1072,16 +1299,11 @@ Muchas gracias por su preferencia.`;
         TipoCodigoAutenticacion.RECUPERACION_CONTRASENA,
       );
 
-      //Generamos el payload para el tokenn
-      const payload = {
-        id: user.id,
-        email: user.userName,
-      };
-
-      //Generamos el token
-      const token = this.jwtService.sign(payload, {
-        expiresIn: `${process.env.JWT_CONFIRMACION}`,
-      });
+      const token = this.signPurposeToken(
+        Number(user.id),
+        user.userName,
+        JwtTyp.PWD_RESET,
+      );
       const name =
         `${user.nombre ?? ''} ${user.apellidoPaterno ?? ''} ${user.apellidoMaterno ?? ''}`.trim();
       await this.emailService.sendResetPasswordEmail(
@@ -1106,22 +1328,23 @@ Muchas gracias por su preferencia.`;
   // ========================================
   async generarCodigo(idUsuario: number, tipo: number): Promise<string> {
     const codigo = randomInt(100000, 1000000).toString();
+    const codigoHash = await bcrypt.hash(codigo, 10);
 
     const ahora = new Date();
-    const desfaseMs = -6 * 60 * 60 * 1000;
     const expiracionMs = 15 * 60 * 1000;
-
-    const expiracion = new Date(ahora.getTime() + expiracionMs + desfaseMs);
+    const expiracion = new Date(ahora.getTime() + expiracionMs);
 
     const codigoExiste = await this.codigoAutenticacioRepository.findOne({
       where: {
         idUsuario: idUsuario,
+        tipo: tipo,
       },
+      order: { id: 'DESC' },
     });
 
     if (codigoExiste) {
       await this.codigoAutenticacioRepository.update(codigoExiste.id, {
-        codigo,
+        codigo: codigoHash,
         fechaCreacion: ahora,
         fechaExpiracion: expiracion,
         usado: EstatusEnum.ACTIVO,
@@ -1132,7 +1355,7 @@ Muchas gracias por su preferencia.`;
     } else {
       const codigoCreate = this.codigoAutenticacioRepository.create({
         idUsuario: idUsuario,
-        codigo: codigo,
+        codigo: codigoHash,
         tipo: tipo,
         fechaExpiracion: expiracion,
         usado: EstatusEnum.ACTIVO,
@@ -1162,13 +1385,11 @@ Muchas gracias por su preferencia.`;
         TipoCodigoAutenticacion.CONFIRMACION_CORREO,
       );
 
-      const payload = {
-        id: user.id,
-        email: user.userName,
-      };
-      const token = this.jwtService.sign(payload, {
-        expiresIn: `${process.env.JWT_CONFIRMACION}`,
-      });
+      const token = this.signPurposeToken(
+        Number(user.id),
+        user.userName,
+        JwtTyp.EMAIL_CONFIRM,
+      );
       const name =
         `${user.nombre ?? ''} ${user.apellidoPaterno ?? ''} ${user.apellidoMaterno ?? ''}`.trim();
       await this.emailService.sendConfirmationEmail(
@@ -1192,18 +1413,28 @@ Muchas gracias por su preferencia.`;
   // ========================================
   //actualizar contraseña
   // ========================================
-  async resetPassword(loginAuthResetDto: LoginAuthResetDto) {
+  async resetPassword(
+    loginAuthResetDto: LoginAuthResetDto,
+    authorization?: string,
+  ) {
     try {
+      this.assertPasswordChangeAuthorized(loginAuthResetDto, authorization);
+
       const user = await this.usuariosRepository.findOne({
         where: { userName: loginAuthResetDto.userName },
       });
       if (!user) throw new BadRequestException('Usuario no encontrado');
+
+      if (loginAuthResetDto.codigo) {
+        await this.consumeResetOtp(Number(user.id), loginAuthResetDto.codigo);
+      }
 
       const hashedPassword = await bcrypt.hash(loginAuthResetDto.password, 10); //encriptamos la contraseña
       loginAuthResetDto.password = hashedPassword;
       await this.usuariosRepository.update(user.id, {
         passwordHash: hashedPassword,
       });
+      await this.bumpTokenVersion(Number(user.id));
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { id: user.id, EmailConfirmado: 1 };
       await this.bitacoraLogger.logToBitacora(
@@ -1233,6 +1464,7 @@ Muchas gracias por su preferencia.`;
       try {
         payloadJwt = this.jwtService.verify(refreshToken, {
           secret: process.env.JWT_REFRESH_SECRET,
+          algorithms: ['HS256'],
         });
       } catch {
         throw new UnauthorizedException('Refresh token inválido o expirado');

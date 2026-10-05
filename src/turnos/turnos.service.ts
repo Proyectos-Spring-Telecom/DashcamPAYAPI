@@ -1,3 +1,8 @@
+import { nowDb } from 'src/common/clock';
+import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
 import {
   BadRequestException,
   HttpException,
@@ -74,16 +79,15 @@ export class TurnosService {
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
       const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
       const { numeroSerieValidador } = createTurnoDto;
 
       const query = `
       SELECT
-	i.Id
+	i.Id AS Id,
+	d.IdCliente AS IdCliente
 FROM Validadores d
 LEFT JOIN Instalaciones i ON i.idValidador = d.Id
 WHERE d.NumeroSerie = ?
@@ -94,6 +98,16 @@ AND i.Estatus = 1
         numeroSerieValidador,
       ]);
       if (instalacion.length === 0) {
+        throw new NotFoundException(
+          'No se ha encontrado la instalación asignada al validador.',
+        );
+      }
+
+      const { ids } = await this.clienteHijos(cliente);
+      if (
+        !tieneIdsTenant(ids) ||
+        !ids.includes(Number(instalacion[0].IdCliente))
+      ) {
         throw new NotFoundException(
           'No se ha encontrado la instalación asignada al validador.',
         );
@@ -151,29 +165,13 @@ AND i.Estatus = 1
       }
       throw new InternalServerErrorException({
         message: `Hubo un problema al crear el turno.`,
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   private async consultarTurnoPaginado(
@@ -390,6 +388,7 @@ INNER JOIN Usuarios u ON o.IdUsuario = u.Id
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           turnos = await this.consultarTurnoPaginado(cliente, limit, offset);
@@ -426,7 +425,6 @@ INNER JOIN Usuarios u ON o.IdUsuario = u.Id
       }
       throw new InternalServerErrorException({
         message: `No fue posible obtener la paginación de turnos.`,
-        error: error.message,
       });
     }
   }
@@ -599,6 +597,7 @@ ORDER BY t.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           turnos = await this.consultarTurnoListado(cliente);
@@ -625,7 +624,6 @@ ORDER BY t.Id DESC;
       }
       throw new InternalServerErrorException({
         message: `Ocurrió un inconveniente al intentar cargar el listado de turnos.`,
-        error: error.message,
       });
     }
   }
@@ -797,6 +795,7 @@ ORDER BY t.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           turnos = await this.consultarTurnoOne(cliente, id);
@@ -828,8 +827,27 @@ ORDER BY t.Id DESC;
       }
       throw new InternalServerErrorException({
         message: `Ocurrió un problema al consultar el turno.`,
-        error: error,
       });
+    }
+  }
+
+  private async assertTurnoTenant(id: number, cliente: number, rol: number) {
+    if (Number(rol) === 1) return;
+    const { ids, placeholders } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids)) {
+      throw new NotFoundException(`Turno con ID: ${id} no encontrado.`);
+    }
+    const rows = await this.turnosRepository.query(
+      `
+SELECT t.Id
+FROM Turnos t
+WHERE t.Id = ? AND t.IdCliente IN (${placeholders})
+LIMIT 1
+      `,
+      [id, ...ids],
+    );
+    if (!rows?.length) {
+      throw new NotFoundException(`Turno con ID: ${id} no encontrado.`);
     }
   }
 
@@ -837,8 +855,11 @@ ORDER BY t.Id DESC;
     id: number,
     idUser: number,
     updateTurnosEstatusDto: UpdateTurnosEstatusDto,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertTurnoTenant(id, cliente, rol);
       //obtenemos estatus
       const estatus = updateTurnosEstatusDto.estatus;
 
@@ -929,9 +950,7 @@ AND i.Estatus = 1
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
       const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
       // buscamos el turno
       const turnoFind = await this.turnosRepository.findOne({
@@ -1001,13 +1020,13 @@ AND i.Estatus = 1
       }
       throw new InternalServerErrorException({
         message: `Hubo un problema al actualizar el turno.`,
-        error: error.message,
       });
     }
   }
 
-  async remove(id: number, idUser: number) {
+  async remove(id: number, idUser: number, cliente = 0, rol = 1) {
     try {
+      await this.assertTurnoTenant(id, cliente, rol);
       //actualizamos
       await this.turnosRepository.update(id, { estatus: 0 });
 
@@ -1051,7 +1070,6 @@ AND i.Estatus = 1
       }
       throw new InternalServerErrorException({
         message: `Hubo un problema al eliminar el turno.`,
-        error: error.message,
       });
     }
   }

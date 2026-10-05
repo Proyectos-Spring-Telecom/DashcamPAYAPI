@@ -15,6 +15,7 @@ import { VariantesService } from './variantes.service';
 import { CreateVarianteDto } from './dto/create-variante.dto';
 import { UpdateVarianteDto } from './dto/update-variante.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { UpdateVariantesEstatusDto } from './dto/update-variante-estatus.dto';
@@ -29,6 +30,7 @@ import {
 @ApiTags('Variantes')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('variantes')
 @TenantResource('variante')
 export class VariantesController {

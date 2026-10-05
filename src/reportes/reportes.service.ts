@@ -1,11 +1,15 @@
+import { clienteHijosDesdeSp } from 'src/common/tenant/ownership-resolvers';
 import {
   Injectable,
   BadRequestException,
   InternalServerErrorException,
+  NotFoundException,
+  HttpException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Clientes } from 'src/entities/Clientes';
+import { assertDateWindow, assertIsoDate } from 'src/common/sql-date';
 import { RecaudacionDiariaRutaDto } from './dto/recaudacion-diaria-ruta.dto';
 import { RecaudacionPorOperadorDto } from './dto/recaudacion-por-operador.dto';
 import { RecaudacionPorVehiculoDto } from './dto/recaudacion-por-vehiculo.dto';
@@ -21,40 +25,57 @@ export class ReportesService {
   ) {}
 
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
+  }
 
-    const idsFiltrados = clientesFiltrado[0];
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-
-    // Asegurar que el cliente mismo esté incluido en la lista
-    if (!ids.includes(cliente)) {
-      ids.unshift(cliente);
+  private async assertClienteEnAlcance(
+    rol: number,
+    clienteToken: number,
+    idCliente: number,
+  ) {
+    if (Number(rol) === 1) return;
+    if (Number(idCliente) === Number(clienteToken)) return;
+    const result = await this.clienteHijos(clienteToken);
+    const ids: number[] = Array.isArray(result.ids) ? result.ids : [];
+    if (!ids.includes(Number(idCliente))) {
+      throw new NotFoundException('Cliente no encontrado');
     }
+  }
 
-    if (ids.length === 0) {
-      return { ids: [], placeholders: '' };
+  private async resolveClienteFiltro(
+    idCliente: number | null | undefined,
+    clienteToken: number,
+    rol: number,
+  ): Promise<number> {
+    if (idCliente !== null && idCliente !== undefined) {
+      await this.assertClienteEnAlcance(rol, clienteToken, Number(idCliente));
+      return Number(idCliente);
     }
+    return clienteToken;
+  }
 
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+  private assertRangoReporte(inicio?: string, fin?: string) {
+    if (!inicio && !fin) return;
+    if (!inicio || !fin) {
+      throw new BadRequestException(
+        'fechaInicio y fechaFin deben enviarse juntas',
+      );
+    }
+    assertDateWindow(inicio, fin);
   }
 
   async recaudacionDiariaPorRuta(
     filtros: RecaudacionDiariaRutaDto,
     cliente: number,
+    rol: number,
   ): Promise<ApiResponseCommon> {
     try {
-      // Si idCliente es null o undefined, usar el cliente del usuario autenticado y sus hijos
-      // Si idCliente tiene valor, usar ese cliente y sus hijos
-      const clienteFiltro =
-        filtros.idCliente !== null && filtros.idCliente !== undefined
-          ? filtros.idCliente
-          : cliente;
+      this.assertRangoReporte(filtros.fechaInicio, filtros.fechaFin);
+      const clienteFiltro = await this.resolveClienteFiltro(
+        filtros.idCliente,
+        cliente,
+        rol,
+      );
 
       // Obtener jerarquía de clientes (cliente y sus hijos)
       const { ids: clienteIds, placeholders } =
@@ -76,12 +97,12 @@ export class ReportesService {
 
       // Filtro de fecha - SOLO EN TRANSACCIONES
       if (filtros.fechaInicio) {
-        const fechaInicio = filtros.fechaInicio.split('T')[0];
+        const fechaInicio = assertIsoDate(filtros.fechaInicio, 'fechaInicio');
         condiciones.push(`DATE(td.FHRegistro) >= ?`);
         parametros.push(fechaInicio);
       }
       if (filtros.fechaFin) {
-        const fechaFin = filtros.fechaFin.split('T')[0];
+        const fechaFin = assertIsoDate(filtros.fechaFin, 'fechaFin');
         condiciones.push(`DATE(td.FHRegistro) <= ?`);
         parametros.push(fechaFin);
       }
@@ -181,12 +202,11 @@ ORDER BY DATE(td.FHRegistro) DESC, reg.Nombre, r.Nombre, d.Nombre;
         data,
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
         message: 'Error al generar el reporte de recaudación diaria por ruta',
-        error: error.message,
         stack: error.stack,
       });
     }
@@ -195,17 +215,18 @@ ORDER BY DATE(td.FHRegistro) DESC, reg.Nombre, r.Nombre, d.Nombre;
   async recaudacionPorOperador(
     filtros: RecaudacionPorOperadorDto,
     cliente: number,
+    rol: number,
   ): Promise<ApiResponseCommon> {
     let query: string = '';
     let parametrosCompletos: any[] = [];
 
     try {
-      // Si idCliente es null o undefined, usar el cliente del usuario autenticado y sus hijos
-      // Si idCliente tiene valor, usar ese cliente y sus hijos
-      const clienteFiltro =
-        filtros.idCliente !== null && filtros.idCliente !== undefined
-          ? filtros.idCliente
-          : cliente;
+      this.assertRangoReporte(filtros.fechaInicio, filtros.fechaFin);
+      const clienteFiltro = await this.resolveClienteFiltro(
+        filtros.idCliente,
+        cliente,
+        rol,
+      );
 
       // Obtener jerarquía de clientes (cliente y sus hijos)
       const { ids: clienteIds, placeholders } =
@@ -219,12 +240,11 @@ ORDER BY DATE(td.FHRegistro) DESC, reg.Nombre, r.Nombre, d.Nombre;
 
       // Preparar filtros de fecha - SOLO PARA TRANSACCIONES
       const fechaInicio = filtros.fechaInicio
-        ? filtros.fechaInicio.split('T')[0]
+        ? assertIsoDate(filtros.fechaInicio, 'fechaInicio')
         : null;
-      const fechaFin = filtros.fechaFin ? filtros.fechaFin.split('T')[0] : null;
-
-      // Construir la lista de IDs de clientes como string para usar en subconsultas
-      const clienteIdsStr = clienteIds.join(',');
+      const fechaFin = filtros.fechaFin
+        ? assertIsoDate(filtros.fechaFin, 'fechaFin')
+        : null;
 
       // Consulta: empezar desde transacciones y agrupar por operador
       // Las subconsultas de turnos y viajes NO tienen filtro de fecha
@@ -292,7 +312,7 @@ LEFT JOIN (
         COUNT(DISTINCT t.Id) AS totalTurnos,
         MAX(t.Inicio) AS ultimoTurno
     FROM Turnos t
-    WHERE t.IdCliente IN (${clienteIdsStr})
+    WHERE t.IdCliente IN (${placeholders})
     GROUP BY t.IdOperador
 ) AS turnos_data ON turnos_data.IdOperador = datos.idOperador AND datos.idOperador > 0
 LEFT JOIN (
@@ -300,7 +320,7 @@ LEFT JOIN (
         v2.IdOperador AS IdOperador,
         COUNT(DISTINCT v2.Id) AS totalViajes
     FROM Viajes v2
-    WHERE v2.IdCliente IN (${clienteIdsStr})
+    WHERE v2.IdCliente IN (${placeholders})
     GROUP BY v2.IdOperador
 ) AS viajes_data ON viajes_data.IdOperador = datos.idOperador AND datos.idOperador > 0
 ORDER BY datos.ingresos DESC, datos.operador ASC;
@@ -322,6 +342,9 @@ ORDER BY datos.ingresos DESC, datos.operador ASC;
       if (filtros.idOperador) {
         parametrosCompletos.push(filtros.idOperador);
       }
+
+      // Subconsultas de turnos y viajes (mismos IDs, parametrizados)
+      parametrosCompletos.push(...clienteIds, ...clienteIds);
 
       const resultados = await this.clienteRepository.query(
         query,
@@ -351,15 +374,11 @@ ORDER BY datos.ingresos DESC, datos.operador ASC;
         data,
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof HttpException) {
         throw error;
       }
-      console.error('Error en recaudacionPorOperador:', error);
-      console.error('Query:', query);
-      console.error('Parámetros:', parametrosCompletos);
       throw new InternalServerErrorException({
         message: 'Error al generar el reporte de recaudación por operador',
-        error: error.message,
         stack: error.stack,
       });
     }
@@ -368,14 +387,15 @@ ORDER BY datos.ingresos DESC, datos.operador ASC;
   async recaudacionPorVehiculo(
     filtros: RecaudacionPorVehiculoDto,
     cliente: number,
+    rol: number,
   ): Promise<ApiResponseCommon> {
     try {
-      // Si idCliente es null o undefined, usar el cliente del usuario autenticado y sus hijos
-      // Si idCliente tiene valor, usar ese cliente y sus hijos
-      const clienteFiltro =
-        filtros.idCliente !== null && filtros.idCliente !== undefined
-          ? filtros.idCliente
-          : cliente;
+      this.assertRangoReporte(filtros.fechaInicio, filtros.fechaFin);
+      const clienteFiltro = await this.resolveClienteFiltro(
+        filtros.idCliente,
+        cliente,
+        rol,
+      );
 
       // Obtener jerarquía de clientes (cliente y sus hijos)
       const { ids: clienteIds, placeholders } =
@@ -389,9 +409,11 @@ ORDER BY datos.ingresos DESC, datos.operador ASC;
 
       // Preparar filtros de fecha - SOLO PARA TRANSACCIONES
       const fechaInicio = filtros.fechaInicio
-        ? filtros.fechaInicio.split('T')[0]
+        ? assertIsoDate(filtros.fechaInicio, 'fechaInicio')
         : null;
-      const fechaFin = filtros.fechaFin ? filtros.fechaFin.split('T')[0] : null;
+      const fechaFin = filtros.fechaFin
+        ? assertIsoDate(filtros.fechaFin, 'fechaFin')
+        : null;
 
       // Consulta principal: empezar desde transacciones y agrupar por vehículo
       // Las subconsultas de turnos y viajes NO tienen filtro de fecha
@@ -471,7 +493,7 @@ ORDER BY datos.ingresos DESC, datos.numeroEconomico ASC;
 
       // Construir parámetros para la consulta principal
       // Orden: clienteIds, fechas (solo transacciones), idVehiculo, idRuta
-      const parametrosCompletos = [...clienteIds];
+      const parametrosCompletos: Array<number | string> = [...clienteIds];
 
       // Parámetros de fecha (solo para transacciones)
       if (fechaInicio) {
@@ -520,12 +542,11 @@ ORDER BY datos.ingresos DESC, datos.numeroEconomico ASC;
         data,
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
         message: 'Error al generar el reporte de recaudación por vehículo',
-        error: error.message,
         stack: error.stack,
       });
     }
@@ -534,14 +555,15 @@ ORDER BY datos.ingresos DESC, datos.numeroEconomico ASC;
   async recaudacionPorDispositivo(
     filtros: RecaudacionPorDispositivoDto,
     cliente: number,
+    rol: number,
   ): Promise<ApiResponseCommon> {
     try {
-      // Si idCliente es null o undefined, usar el cliente del usuario autenticado y sus hijos
-      // Si idCliente tiene valor, usar ese cliente y sus hijos
-      const clienteFiltro =
-        filtros.idCliente !== null && filtros.idCliente !== undefined
-          ? filtros.idCliente
-          : cliente;
+      this.assertRangoReporte(filtros.fechaInicio, filtros.fechaFin);
+      const clienteFiltro = await this.resolveClienteFiltro(
+        filtros.idCliente,
+        cliente,
+        rol,
+      );
 
       // Obtener jerarquía de clientes (cliente y sus hijos)
       const { ids: clienteIds, placeholders } =
@@ -555,9 +577,11 @@ ORDER BY datos.ingresos DESC, datos.numeroEconomico ASC;
 
       // Preparar filtros de fecha - SOLO PARA TRANSACCIONES
       const fechaInicio = filtros.fechaInicio
-        ? filtros.fechaInicio.split('T')[0]
+        ? assertIsoDate(filtros.fechaInicio, 'fechaInicio')
         : null;
-      const fechaFin = filtros.fechaFin ? filtros.fechaFin.split('T')[0] : null;
+      const fechaFin = filtros.fechaFin
+        ? assertIsoDate(filtros.fechaFin, 'fechaFin')
+        : null;
 
       // Consulta principal: empezar desde transacciones y agrupar por instalación/dispositivo
       const query = `
@@ -623,7 +647,7 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
 
       // Construir parámetros para la consulta principal
       // Orden: clienteIds (para ins.IdCliente), fechas (solo transacciones), idDispositivo, idInstalacion
-      const parametrosCompletos = [...clienteIds];
+      const parametrosCompletos: Array<number | string> = [...clienteIds];
 
       // Parámetros de fecha (solo para transacciones)
       if (fechaInicio) {
@@ -678,12 +702,11 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
         data,
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
         message: 'Error al generar el reporte de recaudación por dispositivo',
-        error: error.message,
         stack: error.stack,
       });
     }
@@ -696,24 +719,26 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
     idUser?: number,
   ): Promise<ApiResponseCommon> {
     try {
+      this.assertRangoReporte(filtros.fechaInicio, filtros.fechaFin);
       let query: string = '';
       let parametrosCompletos: any[] = [];
 
       // Convertir rol a número
       const rolNumero = Number(rol);
 
-      // Si idCliente es null o undefined, usar el cliente del usuario autenticado y sus hijos
-      // Si idCliente tiene valor, usar ese cliente y sus hijos
-      const clienteFiltro =
-        filtros.idCliente !== null && filtros.idCliente !== undefined
-          ? filtros.idCliente
-          : cliente;
+      const clienteFiltro = await this.resolveClienteFiltro(
+        filtros.idCliente,
+        cliente,
+        rol,
+      );
 
       // Preparar filtros de fecha
       const fechaInicio = filtros.fechaInicio
-        ? filtros.fechaInicio.split('T')[0]
+        ? assertIsoDate(filtros.fechaInicio, 'fechaInicio')
         : null;
-      const fechaFin = filtros.fechaFin ? filtros.fechaFin.split('T')[0] : null;
+      const fechaFin = filtros.fechaFin
+        ? assertIsoDate(filtros.fechaFin, 'fechaFin')
+        : null;
 
       // Construir condiciones WHERE
       const condiciones: string[] = [];
@@ -745,6 +770,7 @@ ORDER BY datos.ingresos DESC, datos.serieDispositivo ASC;
           parametros.push(idPasajero);
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (2,8,10,15, nuevos): filtrar por idCliente + hijos
           const { ids: clienteIds, placeholders } =
@@ -842,12 +868,11 @@ ORDER BY td.FechaHoraFinal DESC, td.Id DESC;
         data,
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof HttpException) {
         throw error;
       }
       throw new InternalServerErrorException({
         message: 'Error al generar el reporte de transacciones débito',
-        error: error.message,
         stack: error.stack,
       });
     }

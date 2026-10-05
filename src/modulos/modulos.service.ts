@@ -137,7 +137,7 @@ export class ModulosService {
       };
       return result;
     } catch (error) {
-      throw new BadRequestException(error.message || 'Error fetching data');
+      throw new BadRequestException('Error fetching data');
     }
   }
 
@@ -157,7 +157,6 @@ export class ModulosService {
       throw new HttpException(
         {
           message: 'Error interno al buscar el módulo',
-          details: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
@@ -346,7 +345,6 @@ export class ModulosService {
       );
       throw new InternalServerErrorException({
         message: 'Error al eliminar modulos.',
-        error: error.message,
       });
     }
   }

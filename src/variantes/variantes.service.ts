@@ -1,4 +1,8 @@
 import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -46,6 +50,23 @@ export class VariantesService {
     createVarianteDto: CreateVarianteDto,
   ) {
     try {
+      const ruta = await this.rutasRepository.findOne({
+        where: { id: createVarianteDto.idRuta },
+        relations: ['idZona2'],
+      });
+      if (!ruta) throw new NotFoundException('Ruta no encontrada');
+
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        if (
+          !tieneIdsTenant(ids) ||
+          !ruta.idZona2 ||
+          !ids.includes(Number(ruta.idZona2.idCliente))
+        ) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       const { recorridoDetallado: puntos } = createVarianteDto;
 
       // Si no viene idTipoVariante, asignar 1 por defecto
@@ -174,29 +195,13 @@ export class VariantesService {
       }
       throw new InternalServerErrorException({
         message: 'Error al crear Variante',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   private async consultarVariantePaginado(
@@ -374,6 +379,7 @@ WHERE ru.Estatus = 1         -- Solo rutas activas
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           data = await this.consultarVariantePaginado(cliente, limit, offset);
@@ -409,7 +415,6 @@ WHERE ru.Estatus = 1         -- Solo rutas activas
 
       throw new InternalServerErrorException({
         message: 'Error al obtener paginado Variantes',
-        error: error.message,
       });
     }
   }
@@ -544,6 +549,7 @@ ORDER BY d.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           data = await this.consultarVarianteListado(cliente);
@@ -570,7 +576,6 @@ ORDER BY d.Id DESC;
 
       throw new InternalServerErrorException({
         message: 'Error al obtener listado Variantes',
-        error: error.message,
       });
     }
   }
@@ -667,7 +672,6 @@ ORDER BY d.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener variantes por ruta',
-        error: error.message,
       });
     }
   }
@@ -856,18 +860,14 @@ INNER JOIN Rutas ru ON d.IdRuta = ru.Id
 INNER JOIN Zonas r ON ru.IdZona = r.Id
 LEFT JOIN Zonas rf ON ru.IdZonaFin = rf.Id
 INNER JOIN Clientes c ON r.IdCliente = c.Id
-INNER JOIN UsuariosZonas ur ON ur.IdZona = r.Id
 
-WHERE ur.IdUsuario = ?
-  AND ur.Estatus = 1
-  AND r.Estatus = 1
-  AND ru.Estatus = 1
-  AND d.Id = ? -- Id del Variante
+WHERE d.Id = ?
       `,
-            [idUser, id], // parámetro seguro
+            [id],
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           data = await this.consultarVarianteOne(cliente, id);
@@ -894,8 +894,33 @@ WHERE ur.IdUsuario = ?
 
       throw new InternalServerErrorException({
         message: 'Error al obtener Variantes por ID',
-        error: error.message,
       });
+    }
+  }
+
+  private async assertVarianteTenant(
+    id: number,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids, placeholders } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids)) {
+      throw new NotFoundException('Variante no encontrado');
+    }
+    const rows = await this.variantesRepository.query(
+      `
+SELECT v.Id
+FROM Variantes v
+INNER JOIN Rutas ru ON v.IdRuta = ru.Id
+INNER JOIN Zonas z ON ru.IdZona = z.Id
+WHERE v.Id = ? AND z.IdCliente IN (${placeholders})
+LIMIT 1
+      `,
+      [id, ...ids],
+    );
+    if (!rows?.length) {
+      throw new NotFoundException('Variante no encontrado');
     }
   }
 
@@ -907,6 +932,7 @@ WHERE ur.IdUsuario = ?
     updateVariantesEstatusDto: UpdateVariantesEstatusDto,
   ) {
     try {
+      await this.assertVarianteTenant(id, cliente, rol);
       const variante = await this.variantesRepository.findOne({
         where: { id: id },
       });
@@ -956,7 +982,6 @@ WHERE ur.IdUsuario = ?
 
       throw new InternalServerErrorException({
         message: 'Error al actualizar estatus Variantes',
-        error: error.message,
       });
     }
   }
@@ -969,6 +994,28 @@ WHERE ur.IdUsuario = ?
     updateVarianteDto: UpdateVarianteDto,
   ) {
     try {
+      await this.assertVarianteTenant(id, cliente, rol);
+      const existente = await this.variantesRepository.findOne({
+        where: { id },
+      });
+      if (!existente) throw new NotFoundException('Variante no encontrada');
+      if (
+        updateVarianteDto.idRuta !== undefined &&
+        Number(updateVarianteDto.idRuta) !== Number(existente.idRuta)
+      ) {
+        const rows = await this.clienteRepository.query(
+          `SELECT z.IdCliente AS idCliente FROM Rutas r INNER JOIN Zonas z ON r.IdZona = z.Id WHERE r.Id IN (?, ?)`,
+          [existente.idRuta, updateVarianteDto.idRuta],
+        );
+        const clientes = (rows || []).map((r: any) => Number(r.idCliente));
+        if (
+          clientes.length < 2 ||
+          clientes[0] !== clientes[1]
+        ) {
+          throw new NotFoundException('Variante no encontrada');
+        }
+      }
+
       const newVariante = this.variantesRepository.create(updateVarianteDto);
 
       if (
@@ -1037,13 +1084,13 @@ WHERE ur.IdUsuario = ?
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar Variante',
-        error: error.message,
       });
     }
   }
 
-  async remove(id: number, idUser: number, _cliente: number, _rol: number) {
+  async remove(id: number, idUser: number, cliente: number, rol: number) {
     try {
+      await this.assertVarianteTenant(id, cliente, rol);
       const variante = await this.variantesRepository.findOne({
         where: { id: id },
       });
@@ -1092,7 +1139,6 @@ WHERE ur.IdUsuario = ?
 
       throw new InternalServerErrorException({
         message: 'Error al eliminado logico Variantes',
-        error: error.message,
       });
     }
   }
@@ -1124,7 +1170,6 @@ WHERE ur.IdUsuario = ?
 
       throw new InternalServerErrorException({
         message: 'Error al obtener tipos de variante',
-        error: error.message,
       });
     }
   }
@@ -1190,7 +1235,6 @@ WHERE ur.IdUsuario = ?
 
       throw new InternalServerErrorException({
         message: 'Error al eliminado total Variantes',
-        error: error.message,
       });
     }
   }

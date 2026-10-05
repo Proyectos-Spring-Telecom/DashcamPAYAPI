@@ -101,6 +101,7 @@ export class RolesService {
         });
         break;
 
+      case 3:
       default:
         [data, total] = await this.rolesRepository.findAndCount({
           skip: (page - 1) * limit,
@@ -131,6 +132,7 @@ export class RolesService {
         permisos = await this.rolesRepository.find({ where: { estatus: 1 } });
         break;
 
+      case 3:
       default:
         permisos = await this.rolesRepository.find({
           where: {

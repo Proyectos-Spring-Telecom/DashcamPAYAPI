@@ -35,15 +35,68 @@ export const ROL_PASAJERO = 9;
  * Conjunto de clientes visibles para el usuario (él mismo + descendientes),
  * usando el mismo `spGetClientes` que los listados.
  */
+type Queryable = { query: (sql: string, params?: unknown[]) => Promise<unknown> };
+
+const hierarchyCache = new Map<number, { ids: number[]; exp: number }>();
+const HIERARCHY_TTL_MS = Number(process.env.CLIENTES_HIERARCHY_TTL_MS ?? 60_000);
+
+export function invalidateClientesPermitidos(cliente?: number): void {
+  if (cliente == null) {
+    hierarchyCache.clear();
+    return;
+  }
+  hierarchyCache.delete(Number(cliente));
+}
+
 export async function clientesPermitidos(
-  ds: DataSource,
+  ds: Queryable,
   cliente: number,
 ): Promise<number[]> {
-  const result = await ds.query('CALL spGetClientes(?);', [cliente]);
-  const filas = Array.isArray(result) ? (result[0] ?? []) : [];
-  return filas
-    .map((r: { Id?: number | string }) => Number(r.Id))
-    .filter((n: number) => Number.isFinite(n));
+  const key = Number(cliente);
+  if (!Number.isFinite(key) || key <= 0) return [];
+
+  const now = Date.now();
+  const hit = hierarchyCache.get(key);
+  if (hit && hit.exp > now) {
+    return hit.ids.slice();
+  }
+
+  const result = await ds.query('CALL spGetClientes(?);', [key]);
+  const filas = Array.isArray(result) ? ((result as unknown[])[0] ?? []) : [];
+  const seen = new Set<number>();
+  const ids: number[] = [];
+  for (const row of filas as Array<{ Id?: number | string }>) {
+    const n = Number(row?.Id);
+    if (!Number.isFinite(n) || n <= 0 || seen.has(n)) continue;
+    seen.add(n);
+    ids.push(n);
+  }
+  if (!seen.has(key)) {
+    ids.push(key);
+  }
+  hierarchyCache.set(key, { ids, exp: now + HIERARCHY_TTL_MS });
+  return ids.slice();
+}
+
+export async function clienteHijosDesdeSp(
+  ds: Queryable,
+  cliente: number,
+): Promise<{ ids: number[]; placeholders: string; data?: unknown[] }> {
+  const ids = await clientesPermitidos(ds, cliente);
+  if (ids.length === 0) {
+    // Sentinel: evita `IN ()` inválido; ningún Id real es -1.
+    return { ids: [-1], placeholders: '?', data: [] };
+  }
+  return { ids, placeholders: ids.map(() => '?').join(', ') };
+}
+
+/** true si hay ids de tenant reales (no el sentinel vacío). */
+export function tieneIdsTenant(ids?: number[] | null): boolean {
+  return (
+    Array.isArray(ids) &&
+    ids.length > 0 &&
+    !(ids.length === 1 && Number(ids[0]) === -1)
+  );
 }
 
 /** Id del pasajero asociado al usuario del token (para rol Pasajero). */
@@ -52,7 +105,7 @@ async function pasajeroIdDeUsuario(
   userId: number,
 ): Promise<number | null> {
   const filas = await ds.query(
-    'SELECT Id FROM Pasajeros WHERE IdUsuario = ? LIMIT 1',
+    'SELECT Id FROM Pasajeros WHERE IdUsuario = ? ORDER BY Id ASC LIMIT 1',
     [userId],
   );
   return filas?.[0]?.Id != null ? Number(filas[0].Id) : null;
@@ -136,6 +189,21 @@ export const ownershipResolvers: Record<string, OwnershipResolver> = {
   monedero: porClienteOPasajero(
     'SELECT IdCliente, IdPasajero FROM Monederos WHERE Id = ? LIMIT 1',
   ),
+  monederoBySerie: async (ds, id, user) => {
+    const row = (
+      await ds.query(
+        'SELECT IdCliente, IdPasajero FROM Monederos WHERE NumeroSerie = ? OR IdCard = ? LIMIT 1',
+        [id, id],
+      )
+    )?.[0];
+    if (!row) return false;
+    return pertenecePorClienteOPasajero(
+      ds,
+      user,
+      row.IdCliente != null ? Number(row.IdCliente) : null,
+      row.IdPasajero != null ? Number(row.IdPasajero) : null,
+    );
+  },
   pasajero: async (ds, id, user) => {
     if (Number(user.rol) === ROL_PASAJERO) {
       const pid = await pasajeroIdDeUsuario(ds, user.userId);
@@ -147,7 +215,8 @@ export const ownershipResolvers: Record<string, OwnershipResolver> = {
         `SELECT m.IdCliente AS IdCliente
            FROM Pasajeros p
            INNER JOIN Monederos m ON m.IdPasajero = p.Id
-          WHERE p.Id = ? LIMIT 1`,
+          WHERE p.Id = ?
+          ORDER BY m.Id ASC LIMIT 1`,
         [id],
       )
     )?.[0];

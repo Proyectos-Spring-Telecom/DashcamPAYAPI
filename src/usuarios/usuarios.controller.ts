@@ -35,8 +35,10 @@ import { ApiCrudResponse } from 'src/common/ApiResponse';
 import { UpdateUsuarioOperadorDto } from './dto/update-usuario-operador.dto';
 import { UpdateUsuarioContrasena } from './dto/update-usuario-contrasena.dto';
 import { UpdateUsuarioValidadorDto } from './dto/update-usuario-validador.dto';
+import { Roles } from 'src/guard/roles.decorator';
 
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @ApiTags('Usuarios')
 @ApiBearerAuth('bearer-token')
 @Controller('usuarios')
@@ -48,6 +50,7 @@ export class UsuariosController {
   // 🔹 POST ROUTES (crear recursos)
   // ========================================
   @Post()
+  @Roles(1, 2)
   @ApiOperation({ summary: 'Registrar un nuevo usuario' })
   @ApiResponse({
     status: 201,
@@ -62,7 +65,12 @@ export class UsuariosController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.usuariosService.createUsuario(createUsuarioDto, idUser);
+    return await this.usuariosService.createUsuario(
+      createUsuarioDto,
+      idUser,
+      Number(req.user.rol),
+      Number(req.user.cliente),
+    );
   }
 
   // ========================================
@@ -77,7 +85,8 @@ export class UsuariosController {
     return await this.usuariosService.getAllListUsuarios(+cliente, +rol);
   }
 
-  @Get('list/cliente')
+  @Get('list/cliente/:id')
+  @TenantResource({ resolver: 'cliente', idParam: 'id' })
   @ApiOperation({ summary: 'Obtener usuarios por cliente específico' })
   @ApiResponse({ status: 200, description: 'Lista de usuarios del cliente' })
   @ApiResponse({ status: 404, description: 'Cliente no encontrado' })
@@ -85,9 +94,11 @@ export class UsuariosController {
     @Param('id', ParseIntPipe) id: number,
     @Request() req,
   ): Promise<ApiResponseCommon> {
-    const cliente = req.user.cliente;
-    const _rol = req.user.rol;
-    return await this.usuariosService.getAllListUsuariosCliente(id, +cliente);
+    return await this.usuariosService.getAllListUsuariosCliente(
+      id,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get('list/rol/operador/:cliente')
@@ -164,6 +175,7 @@ export class UsuariosController {
   // ========================================
 
   @Put(':id')
+  @Roles(1, 2)
   @ApiOperation({ summary: 'Actualizar información completa del usuario' })
   @ApiResponse({ status: 200, description: 'Usuario actualizado exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
@@ -178,6 +190,8 @@ export class UsuariosController {
       id,
       updateUsuarioDto,
       idUser,
+      Number(req.user?.rol),
+      Number(req.user?.cliente),
     );
   }
 
@@ -186,6 +200,7 @@ export class UsuariosController {
   // ========================================
 
   @Patch('generar/pin')
+  @Roles(1, 2)
   @ApiOperation({ summary: 'Actualizar o crear PIN de operador' })
   @ApiResponse({ status: 200, description: 'PIN de operador actualizado' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
@@ -199,10 +214,13 @@ export class UsuariosController {
       userName,
       +idUser,
       updateUsuarioOperadorDto,
+      Number(req.user.rol),
+      Number(req.user.cliente),
     );
   }
 
   @Patch('actualizar/validador')
+  @Roles(1, 2)
   @ApiOperation({ summary: 'Actualizar validador del operador' })
   @ApiResponse({ status: 200, description: 'Validador Actualizado' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
@@ -216,10 +234,13 @@ export class UsuariosController {
       userName,
       +idUser,
       updateUsuarioValidadorDto,
+      Number(req.user.rol),
+      Number(req.user.cliente),
     );
   }
 
   @Patch('estatus/:id')
+  @Roles(1, 2)
   @ApiOperation({ summary: 'Cambiar estatus del usuario (activar/desactivar)' })
   @ApiResponse({ status: 200, description: 'Estatus actualizado exitosamente' })
   @ApiResponse({ status: 404, description: 'Usuario no encontrado' })
@@ -233,6 +254,8 @@ export class UsuariosController {
       id,
       updateUsuarioEstatusDto,
       idUser,
+      Number(req.user.cliente),
+      Number(req.user.rol),
     );
   }
 
@@ -296,6 +319,7 @@ export class UsuariosController {
   // ========================================
 
   @Delete(':id')
+  @Roles(1, 2)
   @ApiOperation({ summary: 'Eliminar usuario' })
   @ApiResponse({ status: 200, description: 'Usuario eliminado exitosamente' })
   @ApiResponse({ status: 404, description: 'Usuario no encontrado' })
@@ -305,6 +329,11 @@ export class UsuariosController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.usuariosService.deleteUsuario(id, idUser);
+    return await this.usuariosService.deleteUsuario(
+      id,
+      idUser,
+      Number(req.user.cliente),
+      Number(req.user.rol),
+    );
   }
 }

@@ -4,7 +4,10 @@ import {
   IsNotEmpty,
   IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
+  Max,
+  MaxLength,
   ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -49,6 +52,8 @@ export class CreateTransaccioneRecargaDto {
       message: 'monto must be a number conforming to the specified constraints',
     },
   )
+  @IsPositive({ message: 'El monto debe ser mayor a 0' })
+  @Max(10000, { message: 'El monto excede el tope permitido' })
   @IsNotEmpty()
   @Transform(toNumberDecimal)
   monto: number;
@@ -237,4 +242,14 @@ export class CreateTransaccioneRecargaDto {
     httpBrowserScreenWidth?: string;
     httpBrowserTimeDifference?: string;
   };
+
+  @ApiPropertyOptional({
+    example: 'a1b2c3d4-e5f6-47a8-9b0c-1d2e3f4a5b6c',
+    description:
+      'Llave de idempotencia. Obligatoria si ENFORCE_IDEMPOTENCY_KEY=true.',
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(64)
+  claveIdempotencia?: string;
 }

@@ -8,6 +8,8 @@ import {
   IsString,
   ValidateIf,
   Min,
+  Max,
+  MaxLength,
 } from 'class-validator';
 
 export class CreateTransaccioneDebitoDto {
@@ -92,6 +94,7 @@ export class CreateTransaccioneDebitoDto {
   @ValidateIf((o) => o.esMultiple === true)
   @IsInt({ message: 'cantidadPasajes debe ser un número entero' })
   @Min(1, { message: 'cantidadPasajes debe ser mayor a 0' })
+  @Max(50, { message: 'cantidadPasajes no puede ser mayor a 50' })
   @IsNotEmpty({
     message: 'cantidadPasajes es obligatorio cuando esMultiple es true',
   })
@@ -104,5 +107,6 @@ export class CreateTransaccioneDebitoDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   claveIdempotencia?: string;
 }
