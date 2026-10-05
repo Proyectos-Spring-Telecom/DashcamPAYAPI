@@ -1,8 +1,11 @@
+import { nowDb } from 'src/common/clock';
+import { clienteHijosDesdeSp, tieneIdsTenant } from 'src/common/tenant/ownership-resolvers';
 import {
   BadRequestException,
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -35,6 +38,8 @@ import { Posiciones } from 'src/entities/Posiciones';
 
 @Injectable()
 export class ViajesService {
+  private readonly logger = new Logger(ViajesService.name);
+
   constructor(
     @InjectRepository(Viajes)
     private readonly viajesRepository: Repository<Viajes>,
@@ -68,6 +73,7 @@ export class ViajesService {
     cliente: number,
     idOperador: number,
     createViajeDto: CreateViajeDto,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
       //validamos que el usuario sea rol operador
@@ -108,6 +114,18 @@ export class ViajesService {
           );
         }
 
+        if (Number(rol) !== 1) {
+          const { ids } = await this.clienteHijos(cliente);
+          if (
+            !tieneIdsTenant(ids) ||
+            !ids.includes(Number(turno.idCliente))
+          ) {
+            throw new NotFoundException(
+              `El turno con ID ${createViajeDto.idTurno} no existe.`,
+            );
+          }
+        }
+
         if (turno.estatus !== 1) {
           throw new BadRequestException(
             `No se puede crear un viaje porque el turno con ID ${createViajeDto.idTurno} no está activo (estatus: ${turno.estatus}).`,
@@ -119,9 +137,7 @@ export class ViajesService {
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
       const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
 
       createViajeDto.inicio = fechaDesfasada;
@@ -176,22 +192,18 @@ export class ViajesService {
             }
           }
         }
-      } catch (conteoError) {
-        // Si falla la creación del conteoPasajeros, no fallar la creación del viaje
-        // Solo registrar el error en la bitácora
-        console.error(
-          '[VIAJES] Error al crear conteoPasajeros automáticamente:',
-          conteoError,
-        );
+      } catch {
+        // Si falla la creación del conteoPasajeros, no fallar la creación del viaje.
+        // El texto del driver no se guarda en bitácora.
+        this.logger.error('Error al crear conteoPasajeros automáticamente');
         await this.bitacoraLogger.logToBitacora(
           'Viajes',
           `Se creó el viaje con ID: ${viajeSave.id} pero no se pudo crear el conteoPasajeros automáticamente.`,
           'CREATE',
-          { viajeId: viajeSave.id, error: conteoError.message },
+          { viajeId: viajeSave.id },
           idUser,
           EnumModulos.VIAJES,
           EstatusEnumBitcora.ERROR,
-          conteoError.message,
         );
       }
 
@@ -236,7 +248,6 @@ export class ViajesService {
       }
       throw new InternalServerErrorException({
         message: 'Error al crear un viaje',
-        error: error.message,
       });
     }
   }
@@ -262,9 +273,7 @@ export class ViajesService {
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
       const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
       // Buscamos el viaje
       const viaje = await this.viajesRepository.findOne({ where: { id } });
@@ -308,21 +317,18 @@ export class ViajesService {
             EstatusEnumBitcora.SUCCESS,
           );
         }
-      } catch (conteoError) {
-        // Si falla el cierre de conteos, registrar error pero no fallar el cierre del viaje
-        console.error(
-          '[VIAJES] Error al cerrar conteos de pasajeros:',
-          conteoError,
-        );
+      } catch {
+        // Si falla el cierre de conteos, no fallar el cierre del viaje.
+        // El texto del driver no se guarda en bitácora.
+        this.logger.error('Error al cerrar conteos de pasajeros');
         await this.bitacoraLogger.logToBitacora(
           'Viajes',
           `Se cerró el viaje con ID: ${id} pero hubo un error al cerrar los conteos de pasajeros.`,
           'UPDATE',
-          { viajeId: id, error: conteoError.message },
+          { viajeId: id },
           idUser,
           EnumModulos.VIAJES,
           EstatusEnumBitcora.ERROR,
-          conteoError.message,
         );
       }
 
@@ -368,29 +374,13 @@ export class ViajesService {
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar el viaje',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   private async consultarViajesListadoCL(cliente: number) {
@@ -699,6 +689,7 @@ ORDER BY v.Id DESC;
             `,
           );
           break;
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           viajes = await this.consultarViajesListado(cliente);
@@ -754,7 +745,6 @@ ORDER BY v.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener paginado viajes',
-        error: error.message,
       });
     }
   }
@@ -1143,6 +1133,7 @@ LIMIT ? OFFSET ?;
   `,
           );
           break;
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           viajes = await this.consultarViajesPaginado(cliente, limit, offset);
@@ -1206,7 +1197,6 @@ LIMIT ? OFFSET ?;
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener paginado de viajes',
-        error: error.message,
       });
     }
   }
@@ -1318,8 +1308,19 @@ ORDER BY v.Id DESC
     return this.viajesRepository.query(query, [cliente, id]);
   }
 
-  async findOne(id: number, _cliente: number, _rol: number) {
+  async findOne(id: number, cliente: number, rol: number) {
     try {
+      let whereSql = 'WHERE v.Id = ?';
+      let params: Array<number> = [id];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('No se encontraron viajes.');
+        }
+        whereSql += ` AND v.IdCliente IN (${placeholders})`;
+        params = [id, ...ids];
+      }
+
       const viajes = await this.viajesRepository.query(
         `
 SELECT
@@ -1410,11 +1411,11 @@ LEFT JOIN Zonas regInicio ON r.IdZona = regInicio.Id
 -- Zona de fin
 LEFT JOIN Zonas regFin ON r.IdZonaFin = regFin.Id
 
-        WHERE v.Id = ?
+        ${whereSql}
 
 ORDER BY v.Id DESC
             `,
-        [id],
+        params,
       );
 
       if (viajes.length === 0) {
@@ -1456,13 +1457,14 @@ ORDER BY v.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener un viaje',
-        error: error.message,
       });
     }
   }
 
   async getViajesUltimaSemanaPorValidador(
     numeroSerieValidador: string,
+    cliente = 0,
+    rol = 1,
   ): Promise<any> {
     try {
       // Validar que el validador existe
@@ -1474,6 +1476,18 @@ ORDER BY v.Id DESC
         throw new NotFoundException(
           `Validador con número de serie ${numeroSerieValidador} no encontrado.`,
         );
+      }
+
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        if (
+          !tieneIdsTenant(ids) ||
+          !ids.includes(Number(validador.idCliente))
+        ) {
+          throw new NotFoundException(
+            `Validador con número de serie ${numeroSerieValidador} no encontrado.`,
+          );
+        }
       }
 
       // Calcular fecha de hace una semana
@@ -1566,7 +1580,6 @@ ORDER BY v.Id DESC
       throw new InternalServerErrorException({
         message:
           'Error al obtener los viajes de la última semana por validador.',
-        error: error.message,
       });
     }
   }

@@ -13,6 +13,7 @@ import { AuthModule } from 'src/auth/auth.module';
 import { Clientes } from 'src/entities/Clientes';
 import { UsuariosZonas } from 'src/entities/UsuariosZonas';
 import { Validadores } from 'src/entities/Validadores';
+import { Operadores } from 'src/entities/Operadores';
 import { S3Module } from 'src/s3/s3.module';
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { S3Module } from 'src/s3/s3.module';
       UsuariosPermisos,
       Clientes,
       Validadores,
+      Operadores,
       UsuariosZonas,
     ]),
     BitacoraModule,

@@ -18,20 +18,26 @@ import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Catálogo tipos pasajeros')
 @ApiBearerAuth('bearer-token')
+@Roles(1, 2, 3, 9, 11)
 @Controller('catpasajero')
 export class CatpasajeroController {
   constructor(private readonly catpasajeroService: CatpasajeroService) {}
 
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Post()
   create(@Body() createCatpasajeroDto: CreateCatpasajeroDto, @Request() req) {
-    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const _rol = req.user.rol;
-    return this.catpasajeroService.create(+idUser, createCatpasajeroDto);
+    return this.catpasajeroService.create(
+      +idUser,
+      createCatpasajeroDto,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
@@ -53,10 +59,15 @@ export class CatpasajeroController {
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get(':id')
   @TenantResource('catTipoPasajero')
-  findOne(@Param('id') id: string) {
-    return this.catpasajeroService.findOne(+id);
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.catpasajeroService.findOne(
+      +id,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Put(':id')
   @TenantResource('catTipoPasajero')
@@ -71,6 +82,7 @@ export class CatpasajeroController {
     return this.catpasajeroService.update(+id, +idUser, updateCatpasajeroDto);
   }
 
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Patch('estatus/:id')
   @TenantResource('catTipoPasajero')
@@ -85,6 +97,7 @@ export class CatpasajeroController {
     return this.catpasajeroService.update(+id, +idUser, updateCatpasajeroDto);
   }
 
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Delete(':id')
   @TenantResource('catTipoPasajero')

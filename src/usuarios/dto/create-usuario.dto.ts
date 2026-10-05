@@ -9,6 +9,7 @@ import {
   MinLength,
   IsIn,
   IsArray,
+  ArrayMaxSize,
   IsNumber,
   Matches,
 } from 'class-validator';
@@ -109,6 +110,9 @@ export class CreateUsuarioDto {
   estatus?: number = 1;
 
   @IsInt()
+  @IsIn([1, 2, 3, 8, 9, 10, 11, 15], {
+    message: 'Rol no válido',
+  })
   @ApiProperty({ description: 'Rol asignado', example: 2 })
   idRol: number;
 
@@ -119,6 +123,7 @@ export class CreateUsuarioDto {
 
   @IsNotEmpty()
   @IsArray()
+  @ArrayMaxSize(200, { message: 'No se permiten más de 200 permisos' })
   @IsNumber({}, { each: true })
   permisosIds: number[];
 }

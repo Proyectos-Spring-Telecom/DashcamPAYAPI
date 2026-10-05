@@ -1,4 +1,8 @@
 import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -33,29 +37,47 @@ export class MantenimientoCombustibleService {
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
+  }
 
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { ids: [], placeholders: '' }; // No hay clientes que consultar
+  private async assertMantenimientoTenantViaInstalacion(
+    idInstalacion: number | null | undefined,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids) || idInstalacion == null) {
+      throw new NotFoundException(
+        'Mantenimiento de combustible no encontrado',
+      );
     }
-
-    // Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    const instalacion = await this.instalacionesRepository.findOne({
+      where: { id: Number(idInstalacion) },
+    });
+    if (
+      !instalacion ||
+      !ids.includes(Number(instalacion.idCliente))
+    ) {
+      throw new NotFoundException(
+        'Mantenimiento de combustible no encontrado',
+      );
+    }
   }
 
   async create(
     createMantenimientoCombustibleDto: CreateMantenimientoCombustibleDto,
     idUser: number,
+    idCliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertMantenimientoTenantViaInstalacion(
+        createMantenimientoCombustibleDto.idInstalacion,
+        idCliente,
+        rol,
+      );
+
       const create = await this.mantenimientoCombustibleRepository.create(
         createMantenimientoCombustibleDto,
       );
@@ -171,6 +193,7 @@ INNER JOIN Clientes c ON i.IdCliente = c.Id
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(idCliente);
           if (ids.length === 0) {
@@ -295,7 +318,7 @@ WHERE c.Id IN (${placeholders})
         throw error;
       }
       throw new BadRequestException(
-        error.message || 'Error al obtener los mantenimientos de combustible',
+        'Error al obtener los mantenimientos de combustible',
       );
     }
   }
@@ -351,6 +374,7 @@ WHERE mc.Id = ?
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(idCliente);
           if (ids.length === 0) {
@@ -468,6 +492,8 @@ AND mc.Id = ?
     id: number,
     updateMantenimientoCombustibleDto: UpdateMantenimientoCombustibleDto,
     idUser: number,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
       const mantenimiento =
@@ -479,6 +505,11 @@ AND mc.Id = ?
           'Mantenimiento de combustible no encontrado',
         );
       }
+      await this.assertMantenimientoTenantViaInstalacion(
+        mantenimiento.idInstalacion,
+        cliente,
+        rol,
+      );
 
       await this.mantenimientoCombustibleRepository.update(
         id,
@@ -533,7 +564,12 @@ AND mc.Id = ?
     }
   }
 
-  async desactivar(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async desactivar(
+    id: number,
+    idUser: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
       const mantenimiento =
         await this.mantenimientoCombustibleRepository.findOne({
@@ -545,6 +581,11 @@ AND mc.Id = ?
           'Mantenimiento de combustible no encontrado',
         );
       }
+      await this.assertMantenimientoTenantViaInstalacion(
+        mantenimiento.idInstalacion,
+        cliente,
+        rol,
+      );
 
       await this.mantenimientoCombustibleRepository.update(id, { estatus: 0 });
 
@@ -589,12 +630,16 @@ AND mc.Id = ?
       }
       throw new InternalServerErrorException({
         message: 'Error al desactivar el mantenimiento de combustible.',
-        error: error.message,
       });
     }
   }
 
-  async activar(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async activar(
+    id: number,
+    idUser: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
       const mantenimiento =
         await this.mantenimientoCombustibleRepository.findOne({
@@ -606,6 +651,11 @@ AND mc.Id = ?
           'Mantenimiento de combustible no encontrado',
         );
       }
+      await this.assertMantenimientoTenantViaInstalacion(
+        mantenimiento.idInstalacion,
+        cliente,
+        rol,
+      );
 
       if (mantenimiento.estatus === 1) {
         throw new BadRequestException(
@@ -656,7 +706,6 @@ AND mc.Id = ?
       }
       throw new InternalServerErrorException({
         message: 'Error al activar el mantenimiento de combustible.',
-        error: error.message,
       });
     }
   }

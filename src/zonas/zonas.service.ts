@@ -1,4 +1,8 @@
 import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   HttpException,
   Injectable,
   InternalServerErrorException,
@@ -39,6 +43,16 @@ export class ZonasService {
     createZonasDto: CreateZonasDto,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        if (
+          !tieneIdsTenant(ids) ||
+          !ids.includes(Number(createZonasDto.idCliente))
+        ) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       let rootPermisos;
       createZonasDto.nombre = createZonasDto.nombre.toUpperCase();
 
@@ -118,29 +132,13 @@ export class ZonasService {
 
       throw new InternalServerErrorException({
         message: 'Error al crear Zona',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   //Funcion para obtener paginado por clientes
@@ -250,6 +248,7 @@ INNER JOIN Clientes c ON r.IdCliente = c.Id
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           zonas = await this.consultarZonasPagina(cliente, limit, offset);
@@ -283,7 +282,6 @@ INNER JOIN Clientes c ON r.IdCliente = c.Id
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener paginado Zonas',
-        error: error.message,
       });
     }
   }
@@ -323,8 +321,20 @@ ORDER BY r.Id DESC
   }
 
   //Obtener listado por idCliente recibido por ruta (solo del cliente, sin hijos)
-  async findByCliente(idCliente: number, _idUser: number, _rol: number) {
+  async findByCliente(
+    idCliente: number,
+    _idUser: number,
+    rol: number,
+    clienteActor = 0,
+  ) {
     try {
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(clienteActor);
+        if (!tieneIdsTenant(ids) || !ids.includes(Number(idCliente))) {
+          return { data: [] };
+        }
+      }
+
       // Consulta directa sin incluir clientes hijos
       const zonas = await this.zonasRepository.query(
         `
@@ -376,7 +386,6 @@ ORDER BY r.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener zonas por cliente',
-        error: error.message,
       });
     }
   }
@@ -421,6 +430,7 @@ ORDER BY r.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           zonas = await this.consultarZonasListado(cliente);
@@ -445,7 +455,6 @@ ORDER BY r.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener listado Zonas',
-        error: error.message,
       });
     }
   }
@@ -523,6 +532,7 @@ ORDER BY r.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           zonas = await this.consultarZonasOne(cliente, id);
@@ -551,7 +561,6 @@ ORDER BY r.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener una zona',
-        error: error.message,
       });
     }
   }
@@ -628,7 +637,6 @@ ORDER BY r.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar estatus de una zona',
-        error: error.message,
       });
     }
   }
@@ -661,6 +669,13 @@ ORDER BY r.Id DESC;
       if (!zonas) {
         throw new NotFoundException('Zona no encontrada');
       }
+      if (
+        (updateZonaDto as any).idCliente !== undefined &&
+        Number((updateZonaDto as any).idCliente) !== Number(zonas.idCliente)
+      ) {
+        throw new NotFoundException('Zona no encontrada');
+      }
+      delete (updateZonaDto as any).idCliente;
 
       //actualizamos datos
       await this.zonasRepository.update(id, updateZonaDto);
@@ -705,7 +720,6 @@ ORDER BY r.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar una zona',
-        error: error.message,
       });
     }
   }
@@ -774,7 +788,6 @@ ORDER BY r.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al eliminar una zona',
-        error: error.message,
       });
     }
   }

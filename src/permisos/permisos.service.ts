@@ -17,6 +17,7 @@ import {
   EstatusEnumBitcora,
 } from 'src/common/ApiResponse';
 import { UsuariosPermisos } from 'src/entities/UsuariosPermisos';
+import { assertPositiveInt } from 'src/common/sql-date';
 
 @Injectable()
 export class PermisosService {
@@ -331,10 +332,12 @@ export class PermisosService {
             INNER JOIN 
              DashCamDev.Modulos ON Permisos.IdModulo = Modulos.Id
             WHERE 
-              UsuariosPermisos.IdUsuario = '${idUsuario}'`;
+              UsuariosPermisos.IdUsuario = ?`;
 
     // Ejecutar la consulta
-    const results = await this.permisoRepository.query(query);
+    const results = await this.permisoRepository.query(query, [
+      assertPositiveInt(idUsuario, 'idUsuario'),
+    ]);
 
     if (!Array.isArray(results)) {
       throw new Error('El resultado de la consulta no es un array');

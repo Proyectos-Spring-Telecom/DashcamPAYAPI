@@ -88,6 +88,9 @@ export class Usuarios {
   @Column('datetime', { name: 'BloqueadoHasta', nullable: true })
   bloqueadoHasta: string | null;
 
+  @Column('int', { name: 'TokenVersion', default: () => "'0'" })
+  tokenVersion: number;
+
   @Column('bigint', { name: 'IdRol' })
   idRol: number;
 

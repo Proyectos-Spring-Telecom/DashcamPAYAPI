@@ -94,7 +94,6 @@ export class CatMetodoPagoService {
       throw new InternalServerErrorException({
         message:
           'Se ha producido un error durante la creación de un nuevo método de pago.',
-        error: error.message,
       });
     }
   }
@@ -245,7 +244,6 @@ export class CatMetodoPagoService {
       throw new InternalServerErrorException({
         message:
           'Se ha producido un error durante la actualización del método de pago.',
-        error: error.message,
       });
     }
   }
@@ -310,7 +308,6 @@ export class CatMetodoPagoService {
       throw new InternalServerErrorException({
         message:
           'Se ha producido un error durante la eliminación del método de pago.',
-        error: error.message,
       });
     }
   }

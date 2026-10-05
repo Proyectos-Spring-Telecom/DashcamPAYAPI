@@ -15,6 +15,7 @@ import { RutasService } from './rutas.service';
 import { CreateRutaDto } from './dto/create-ruta.dto';
 import { UpdateRutaDto } from './dto/update-ruta.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { UpdateRutasEstatusDto } from './dto/update-ruta-estatus.dto';
@@ -29,6 +30,7 @@ import {
 @ApiTags('Rutas')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('rutas')
 @TenantResource('ruta')
 export class RutasController {
@@ -181,9 +183,9 @@ export class RutasController {
 
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    const _cliente = req.user.cliente;
+    const cliente = req.user.cliente;
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return this.rutasService.remove(id, +idUser, +rol);
+    return this.rutasService.remove(id, +idUser, +cliente, +rol);
   }
 }

@@ -1,4 +1,8 @@
 import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -17,6 +21,7 @@ import {
   EstatusEnumBitcora,
 } from 'src/common/ApiResponse';
 import { UpdateInstalacioneEstatusDto } from './dto/update-instalacione-estatus.dto';
+import { forbidTenantMove } from 'src/common/tenant/forbid-tenant-move';
 import { UsuariosInstalaciones } from 'src/entities/UsuariosInstalaciones';
 import { Validadores } from 'src/entities/Validadores';
 import { Contadores } from 'src/entities/Contadores';
@@ -62,6 +67,50 @@ export class InstalacionesService {
     createInstalacioneDto: CreateInstalacionesDto,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        if (
+          !tieneIdsTenant(ids) ||
+          !ids.includes(Number(createInstalacioneDto.idCliente))
+        ) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
+      const idClienteInstalacion = Number(createInstalacioneDto.idCliente);
+
+      const validador = await this.validadoresRepository.findOne({
+        where: { id: createInstalacioneDto.idValidador },
+      });
+      if (
+        !validador ||
+        Number(validador.idCliente) !== idClienteInstalacion
+      ) {
+        throw new NotFoundException('Recurso no encontrado');
+      }
+
+      const vehiculo = await this.vehiculosRepository.findOne({
+        where: { id: createInstalacioneDto.idVehiculo },
+      });
+      if (
+        !vehiculo ||
+        Number(vehiculo.idCliente) !== idClienteInstalacion
+      ) {
+        throw new NotFoundException('Recurso no encontrado');
+      }
+
+      for (const idContador of createInstalacioneDto.idContadores) {
+        const contador = await this.contadoresRepository.findOne({
+          where: { id: idContador },
+        });
+        if (
+          !contador ||
+          Number(contador.idCliente) !== idClienteInstalacion
+        ) {
+          throw new NotFoundException('Recurso no encontrado');
+        }
+      }
+
       let permiso;
       // ✅ VALIDACIÓN MEJORADA: Verificar todos los conflictos con relaciones
       const errores: string[] = [];
@@ -245,29 +294,13 @@ export class InstalacionesService {
 
       throw new InternalServerErrorException({
         message: 'Error al crear Instalación',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   private async consultarInstalacionesPaginado(
@@ -437,6 +470,7 @@ INNER JOIN Clientes c ON i.IdCliente = c.Id
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           instalaciones = await this.consultarInstalacionesPaginado(
@@ -496,7 +530,6 @@ INNER JOIN Clientes c ON i.IdCliente = c.Id
       throw new InternalServerErrorException({
         message:
           'Ocurrió un problema al intentar cargar la paginación de instalaciones.',
-        error: error.message,
       });
     }
   }
@@ -640,6 +673,7 @@ ORDER BY i.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           instalaciones = await this.consultarInstalacionesListado(cliente);
@@ -866,7 +900,6 @@ ORDER BY i.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener instalaciones por validador',
-        error: error.message,
       });
     }
   }
@@ -994,6 +1027,7 @@ ORDER BY i.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           instalaciones = await this.consultarInstalacionesOne(cliente, id);
@@ -1064,7 +1098,6 @@ ORDER BY i.Id DESC;
       throw new InternalServerErrorException({
         message:
           'Ocurrió un problema al intentar acceder a las instalaciones por ID.',
-        error: error.message,
       });
     }
   }
@@ -1080,6 +1113,24 @@ ORDER BY i.Id DESC;
     updateInstalacioneEstatusDto: UpdateInstalacioneEstatusDto,
   ) {
     try {
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException(
+            `Instalaciones con id: ${id} no encontrado`,
+          );
+        }
+        const owned = await this.instalacionesRepository.findOne({
+          where: { id },
+          select: { id: true, idCliente: true },
+        });
+        if (!owned || !ids.includes(Number(owned.idCliente))) {
+          throw new NotFoundException(
+            `Instalaciones con id: ${id} no encontrado`,
+          );
+        }
+      }
+
       const instalacion = await this.instalacionesRepository.findOne({
         where: { id: id },
       });
@@ -1283,7 +1334,6 @@ ORDER BY i.Id DESC;
       }
       throw new InternalServerErrorException({
         message: `Ocurrió un problema al intentar modificar el estatus de la instalación con ID: ${id}.`,
-        error: error.message,
       });
     }
   }
@@ -1299,6 +1349,24 @@ ORDER BY i.Id DESC;
     updateInstalacioneDto: UpdateInstalacioneDto,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException(
+            `No se encontró la instalación con ID: ${id}.`,
+          );
+        }
+        const owned = await this.instalacionesRepository.findOne({
+          where: { id },
+          select: { id: true, idCliente: true },
+        });
+        if (!owned || !ids.includes(Number(owned.idCliente))) {
+          throw new NotFoundException(
+            `No se encontró la instalación con ID: ${id}.`,
+          );
+        }
+      }
+
       const instalacion = await this.instalacionesRepository.findOne({
         where: { id: id },
       });
@@ -1307,6 +1375,38 @@ ORDER BY i.Id DESC;
         throw new NotFoundException(
           `No se encontró la instalación con ID: ${id}.`,
         );
+      }
+      forbidTenantMove(
+        instalacion.idCliente,
+        updateInstalacioneDto as any,
+        'idCliente',
+        'Instalación no encontrada',
+      );
+
+      const idClienteInstalacion = Number(instalacion.idCliente);
+      if (updateInstalacioneDto.idValidador != null) {
+        const validador = await this.validadoresRepository.findOne({
+          where: { id: Number(updateInstalacioneDto.idValidador) },
+        });
+        if (
+          !validador ||
+          Number(validador.idCliente) !== idClienteInstalacion
+        ) {
+          throw new NotFoundException('Recurso no encontrado');
+        }
+      }
+      if (updateInstalacioneDto.idContadores?.length) {
+        for (const idContador of updateInstalacioneDto.idContadores) {
+          const contador = await this.contadoresRepository.findOne({
+            where: { id: idContador },
+          });
+          if (
+            !contador ||
+            Number(contador.idCliente) !== idClienteInstalacion
+          ) {
+            throw new NotFoundException('Recurso no encontrado');
+          }
+        }
       }
 
       //verificamos que exista el dispositivo a actualizar
@@ -1457,7 +1557,6 @@ ORDER BY i.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar Instalación',
-        error: error, // ✅ Solo el mensaje, no todo el objeto
       });
     }
   }
@@ -1472,6 +1571,24 @@ ORDER BY i.Id DESC;
     rol: number,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException(
+            `La instalación con ID: ${id} no está disponible.`,
+          );
+        }
+        const owned = await this.instalacionesRepository.findOne({
+          where: { id },
+          select: { id: true, idCliente: true },
+        });
+        if (!owned || !ids.includes(Number(owned.idCliente))) {
+          throw new NotFoundException(
+            `La instalación con ID: ${id} no está disponible.`,
+          );
+        }
+      }
+
       let instalacion;
       instalacion = await this.instalacionesRepository.findOne({
         where: { id: id },

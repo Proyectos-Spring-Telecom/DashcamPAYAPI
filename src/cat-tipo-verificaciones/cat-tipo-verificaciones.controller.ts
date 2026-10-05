@@ -23,16 +23,19 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Catálogo tipo verificaciones')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2, 3, 11)
 @Controller('cat-tipo-verificaciones')
 export class CatTipoVerificacionesController {
   constructor(
     private readonly catTipoVerificacionesService: CatTipoVerificacionesService,
   ) {}
 
+  @Roles(1, 2)
   @Post()
   @ApiOperation({
     summary: 'Crear un nuevo tipo de verificación',
@@ -145,6 +148,7 @@ export class CatTipoVerificacionesController {
     return this.catTipoVerificacionesService.findOne(id);
   }
 
+  @Roles(1, 2)
   @Patch(':id')
   @ApiOperation({
     summary: 'Actualizar un tipo de verificación',
@@ -189,6 +193,7 @@ export class CatTipoVerificacionesController {
     );
   }
 
+  @Roles(1, 2)
   @Delete(':id')
   @ApiOperation({
     summary: 'Eliminar un tipo de verificación',

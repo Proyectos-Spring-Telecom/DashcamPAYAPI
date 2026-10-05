@@ -29,12 +29,14 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Incidentes')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('incidentes')
 @TenantResource('incidente')
 export class IncidentesController {
@@ -87,10 +89,13 @@ export class IncidentesController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
+    const idCliente = Number(req.user.cliente) || 0;
     return await this.incidentesService.create(
       createIncidentesDto,
       idUser,
       imagenFile,
+      idCliente,
+      +req.user.rol,
     );
   }
 
@@ -228,11 +233,14 @@ export class IncidentesController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
+    const idCliente = Number(req.user.cliente) || 0;
     return await this.incidentesService.update(
       id,
       updateIncidentesDto,
       idUser,
       imagenFile,
+      idCliente,
+      +req.user.rol,
     );
   }
 
@@ -264,7 +272,12 @@ export class IncidentesController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.incidentesService.desactivar(id, idUser);
+    return await this.incidentesService.desactivar(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Patch(':id/activar')
@@ -300,7 +313,12 @@ export class IncidentesController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.incidentesService.activar(id, idUser);
+    return await this.incidentesService.activar(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Patch(':id/estatus/:estatus')
@@ -342,6 +360,12 @@ export class IncidentesController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.incidentesService.updateStatus(idUser, id, estatus);
+    return await this.incidentesService.updateStatus(
+      idUser,
+      id,
+      estatus,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

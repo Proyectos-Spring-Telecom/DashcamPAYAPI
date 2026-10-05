@@ -17,6 +17,7 @@ import { UpdateUsuarioszonaDto } from './dto/update-usuarioszona.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdateUsuariosZonasEstatusDto } from './dto/update-usuarioszona-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -24,6 +25,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 @ApiTags('Usuarios Zonas')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2)
 @Controller('usuarioszonas')
 @TenantResource('usuarioZona')
 export class UsuarioszonasController {
@@ -38,12 +40,17 @@ export class UsuarioszonasController {
     return await this.usuarioszonasService.create(
       +idUser,
       createUsuariosZonasDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
   @Get('list')
-  async findAllList(): Promise<ApiResponseCommon> {
-    return await this.usuarioszonasService.findAllList();
+  async findAllList(@Request() req): Promise<ApiResponseCommon> {
+    return await this.usuarioszonasService.findAllList(
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get('usuario/:idUsuario')
@@ -56,14 +63,23 @@ export class UsuarioszonasController {
   async findAll(
     @Param('page', ParseIntPipe) page: number,
     @Param('limit', ParseIntPipe) limit: number,
-    @Request() _req,
+    @Request() req,
   ): Promise<ApiResponseCommon> {
-    return await this.usuarioszonasService.findAll(page, limit);
+    return await this.usuarioszonasService.findAll(
+      page,
+      limit,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return await this.usuarioszonasService.findOne(+id);
+  async findOne(@Param('id') id: string, @Request() req) {
+    return await this.usuarioszonasService.findOne(
+      +id,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Patch('estatus/:id')

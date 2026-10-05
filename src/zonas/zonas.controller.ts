@@ -16,6 +16,7 @@ import { CreateZonasDto } from './dto/create-zona.dto';
 import { UpdateZonaDto } from './dto/update-zona.dto';
 import { UpdateZonasEstatusDto } from './dto/update-zona-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
@@ -29,6 +30,7 @@ import {
 @ApiTags('Zonas')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('zonas')
 @TenantResource('zona')
 export class ZonasController {
@@ -83,6 +85,7 @@ export class ZonasController {
       +idCliente,
       +req.user.userId,
       +req.user.rol,
+      +req.user.cliente,
     );
   }
 
@@ -117,7 +120,12 @@ export class ZonasController {
   ) {
     const idUser = req.user.userId;
     const rol = req.user.rol;
-    return await this.zonasService.findByCliente(+idCliente, +idUser, +rol);
+    return await this.zonasService.findByCliente(
+      +idCliente,
+      +idUser,
+      +rol,
+      +req.user.cliente,
+    );
   }
 
   @Get(':page/:limit')

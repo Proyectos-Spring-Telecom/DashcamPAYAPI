@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class LoginAuthDto {
   @IsString()
@@ -17,4 +17,13 @@ export class LoginAuthDto {
     example: 'contraseña1',
   })
   password: string;
+
+  @IsOptional()
+  @IsString()
+  @ApiProperty({
+    description:
+      'Serie del validador en el que entra el operador. Si viene, el login lo reasigna a ese equipo.',
+    required: false,
+  })
+  validadorId?: string;
 }

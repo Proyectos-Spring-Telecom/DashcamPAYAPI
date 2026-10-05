@@ -7,6 +7,7 @@ import {
   UseGuards,
   Patch,
   Request,
+  Headers,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginAuthDto } from './dto/login-auth.dto';
@@ -28,6 +29,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { Public } from 'src/guard/public.decorator';
+import { Roles, ROLES_CONOCIDOS } from 'src/guard/roles.decorator';
 
 @ApiTags('Autenticación')
 @ApiBearerAuth('bearer-token')
@@ -39,12 +42,14 @@ export class AuthController {
   // 🔹 POST ROUTES - Rutas específicas primero
   // ========================================
 
+  @Public()
   @Post('usuario/recuperar/acceso')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async email(@Body() loginAuthConfirmacionDto: LoginAuthConfirmacionDto) {
     return await this.authService.recuperarContrasena(loginAuthConfirmacionDto);
   }
 
+  @Public()
   @Post('recuperar/confirmacion')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async recuperacionConfirmacion(
@@ -55,13 +60,17 @@ export class AuthController {
     );
   }
 
+  @Public()
   @Post('pasajero/registro')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createPasajero(@Body() createAltaPasajaroDto: CreateAltaPasajaroDto) {
     return this.authService.createPasajero(createAltaPasajaroDto);
   }
 
+  @Public()
   @Post('operador/login')
   @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({
     summary: 'Login operador por PIN (validador)',
     description:
@@ -74,6 +83,7 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
+  @Roles(...ROLES_CONOCIDOS)
   @ApiOperation({
     summary: 'Perfil del usuario autenticado',
     description:
@@ -83,6 +93,7 @@ export class AuthController {
     return this.authService.getMe(req.user.userId);
   }
 
+  @Public()
   @Post('refresh')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
@@ -97,6 +108,7 @@ export class AuthController {
     return this.authService.refreshToken(dto.refreshToken);
   }
 
+  @Public()
   @Post('logout')
   @HttpCode(200)
   @ApiOperation({
@@ -108,6 +120,7 @@ export class AuthController {
     return this.authService.logout(dto.refreshToken);
   }
 
+  @Public()
   @Post()
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
@@ -125,12 +138,20 @@ export class AuthController {
   // 🔹 PATCH ROUTES - Rutas específicas primero
   // ========================================
 
+  @Public()
   @Post('cambiar/accesso')
-  @UseGuards(JwtAuthGuard)
-  async resetPassword(@Body() loginAuthResetDto: LoginAuthResetDto) {
-    return await this.authService.resetPassword(loginAuthResetDto);
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async resetPassword(
+    @Body() loginAuthResetDto: LoginAuthResetDto,
+    @Headers('authorization') authorization?: string,
+  ) {
+    return await this.authService.resetPassword(
+      loginAuthResetDto,
+      authorization,
+    );
   }
 
+  @Public()
   @Patch('verify')
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 60000 } })

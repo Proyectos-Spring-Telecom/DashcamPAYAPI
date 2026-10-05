@@ -19,14 +19,17 @@ import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { UpdateRolEstatusDto } from './dto/update-rol.dto';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Roles')
 @ApiBearerAuth('bearer-token')
 @Controller('roles')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2)
 export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
+  @Roles(1, 2)
   @Post()
   create(@Body() createRoleDto: CreateRolDto, @Request() req) {
     const idUser = req.user.userId;
@@ -60,6 +63,7 @@ export class RolesController {
     return this.rolesService.findOne(id);
   }
 
+  @Roles(1, 2)
   @Put(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
@@ -70,6 +74,7 @@ export class RolesController {
     return this.rolesService.update(id, idUser, updateRoleDto);
   }
 
+  @Roles(1, 2)
   @Patch('estatus/:id')
   async updateEstatus(
     @Param('id', ParseIntPipe) id: number,
@@ -84,6 +89,7 @@ export class RolesController {
     );
   }
 
+  @Roles(1, 2)
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req) {
     const idUser = req.user.userId;

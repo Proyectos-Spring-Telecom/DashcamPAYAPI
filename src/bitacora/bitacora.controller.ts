@@ -14,10 +14,12 @@ import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Bitácora')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2)
 @Controller('bitacora')
 @TenantResource('bitacoraEntry')
 export class BitacoraController {
@@ -55,9 +57,10 @@ export class BitacoraController {
 
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    const _idUser = req.user.userId;
-    const _cliente = req.user.cliente;
-    const _rol = req.user.rol;
-    return await this.bitacoraService.findOne(id);
+    return await this.bitacoraService.findOne(
+      id,
+      Number(req.user.cliente),
+      Number(req.user.rol),
+    );
   }
 }

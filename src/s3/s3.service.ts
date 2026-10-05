@@ -3,6 +3,7 @@ import {
   BadRequestException,
   InternalServerErrorException,
   HttpException,
+  Logger,
 } from '@nestjs/common';
 import {
   S3Client,
@@ -14,9 +15,15 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuid } from 'uuid';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { EstatusEnumBitcora } from 'src/common/ApiResponse';
+import {
+  detectAllowedUploadKind,
+  extensionForUploadKind,
+} from 'src/common/magic-bytes';
+import { buildS3ObjectKey, S3FolderNotAllowedError } from './s3-key';
 
 @Injectable()
 export class S3Service {
+  private readonly logger = new Logger(S3Service.name);
   private client: S3Client;
   private bucket: string;
 
@@ -36,6 +43,7 @@ export class S3Service {
     folder: string,
     idUser: number,
     idModule: number,
+    idCliente = 0,
   ) {
     try {
       if (!file) throw new BadRequestException('Archivo requerido');
@@ -51,18 +59,26 @@ export class S3Service {
         throw new BadRequestException('Solo se permiten PNG, JPG, JPEG o PDF');
       }
 
+      const kind = detectAllowedUploadKind(file.buffer);
+      if (!kind) {
+        throw new BadRequestException('Solo se permiten PNG, JPG, JPEG o PDF');
+      }
+
       if (file.size >= Number(process.env.UPLOAD_MAX_SIZE)) {
         throw new BadRequestException('Archivo demasiado grande');
       }
 
-      // Definir extensión
-      let extension = '';
-      if (file.mimetype === 'image/png') extension = 'png';
-      else if (file.mimetype === 'image/jpg') extension = 'jpg';
-      else if (file.mimetype === 'image/jpeg') extension = 'jpeg';
-      else if (file.mimetype === 'application/pdf') extension = 'pdf';
+      const extension = extensionForUploadKind(kind);
 
-      const key = `${folder}/${uuid()}.${extension}`;
+      let key: string;
+      try {
+        key = buildS3ObjectKey(folder, idCliente, idUser, uuid(), extension);
+      } catch (err) {
+        if (err instanceof S3FolderNotAllowedError) {
+          throw new BadRequestException('Carpeta de carga no permitida');
+        }
+        throw err;
+      }
 
       await this.client.send(
         new PutObjectCommand({
@@ -137,7 +153,7 @@ export class S3Service {
       const match = url.match(urlPattern);
 
       if (!match || !match[1]) {
-        console.warn(`No se pudo extraer la key de la URL: ${url}`);
+        this.logger.warn('No se pudo extraer la key de la URL');
         return;
       }
 
@@ -179,7 +195,7 @@ export class S3Service {
         error.message,
       );
       // No lanzar error para que no falle la actualización si no se puede eliminar el archivo anterior
-      console.error('Error eliminando archivo de S3:', error);
+      this.logger.error('Error eliminando archivo de S3');
     }
   }
 }

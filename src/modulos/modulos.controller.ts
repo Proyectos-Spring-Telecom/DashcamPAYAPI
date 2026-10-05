@@ -18,14 +18,17 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UpdateModulosEstatusDto } from './dto/update-modulo-estatus.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Modulos')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2)
 @Controller('modulos')
 export class ModulosController {
   constructor(private readonly modulosService: ModulosService) {}
 
+  @Roles(1, 2)
   @Post()
   async create(
     @Body() createModuloDto: CreateModuloDto,
@@ -53,6 +56,7 @@ export class ModulosController {
     return this.modulosService.findOne(+id);
   }
 
+  @Roles(1, 2)
   @Put(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
@@ -63,6 +67,7 @@ export class ModulosController {
     return await this.modulosService.update(id, updateModuloDto, idUser);
   }
 
+  @Roles(1, 2)
   @Patch(':id/estatus')
   async updateModuloEstatus(
     @Param('id') id: string,
@@ -77,6 +82,7 @@ export class ModulosController {
     );
   }
 
+  @Roles(1, 2)
   @Delete(':id')
   async remove(
     @Param('id', ParseIntPipe) id: number,

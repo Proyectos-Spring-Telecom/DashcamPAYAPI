@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Usuarios } from 'src/entities/Usuarios';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
 import { UsuariosPermisos } from 'src/entities/UsuariosPermisos';
 import { JwtStrategy } from './jwt.strategy';
 import { MailModule } from 'src/mail/mail.module';
@@ -29,12 +30,17 @@ import { Validadores } from 'src/entities/Validadores';
     PasajerosModule,
     NetpayModule,
     ConfigModule,
+    PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: config.get<string>('JWT_EXPIRES_IN') },
+        signOptions: {
+          expiresIn: config.get<string>('JWT_EXPIRES_IN'),
+          algorithm: 'HS256',
+        },
+        verifyOptions: { algorithms: ['HS256'] },
       }),
     }),
     TypeOrmModule.forFeature([
@@ -51,6 +57,6 @@ import { Validadores } from 'src/entities/Validadores';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, LoggerService],
-  exports: [JwtModule],
+  exports: [JwtModule, AuthService],
 })
 export class AuthModule {}

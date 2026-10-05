@@ -141,7 +141,7 @@ export class CatTipoCombustibleService {
         throw error;
       }
       throw new BadRequestException(
-        error.message || 'Error al obtener los tipos de combustible',
+        'Error al obtener los tipos de combustible',
       );
     }
   }
@@ -304,7 +304,6 @@ export class CatTipoCombustibleService {
       }
       throw new InternalServerErrorException({
         message: 'Error al eliminar el tipo de combustible.',
-        error: error.message,
       });
     }
   }

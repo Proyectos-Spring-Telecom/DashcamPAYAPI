@@ -1,3 +1,4 @@
+import { clienteHijosDesdeSp, tieneIdsTenant } from 'src/common/tenant/ownership-resolvers';
 import {
   BadRequestException,
   HttpException,
@@ -38,29 +39,47 @@ export class MantenimientoKilometrajeService {
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
+  }
 
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { ids: [], placeholders: '' }; // No hay clientes que consultar
+  private async assertMantenimientoTenantViaInstalacion(
+    idInstalacion: number | null | undefined,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids) || idInstalacion == null) {
+      throw new NotFoundException(
+        'Mantenimiento por kilometraje no encontrado',
+      );
     }
-
-    // Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    const instalacion = await this.instalacionesRepository.findOne({
+      where: { id: Number(idInstalacion) },
+    });
+    if (
+      !instalacion ||
+      !ids.includes(Number(instalacion.idCliente))
+    ) {
+      throw new NotFoundException(
+        'Mantenimiento por kilometraje no encontrado',
+      );
+    }
   }
 
   async create(
     createMantenimientoKilometrajeDto: CreateMantenimientoKilometrajeDto,
     idUser: number,
+    idCliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertMantenimientoTenantViaInstalacion(
+        createMantenimientoKilometrajeDto.idInstalacion,
+        idCliente,
+        rol,
+      );
+
       const create = await this.mantenimientoKilometrajeRepository.create(
         createMantenimientoKilometrajeDto,
       );
@@ -177,6 +196,7 @@ INNER JOIN Clientes c ON i.IdCliente = c.Id
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(idCliente);
           if (ids.length === 0) {
@@ -347,7 +367,7 @@ WHERE c.Id IN (${placeholders})
         throw error;
       }
       throw new BadRequestException(
-        error.message || 'Error al obtener los mantenimientos por kilometraje',
+        'Error al obtener los mantenimientos por kilometraje',
       );
     }
   }
@@ -374,6 +394,19 @@ WHERE c.Id IN (${placeholders})
         throw new NotFoundException(
           'Mantenimiento por kilometraje no encontrado',
         );
+      }
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(idCliente);
+        const idClienteRecurso = Number(mantenimiento.instalacion?.idCliente);
+        if (
+          !tieneIdsTenant(ids) ||
+          !Number.isFinite(idClienteRecurso) ||
+          !ids.includes(idClienteRecurso)
+        ) {
+          throw new NotFoundException(
+            'Mantenimiento por kilometraje no encontrado',
+          );
+        }
       }
 
       const item = mantenimiento;
@@ -489,6 +522,8 @@ WHERE c.Id IN (${placeholders})
     id: number,
     updateMantenimientoKilometrajeDto: UpdateMantenimientoKilometrajeDto,
     idUser: number,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
       const mantenimiento =
@@ -500,6 +535,11 @@ WHERE c.Id IN (${placeholders})
           'Mantenimiento por kilometraje no encontrado',
         );
       }
+      await this.assertMantenimientoTenantViaInstalacion(
+        mantenimiento.idInstalacion,
+        cliente,
+        rol,
+      );
 
       await this.mantenimientoKilometrajeRepository.update(
         id,
@@ -554,7 +594,12 @@ WHERE c.Id IN (${placeholders})
     }
   }
 
-  async desactivar(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async desactivar(
+    id: number,
+    idUser: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
       const mantenimiento =
         await this.mantenimientoKilometrajeRepository.findOne({
@@ -566,6 +611,11 @@ WHERE c.Id IN (${placeholders})
           'Mantenimiento por kilometraje no encontrado',
         );
       }
+      await this.assertMantenimientoTenantViaInstalacion(
+        mantenimiento.idInstalacion,
+        cliente,
+        rol,
+      );
 
       await this.mantenimientoKilometrajeRepository.update(id, { estatus: 0 });
 
@@ -610,12 +660,16 @@ WHERE c.Id IN (${placeholders})
       }
       throw new InternalServerErrorException({
         message: 'Error al desactivar el mantenimiento por kilometraje.',
-        error: error.message,
       });
     }
   }
 
-  async activar(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async activar(
+    id: number,
+    idUser: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
       const mantenimiento =
         await this.mantenimientoKilometrajeRepository.findOne({
@@ -627,6 +681,11 @@ WHERE c.Id IN (${placeholders})
           'Mantenimiento por kilometraje no encontrado',
         );
       }
+      await this.assertMantenimientoTenantViaInstalacion(
+        mantenimiento.idInstalacion,
+        cliente,
+        rol,
+      );
 
       if (mantenimiento.estatus === 1) {
         throw new BadRequestException(
@@ -677,7 +736,6 @@ WHERE c.Id IN (${placeholders})
       }
       throw new InternalServerErrorException({
         message: 'Error al activar el mantenimiento por kilometraje.',
-        error: error.message,
       });
     }
   }
@@ -856,7 +914,6 @@ WHERE c.Id IN (${placeholders})
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener el reporte de kilometraje por días.',
-        error: error.message,
       });
     }
   }

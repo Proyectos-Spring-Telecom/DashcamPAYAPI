@@ -1,11 +1,13 @@
 import { Controller, Get, Body, UseGuards } from '@nestjs/common';
 import { CattipotransaccionesService } from './cattipotransacciones.service';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Catálogo tipo transacciones')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2, 3, 11)
 @Controller('cattipotransacciones')
 export class CattipotransaccionesController {
   constructor(

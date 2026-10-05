@@ -12,6 +12,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  Request,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -30,22 +31,16 @@ import { Confirm3DSDto } from './dto/confirm-3ds.dto';
 import { CancelRefundDto } from './dto/cancel-refund.dto';
 import { ProcessPaymentWithTokenDto } from './dto/process-payment-with-token.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { NormalizeCreateCustomerBodyInterceptor } from './interceptors/normalize-create-customer-body.interceptor';
 
 @ApiTags('Netpay - Integración Backend')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2, 9, 11)
 @Controller('netpay')
 export class NetpayController {
   constructor(private readonly netpayService: NetpayService) {}
-
-  @Get('test-connection')
-  @ApiExcludeEndpoint()
-  @ApiOperation({ summary: 'Verifica la conectividad con Netpay' })
-  @ApiResponse({ status: 200, description: 'Estado de la conexión' })
-  async testConnection() {
-    return this.netpayService.testConnection();
-  }
 
   @Get('public-key')
   @ApiExcludeEndpoint()
@@ -75,8 +70,12 @@ export class NetpayController {
   @ApiResponse({ status: 400, description: 'Datos inválidos o pago rechazado' })
   async processPaymentWithToken(
     @Body() processPaymentDto: ProcessPaymentWithTokenDto,
+    @Request() req,
   ) {
-    return this.netpayService.processPaymentWithToken(processPaymentDto);
+    return this.netpayService.processPaymentWithToken(
+      processPaymentDto,
+      req.user,
+    );
   }
 
   @Post('customers')
@@ -88,8 +87,11 @@ export class NetpayController {
   })
   @ApiResponse({ status: 201, description: 'Cliente creado exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
-  async createCustomer(@Body() createCustomerDto: CreateCustomerDto) {
-    return this.netpayService.createCustomer(createCustomerDto);
+  async createCustomer(
+    @Body() createCustomerDto: CreateCustomerDto,
+    @Request() req,
+  ) {
+    return this.netpayService.createCustomer(createCustomerDto, req.user);
   }
 
   @Get('customers')
@@ -100,11 +102,14 @@ export class NetpayController {
   })
   @ApiResponse({ status: 200, description: 'Información del cliente' })
   @ApiResponse({ status: 404, description: 'Cliente no encontrado' })
-  async getCustomer(@Query('customerId') customerId: string) {
+  async getCustomer(
+    @Query('customerId') customerId: string,
+    @Request() req,
+  ) {
     if (!customerId) {
       throw new BadRequestException('El parámetro customerId es requerido');
     }
-    return this.netpayService.getCustomer(customerId);
+    return this.netpayService.getCustomer(customerId, req.user);
   }
 
   @Get('datos-tarjeta')
@@ -131,8 +136,12 @@ export class NetpayController {
   })
   async getDatosTarjetaByCustomerId(
     @Query('customerIdNetPay') customerIdNetPay: string,
+    @Request() req,
   ) {
-    return this.netpayService.getDatosTarjetaByCustomerId(customerIdNetPay);
+    return this.netpayService.getDatosTarjetaByCustomerId(
+      customerIdNetPay,
+      req.user,
+    );
   }
 
   @Put('customers/:customerId/token')
@@ -146,11 +155,15 @@ export class NetpayController {
   async assignCardToCustomer(
     @Param('customerId') customerId: string,
     @Body() assignCardDto: AssignCardDto,
+    @Request() req,
   ) {
-    return this.netpayService.assignCardToCustomer({
-      ...assignCardDto,
-      customerId,
-    });
+    return this.netpayService.assignCardToCustomer(
+      {
+        ...assignCardDto,
+        customerId,
+      },
+      req.user,
+    );
   }
 
   @Put('customers/:customerId/cards')
@@ -165,11 +178,15 @@ export class NetpayController {
   async assignCardToCustomerAlias(
     @Param('customerId') customerId: string,
     @Body() assignCardDto: AssignCardDto,
+    @Request() req,
   ) {
-    return this.netpayService.assignCardToCustomer({
-      ...assignCardDto,
-      customerId,
-    });
+    return this.netpayService.assignCardToCustomer(
+      {
+        ...assignCardDto,
+        customerId,
+      },
+      req.user,
+    );
   }
 
   @Delete('customers/:customerId/cards/:tokenCard')
@@ -180,8 +197,9 @@ export class NetpayController {
   async deleteCard(
     @Param('customerId') customerId: string,
     @Param('tokenCard') tokenCard: string,
+    @Request() req,
   ) {
-    return this.netpayService.deleteCard(customerId, tokenCard);
+    return this.netpayService.deleteCard(customerId, tokenCard, req.user);
   }
 
   @Post('payment/saved-card')
@@ -196,26 +214,37 @@ export class NetpayController {
   @ApiResponse({ status: 400, description: 'Datos inválidos o pago rechazado' })
   async processPaymentWithSavedCard(
     @Body() paymentSavedCardDto: PaymentSavedCardDto,
+    @Request() req,
   ) {
-    return this.netpayService.processPaymentWithSavedCard(paymentSavedCardDto);
+    return this.netpayService.processPaymentWithSavedCard(
+      paymentSavedCardDto,
+      req.user,
+    );
   }
 
   @Post('3ds/confirm')
   @HttpCode(HttpStatus.OK)
   @ApiExcludeEndpoint()
-  async confirm3DSPayment(@Body() confirm3DSDto: Confirm3DSDto) {
-    return this.netpayService.confirm3DSPayment(confirm3DSDto);
+  async confirm3DSPayment(
+    @Body() confirm3DSDto: Confirm3DSDto,
+    @Request() req,
+  ) {
+    return this.netpayService.confirm3DSPayment(confirm3DSDto, req.user);
   }
 
   @Get('transactions/:transactionId')
   @ApiOperation({ summary: 'Consulta los detalles de una transacción' })
   @ApiResponse({ status: 200, description: 'Detalles de la transacción' })
   @ApiResponse({ status: 404, description: 'Transacción no encontrada' })
-  async getTransactionDetails(@Param('transactionId') transactionId: string) {
-    return this.netpayService.getTransactionDetails(transactionId);
+  async getTransactionDetails(
+    @Param('transactionId') transactionId: string,
+    @Request() req,
+  ) {
+    return this.netpayService.getTransactionDetails(transactionId, req.user);
   }
 
   @Put('transactions/:tokenId/refund')
+  @Roles(1, 2, 11)
   @HttpCode(HttpStatus.OK)
   @ApiExcludeEndpoint()
   @ApiOperation({ summary: 'Cancela o reembolsa una transacción' })
@@ -227,10 +256,14 @@ export class NetpayController {
   async cancelOrRefund(
     @Param('tokenId') tokenId: string,
     @Body() cancelRefundDto: CancelRefundDto,
+    @Request() req,
   ) {
-    return this.netpayService.cancelOrRefund({
-      ...cancelRefundDto,
-      tokenId,
-    });
+    return this.netpayService.cancelOrRefund(
+      {
+        ...cancelRefundDto,
+        tokenId,
+      },
+      req.user,
+    );
   }
 }

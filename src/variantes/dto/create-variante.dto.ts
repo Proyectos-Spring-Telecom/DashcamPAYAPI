@@ -12,6 +12,7 @@ import {
   IsInt,
   IsIn,
   IsArray,
+  ArrayMaxSize,
   ValidateNested,
   IsBoolean,
 } from 'class-validator';
@@ -58,6 +59,7 @@ export class CreateVarianteDto {
     description: 'Recorrido base para interpolación',
   })
   @IsArray()
+  @ArrayMaxSize(2000, { message: 'El recorrido no puede exceder 2000 puntos' })
   @ValidateNested({ each: true })
   @Type(() => PuntoDto)
   recorridoDetallado: PuntoDto[];

@@ -23,16 +23,19 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Catálogo estatus mantenimiento')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2, 3, 11)
 @Controller('cat-estatus-mantenimiento')
 export class CatEstatusMantenimientoController {
   constructor(
     private readonly catEstatusMantenimientoService: CatEstatusMantenimientoService,
   ) {}
 
+  @Roles(1, 2)
   @Post()
   @ApiOperation({
     summary: 'Crear un nuevo estatus de mantenimiento',
@@ -145,6 +148,7 @@ export class CatEstatusMantenimientoController {
     return this.catEstatusMantenimientoService.findOne(id);
   }
 
+  @Roles(1, 2)
   @Patch(':id')
   @ApiOperation({
     summary: 'Actualizar un estatus de mantenimiento',
@@ -190,6 +194,7 @@ export class CatEstatusMantenimientoController {
     );
   }
 
+  @Roles(1, 2)
   @Delete(':id')
   @ApiOperation({
     summary: 'Eliminar un estatus de mantenimiento',

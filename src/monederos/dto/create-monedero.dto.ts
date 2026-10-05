@@ -1,11 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
   IsString,
-  IsNumber,
   IsDateString,
   IsOptional,
   IsInt,
-  Min,
   IsIn,
 } from 'class-validator';
 
@@ -16,15 +14,6 @@ export class CreateMonederoDto {
   })
   @IsString()
   numeroSerie: string;
-
-  @ApiProperty({
-    example: 500.0,
-    description: 'Saldo inicial del monedero',
-    default: 0.0,
-  })
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  saldo: number = 0.0;
 
   @ApiProperty({
     example: '2025-09-10T10:00:00Z',

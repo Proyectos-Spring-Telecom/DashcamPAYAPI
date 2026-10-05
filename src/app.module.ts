@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CommonModule } from './common/common.module';
+import { mysqlSslOption } from './common/mysql-ssl';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { AuthModule } from './auth/auth.module';
 import { BitacoraModule } from './bitacora/bitacora.module';
@@ -63,12 +64,19 @@ import { CatMetodoPagoModule } from './cat-metodo-pago/cat-metodo-pago.module';
 import { DireccionesModule } from './direcciones/direcciones.module';
 import Joi from 'joi';
 import { LoggerService } from './common/logger.service';
+import { JwtAuthGuard } from './guard/jwt-auth.guard';
+import { RolesGuard } from './guard/roles.guard';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       ignoreEnvFile: true,
+      // PATH, HOME y el resto del entorno del proceso no están en el esquema.
+      validationOptions: {
+        allowUnknown: true,
+        abortEarly: false,
+      },
       validationSchema: Joi.object({
         DB_HOST: Joi.string().required(),
         DB_PORT: Joi.number().default(3306),
@@ -79,6 +87,25 @@ import { LoggerService } from './common/logger.service';
         JWT_EXPIRES_IN: Joi.string().required(),
         JWT_REFRESH_SECRET: Joi.string().required(),
         JWT_REFRESH_EXPIRES: Joi.string().default('7d'),
+        JWT_PURPOSE_SECRET: Joi.string().required(),
+        JWT_CONFIRMACION: Joi.string().optional(),
+        RECARGA_MONTO_MAX: Joi.number().default(10000),
+        ENFORCE_PIN_BINDING: Joi.string().valid('true', 'false').default('true'),
+        ENFORCE_CVV2_FORBIDDEN: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
+        ENFORCE_VERIFY_USERNAME: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
+        ENFORCE_IDEMPOTENCY_KEY: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
+        ENFORCE_CASH_RECHARGE_ROLES: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
+        ENFORCE_ROLES_DENY_DEFAULT: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
         AWS_REGION: Joi.string().required(),
         AWS_ACCESS_KEY_ID: Joi.string().required(),
         AWS_SECRET_ACCESS_KEY: Joi.string().required(),
@@ -96,6 +123,7 @@ import { LoggerService } from './common/logger.service';
         NETPAY_BASE_URL: Joi.string().uri().optional(),
         NETPAY_PUBLIC_KEY: Joi.string().optional(),
         NETPAY_PRIVATE_KEY: Joi.string().optional(),
+        FRONTEND_BASE_URL: Joi.string().uri().optional(),
         CORS_ORIGINS: Joi.string().optional(),
         ENFORCE_HTTPS: Joi.string().valid('true', 'false').default('false'),
         SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
@@ -105,6 +133,19 @@ import { LoggerService } from './common/logger.service';
         LOCKOUT_MINUTES: Joi.number().default(30),
         OTP_MAX_ATTEMPTS: Joi.number().default(5),
         BITACORA_HMAC_SECRET: Joi.string().required(),
+        DB_TIME_OFFSET_HOURS: Joi.number().default(-6),
+        ABIERTA_TTL_HOURS: Joi.number().default(4),
+        ABIERTA_SWEEP_MINUTES: Joi.number().default(15),
+        DB_SSL: Joi.string().valid('true', 'false').default('false'),
+        DB_SSL_REJECT_UNAUTHORIZED: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
+        PORT: Joi.number().port().default(3000),
+        CLIENTES_HIERARCHY_TTL_MS: Joi.number()
+          .integer()
+          .min(1000)
+          .max(3_600_000)
+          .default(60_000),
       }),
     }),
 
@@ -127,9 +168,12 @@ import { LoggerService } from './common/logger.service';
         database: config.get<string>('DB_DATABASE'),
         autoLoadEntities: false,
         entities: [__dirname + '/entities/*{.ts,.js}'],
+        migrations: [__dirname + '/migrations/*{.ts,.js}'],
+        migrationsRun: false,
         synchronize: false, //Nunca poner en true
         dateStrings: false,
         timezone: 'Z',
+        ...mysqlSslOption(),
         extra: {
           // Evita que bigint se devuelvan como string
           decimalNumbers: true,
@@ -257,6 +301,14 @@ import { LoggerService } from './common/logger.service';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
   ],
 })

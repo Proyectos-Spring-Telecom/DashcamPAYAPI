@@ -5,9 +5,27 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpStringResponseFilter } from './utils/http-string-response.filter';
+import { ClampPageLimitInterceptor } from './common/clamp-page-limit.interceptor';
 import { SocketIOAdapter } from './common/socket-io.adapter';
 import helmet from 'helmet';
 import basicAuth from 'express-basic-auth';
+
+function contentSecurityPolicy(swaggerOn: boolean) {
+  const self = [`'self'`];
+  const withInline = [`'self'`, `'unsafe-inline'`];
+  return {
+    directives: {
+      defaultSrc: self,
+      baseUri: self,
+      objectSrc: [`'none'`],
+      frameAncestors: [`'none'`],
+      // Swagger UI necesita scripts y estilos en línea. El API JSON no.
+      scriptSrc: swaggerOn ? withInline : self,
+      styleSrc: swaggerOn ? withInline : self,
+      imgSrc: [`'self'`, 'data:', 'https:'],
+    },
+  };
+}
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -18,6 +36,21 @@ async function bootstrap() {
   // El TLS lo termina el reverse proxy; confiar en sus headers X-Forwarded-*
   app.set('trust proxy', 1);
 
+  const swaggerOn = process.env.SWAGGER_ENABLED === 'true';
+  const corsOrigins = (process.env.CORS_ORIGINS ?? 'https://dashcampay.com')
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
+  const corsHosts = new Set(
+    corsOrigins.flatMap((origin) => {
+      try {
+        return [new URL(origin).hostname.toLowerCase()];
+      } catch {
+        return [];
+      }
+    }),
+  );
+
   // Cabeceras de seguridad HTTP (PCI DSS Req. 6.4.1)
   app.use(
     helmet({
@@ -27,15 +60,7 @@ async function bootstrap() {
         includeSubDomains: true,
         preload: true,
       },
-      // CSP configurada para permitir que Swagger UI siga funcionando
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: [`'self'`],
-          styleSrc: [`'self'`, `'unsafe-inline'`],
-          imgSrc: [`'self'`, 'data:', 'https:'],
-          scriptSrc: [`'self'`, `'unsafe-inline'`],
-        },
-      },
+      contentSecurityPolicy: contentSecurityPolicy(swaggerOn),
       // Evita problemas de carga de recursos de Swagger UI
       crossOriginEmbedderPolicy: false,
     }),
@@ -45,33 +70,37 @@ async function bootstrap() {
   if (process.env.ENFORCE_HTTPS === 'true') {
     app.use((req, res, next) => {
       const proto = req.header('x-forwarded-proto');
-      if (proto && proto !== 'https') {
-        return res.redirect(301, `https://${req.header('host')}${req.url}`);
+      if (!proto || proto === 'https') {
+        return next();
       }
-      next();
+      const host = (req.header('host') ?? '').split(':')[0]?.toLowerCase();
+      const path = req.url ?? '/';
+      if (
+        !host ||
+        !corsHosts.has(host) ||
+        !path.startsWith('/') ||
+        /[\r\n]/.test(path)
+      ) {
+        return res.status(400).end();
+      }
+      return res.redirect(301, `https://${host}${path}`);
     });
   }
 
   app.useGlobalFilters(new HttpStringResponseFilter());
+  app.useGlobalInterceptors(new ClampPageLimitInterceptor());
 
   // Configurar CORS — solo orígenes autorizados (PCI DSS Req. 1.3 / 6.4.3)
   // Los orígenes se leen de la variable de entorno CORS_ORIGINS (separados por coma).
   // CORS valida por origin (esquema + dominio + puerto), NO por ruta.
-  const corsOrigins = (process.env.CORS_ORIGINS ?? 'https://dashcampay.com')
-    .split(',')
-    .map((o) => o.trim())
-    .filter((o) => o.length > 0);
-
   app.enableCors({
     origin: (origin, callback) => {
-      // Permitir herramientas sin origin (curl, apps móviles nativas, healthchecks)
-      if (!origin) {
+      // Sin Origin: curl, apps nativas y healthchecks. El navegador sí lo manda.
+      if (!origin || corsOrigins.includes(origin)) {
         return callback(null, true);
       }
-      if (corsOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      return callback(new Error(`Origen no permitido por CORS: ${origin}`));
+      // false niega el origen sin devolverlo en el cuerpo del error.
+      return callback(null, false);
     },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
@@ -80,13 +109,13 @@ async function bootstrap() {
 
   // Swagger gobernado por entorno (PCI DSS Req. 2.2 / 6.4)
   // SWAGGER_ENABLED=false en producción pública. Si se habilita, queda protegido con auth básica.
-  if (process.env.SWAGGER_ENABLED === 'true') {
-    const swaggerUser = process.env.SWAGGER_USER || 'admin';
-    const swaggerPassword = process.env.SWAGGER_PASSWORD || '';
+  if (swaggerOn) {
+    const swaggerUser = process.env.SWAGGER_USER ?? '';
+    const swaggerPassword = process.env.SWAGGER_PASSWORD ?? '';
 
-    if (!swaggerPassword) {
+    if (!swaggerUser || !swaggerPassword) {
       throw new Error(
-        'SWAGGER_ENABLED=true requiere SWAGGER_PASSWORD configurada en el .env',
+        'SWAGGER_ENABLED=true requiere SWAGGER_USER y SWAGGER_PASSWORD',
       );
     }
 
@@ -205,6 +234,7 @@ async function bootstrap() {
     }),
   );
 
+  app.enableShutdownHooks();
   await app.listen(process.env.PORT ?? 3000);
 }
 void bootstrap();

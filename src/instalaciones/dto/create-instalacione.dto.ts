@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   IsArray,
   IsIn,
   IsInt,
@@ -24,6 +25,7 @@ export class CreateInstalacionesDto {
   })
   @IsNotEmpty({ message: 'Los IdContadores son obligatorios' })
   @IsArray({ message: 'IdContadores debe ser un array' })
+  @ArrayMaxSize(20, { message: 'No se permiten más de 20 contadores' })
   @IsNumber({}, { each: true, message: 'Cada IdContador debe ser un número' })
   idContadores: number[];
 

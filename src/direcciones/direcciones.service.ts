@@ -1,4 +1,9 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -16,41 +21,22 @@ export class DireccionesService {
   ) {}
 
   async findByCodigoPostal(cp: string): Promise<any> {
+    if (!/^\d{5}$/.test(String(cp ?? '').trim())) {
+      throw new BadRequestException('Código postal inválido');
+    }
+    const codigo = String(cp).trim();
     try {
-      // La API de tau.com.mx espera el token como header APIKEY
-      const url = `${this.apiUrl}${cp}`;
-
-      console.log('[DIRECCIONES] URL:', url);
-      console.log('[DIRECCIONES] Código postal:', cp);
+      const url = `${this.apiUrl}${codigo}`;
 
       const response = await firstValueFrom(
         this.httpService.get<any>(url).pipe(
           map((response) => response.data),
-          catchError((error) => {
-            console.error('[DIRECCIONES] Error completo:', {
-              status: error.response?.status,
-              statusText: error.response?.statusText,
-              data: error.response?.data,
-              message: error.message,
-              url: error.config?.url,
-            });
-
-            const errorMessage =
-              error.response?.data?.message ||
-              error.response?.data?.error ||
-              error.response?.data?.error_description ||
-              error.message ||
-              'Error desconocido al consultar direcciones';
-
-            console.error(
-              '[DIRECCIONES] Error en la solicitud HTTP:',
-              errorMessage,
-            );
+          catchError(() => {
             return throwError(
               () =>
                 new HttpException(
-                  errorMessage,
-                  error.response?.status || HttpStatus.BAD_REQUEST,
+                  'No se pudo consultar el código postal',
+                  HttpStatus.BAD_GATEWAY,
                 ),
             );
           }),
@@ -62,7 +48,6 @@ export class DireccionesService {
       if (error instanceof HttpException) {
         throw error;
       }
-      console.error('[DIRECCIONES] Error no manejado:', error);
       throw new HttpException(
         'Error al consultar direcciones por código postal',
         HttpStatus.INTERNAL_SERVER_ERROR,

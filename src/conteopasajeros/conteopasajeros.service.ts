@@ -1,4 +1,7 @@
+import { nowDb } from 'src/common/clock';
+import { clienteHijosDesdeSp } from 'src/common/tenant/ownership-resolvers';
 import {
+  BadRequestException,
   HttpException,
   Injectable,
   InternalServerErrorException,
@@ -7,7 +10,7 @@ import {
 import { CreateConteoPasajerosDto } from './dto/create-conteopasajero.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConteoPasajeros } from 'src/entities/ConteoPasajeros';
-import { Between, MoreThanOrEqual, Repository } from 'typeorm';
+import { Between, In, MoreThanOrEqual, Repository } from 'typeorm';
 import {
   ApiCrudResponse,
   ApiResponseCommon,
@@ -23,6 +26,7 @@ import { InstalacionContadores } from 'src/entities/InstalacionContadores';
 import { Turnos } from 'src/entities/Turnos';
 import { UpdateConteoPasajerosDto } from './dto/update-conteopasajero.dto';
 import { EnumModulos, EstatusConteo } from 'src/common/estatus.enum';
+import { assertIsoDate, dateTimeBounds } from 'src/common/sql-date';
 
 @Injectable()
 export class ConteopasajerosService {
@@ -52,6 +56,8 @@ export class ConteopasajerosService {
   async create(
     createConteopasajeroDto: CreateConteoPasajerosDto,
     idUser: number,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
       // Validar que el contador existe
@@ -60,6 +66,16 @@ export class ConteopasajerosService {
       });
 
       if (!contador) {
+        throw new NotFoundException(
+          `El contador con número de serie '${createConteopasajeroDto.numeroSerieContador}' no existe.`,
+        );
+      }
+
+      const series = await this.seriesContadoresPermitidas(rol, cliente);
+      if (
+        series &&
+        !series.includes(createConteopasajeroDto.numeroSerieContador)
+      ) {
         throw new NotFoundException(
           `El contador con número de serie '${createConteopasajeroDto.numeroSerieContador}' no existe.`,
         );
@@ -130,9 +146,7 @@ export class ConteopasajerosService {
 
       // Preparar los datos para crear con idViaje y numeroSerieContador
       // Usar valores por defecto para campos requeridos
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-      const fechaHora = new Date(ahora.getTime() + desfaseMs);
+      const fechaHora = nowDb();
 
       const dataToCreate: any = {
         numeroSerieContador: createConteopasajeroDto.numeroSerieContador,
@@ -227,29 +241,32 @@ export class ConteopasajerosService {
 
       throw new InternalServerErrorException({
         message: 'Error al crear ConteoPasajeros',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
+  }
 
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
+  /** null = SuperAdmin (sin filtro). [] = sin series en alcance. */
+  private async seriesContadoresPermitidas(
+    rol: number,
+    cliente: number,
+  ): Promise<string[] | null> {
+    if (Number(rol) === 1) return null;
+    const hijos = await this.clienteHijos(cliente);
+    const ids: number[] = Array.isArray((hijos as any).ids)
+      ? (hijos as any).ids
+      : [];
+    if (!ids.length) return [];
     const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    const rows = await this.contadoresRepository.query(
+      `SELECT NumeroSerie AS serie FROM Contadores WHERE IdCliente IN (${placeholders})`,
+      ids,
+    );
+    return rows.map((r: any) => r.serie).filter(Boolean);
   }
 
   private async consultarConteoPasajerosPaginado(
@@ -411,6 +428,7 @@ INNER JOIN Clientes c
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           conteoPasajeros = await this.consultarConteoPasajerosPaginado(
@@ -446,7 +464,6 @@ INNER JOIN Clientes c
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener conteo pasajeros',
-        error: error.message,
       });
     }
   }
@@ -487,13 +504,20 @@ INNER JOIN Contadores bv
     ON cp.NumeroSerieContador = bv.NumeroSerie
 INNER JOIN Clientes c
     ON bv.IdCliente = c.Id
-WHERE cp.FechaHora BETWEEN '${fechaInicio}T00:00:00' AND '${fechaFin}T23:59:00'
-AND c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+WHERE cp.FechaHora BETWEEN ? AND ?
+AND c.Id IN (${placeholders})
 
 ORDER BY cp.FechaHora DESC
 LIMIT ? OFFSET ?;
     `;
-    return this.conteopasajeroRepository.query(query, [...ids, limit, offset]);
+    const { from, to } = dateTimeBounds(fechaInicio, fechaFin);
+    return this.conteopasajeroRepository.query(query, [
+      from,
+      to,
+      ...ids,
+      limit,
+      offset,
+    ]);
   }
 
   private async consultarTotalConteoPasajerosPaginadosRango(
@@ -509,10 +533,11 @@ INNER JOIN Contadores bv
     ON cp.NumeroSerieContador = bv.NumeroSerie
 INNER JOIN Clientes c
     ON bv.IdCliente = c.Id
-WHERE cp.FechaHora BETWEEN '${fechaInicio}T00:00:00' AND '${fechaFin}T23:59:00'
-AND c.Id IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+WHERE cp.FechaHora BETWEEN ? AND ?
+AND c.Id IN (${placeholders})
 `;
-    return await this.conteopasajeroRepository.query(query, [...ids]);
+    const { from, to } = dateTimeBounds(fechaInicio, fechaFin);
+    return await this.conteopasajeroRepository.query(query, [from, to, ...ids]);
   }
 
   private async consultarConteoPasajerosPaginadoRangoCL(
@@ -550,13 +575,20 @@ INNER JOIN Contadores bv
     ON cp.NumeroSerieContador = bv.NumeroSerie
 INNER JOIN Clientes c
     ON bv.IdCliente = c.Id
-WHERE cp.FechaHora BETWEEN '${fechaInicio}T00:00:00' AND '${fechaFin}T23:59:00'
-AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+WHERE cp.FechaHora BETWEEN ? AND ?
+AND c.Id = ?
 
 ORDER BY cp.FechaHora DESC
 LIMIT ? OFFSET ?;
     `;
-    return this.conteopasajeroRepository.query(query, [cliente, limit, offset]);
+    const { from, to } = dateTimeBounds(fechaInicio, fechaFin);
+    return this.conteopasajeroRepository.query(query, [
+      from,
+      to,
+      cliente,
+      limit,
+      offset,
+    ]);
   }
 
   private async consultarTotalConteoPasajerosPaginadosRangoCl(
@@ -571,15 +603,25 @@ INNER JOIN Contadores bv
     ON cp.NumeroSerieContador = bv.NumeroSerie
 INNER JOIN Clientes c
     ON bv.IdCliente = c.Id
-WHERE cp.FechaHora BETWEEN '${fechaInicio}T00:00:00' AND '${fechaFin}T23:59:00'
-AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+WHERE cp.FechaHora BETWEEN ? AND ?
+AND c.Id = ?
 `;
-    return await this.conteopasajeroRepository.query(query, [cliente]);
+    const { from, to } = dateTimeBounds(fechaInicio, fechaFin);
+    return await this.conteopasajeroRepository.query(query, [
+      from,
+      to,
+      cliente,
+    ]);
   }
 
-  async findAllList(): Promise<ApiResponseCommon> {
+  async findAllList(cliente: number, rol: number): Promise<ApiResponseCommon> {
     try {
+      const series = await this.seriesContadoresPermitidas(rol, cliente);
+      if (series && series.length === 0) {
+        return { data: [] };
+      }
       const conteopasajero = await this.conteopasajeroRepository.find({
+        where: series ? { numeroSerieContador: In(series) } : {},
         order: { fechaHora: 'DESC' },
       });
       if (conteopasajero.length === 0) {
@@ -598,7 +640,6 @@ AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener conteo pasajeros',
-        error: error.message,
       });
     }
   }
@@ -606,12 +647,20 @@ AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
   // ========================================
   // 🔹 OBTENER UN DATO CONTEOPASAJEROS
   // ========================================
-  async findOne(id: number) {
+  async findOne(id: number, cliente = 0, rol = 1) {
     try {
       const conteopasajero = await this.conteopasajeroRepository.findOne({
         where: { id: id },
       });
       if (!conteopasajero) {
+        throw new NotFoundException('ConteoPasajeros no encontrado');
+      }
+
+      const series = await this.seriesContadoresPermitidas(rol, cliente);
+      if (
+        series &&
+        !series.includes(String(conteopasajero.numeroSerieContador))
+      ) {
         throw new NotFoundException('ConteoPasajeros no encontrado');
       }
 
@@ -623,7 +672,6 @@ AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener conteo pasajeros',
-        error: error.message,
       });
     }
   }
@@ -633,13 +681,26 @@ AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
     fecha: string,
     page: number,
     limit: number,
+    cliente: number,
+    rol: number,
   ): Promise<ApiResponseCommon> {
     try {
-      const startDate = new Date(`${fecha}T00:00:00`);
-      const endDate = new Date(`${fecha}T23:59:59`);
+      const day = assertIsoDate(fecha, 'fecha');
+      const startDate = new Date(`${day}T00:00:00`);
+      const endDate = new Date(`${day}T23:59:59`);
+      const series = await this.seriesContadoresPermitidas(rol, cliente);
+      if (series && series.length === 0) {
+        return {
+          data: [],
+          paginated: { total: 0, page, lastPage: 0 },
+        };
+      }
 
       const [data, total] = await this.conteopasajeroRepository.findAndCount({
-        where: { fechaHora: Between(startDate, endDate) },
+        where: {
+          fechaHora: Between(startDate, endDate),
+          ...(series ? { numeroSerieContador: In(series) } : {}),
+        },
         skip: (page - 1) * limit,
         take: limit,
         order: { fechaHora: 'DESC' },
@@ -659,9 +720,11 @@ AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
         },
       };
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       throw new InternalServerErrorException({
         message: 'Error al obtener conteo pasajeros por fecha',
-        error: error.message,
       });
     }
   }
@@ -682,8 +745,7 @@ AND c.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
       let conteoPasajeros;
       const offset = (page - 1) * limit;
       let totalResult;
-      const _startDate = new Date(`${fechaInicio} 00:00:00`);
-      const _endDate = new Date(`${fechaFin} 23:59:59`);
+      const { from, to } = dateTimeBounds(fechaInicio, fechaFin);
       switch (rol) {
         case 1:
           conteoPasajeros = await this.conteopasajeroRepository.query(
@@ -715,12 +777,12 @@ INNER JOIN Contadores bv
     ON cp.NumeroSerieContador = bv.NumeroSerie
 INNER JOIN Clientes c
     ON bv.IdCliente = c.Id
-WHERE cp.FechaHora BETWEEN '${fechaInicio}T00:00:00' AND '${fechaFin}T23:59:00'
+WHERE cp.FechaHora BETWEEN ? AND ?
 
 ORDER BY cp.FechaHora DESC
 LIMIT ? OFFSET ?;
         `,
-            [limit, offset],
+            [from, to, limit, offset],
           );
 
           // Query para total (sin paginación)
@@ -732,12 +794,14 @@ INNER JOIN Contadores bv
     ON cp.NumeroSerieContador = bv.NumeroSerie
 INNER JOIN Clientes c
     ON bv.IdCliente = c.Id
-WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
+WHERE cp.FechaHora BETWEEN ? AND ?
 
   `,
+            [from, to],
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           conteoPasajeros = await this.consultarConteoPasajerosPaginadoRango(
@@ -778,7 +842,6 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener conteo pasajeros',
-        error: error.message,
       });
     }
   }
@@ -789,13 +852,29 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
     hora: string,
     page: number,
     limit: number,
+    cliente: number,
+    rol: number,
   ): Promise<ApiResponseCommon> {
     try {
-      const dateTime = new Date(`${fecha}T${hora}:00`);
-      const endDateTime = new Date(`${fecha}T${hora}:59`);
+      const day = assertIsoDate(fecha, 'fecha');
+      if (!/^\d{2}$/.test(String(hora))) {
+        throw new BadRequestException('hora debe tener formato HH');
+      }
+      const dateTime = new Date(`${day}T${hora}:00`);
+      const endDateTime = new Date(`${day}T${hora}:59`);
+      const series = await this.seriesContadoresPermitidas(rol, cliente);
+      if (series && series.length === 0) {
+        return {
+          data: [],
+          paginated: { total: 0, page, lastPage: 0 },
+        };
+      }
 
       const [data, total] = await this.conteopasajeroRepository.findAndCount({
-        where: { fechaHora: Between(dateTime, endDateTime) },
+        where: {
+          fechaHora: Between(dateTime, endDateTime),
+          ...(series ? { numeroSerieContador: In(series) } : {}),
+        },
         skip: (page - 1) * limit,
         take: limit,
         order: { fechaHora: 'DESC' },
@@ -815,9 +894,11 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
         },
       };
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       throw new InternalServerErrorException({
         message: 'Error al obtener conteo pasajeros por fecha y hora',
-        error: error.message,
       });
     }
   }
@@ -826,14 +907,26 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
   async findTodayPaginated(
     page: number,
     limit: number,
+    cliente: number,
+    rol: number,
   ): Promise<ApiResponseCommon> {
     try {
       const today = new Date();
       const startOfDay = new Date(today.setHours(0, 0, 0, 0));
       const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+      const series = await this.seriesContadoresPermitidas(rol, cliente);
+      if (series && series.length === 0) {
+        return {
+          data: [],
+          paginated: { total: 0, page, lastPage: 0 },
+        };
+      }
 
       const [data, total] = await this.conteopasajeroRepository.findAndCount({
-        where: { fechaHora: Between(startOfDay, endOfDay) },
+        where: {
+          fechaHora: Between(startOfDay, endOfDay),
+          ...(series ? { numeroSerieContador: In(series) } : {}),
+        },
         skip: (page - 1) * limit,
         take: limit,
         order: { fechaHora: 'DESC' },
@@ -855,7 +948,6 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
     } catch (error) {
       throw new InternalServerErrorException({
         message: 'Error al obtener conteo pasajeros de hoy',
-        error: error.message,
       });
     }
   }
@@ -864,14 +956,24 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
   async findLastWeekPaginated(
     page: number,
     limit: number,
+    cliente: number,
+    rol: number,
   ): Promise<ApiResponseCommon> {
     try {
       const today = new Date();
       const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const series = await this.seriesContadoresPermitidas(rol, cliente);
+      if (series && series.length === 0) {
+        return {
+          data: [],
+          paginated: { total: 0, page, lastPage: 0 },
+        };
+      }
 
       const [data, total] = await this.conteopasajeroRepository.findAndCount({
         where: {
           fechaHora: MoreThanOrEqual(lastWeek),
+          ...(series ? { numeroSerieContador: In(series) } : {}),
         },
         skip: (page - 1) * limit,
         take: limit,
@@ -894,7 +996,6 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
     } catch (error) {
       throw new InternalServerErrorException({
         message: 'Error al obtener conteo pasajeros de la última semana',
-        error: error.message,
       });
     }
   }
@@ -906,25 +1007,39 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
     fechaFin: string,
     page: number,
     limit: number,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiResponseCommon> {
     try {
-      const startDate = new Date(`${fechaInicio}T00:00:00`);
-      const endDate = new Date(`${fechaFin}T23:59:59`);
+      const series = await this.seriesContadoresPermitidas(rol, cliente);
+      if (series && !series.includes(String(numeroSerie))) {
+        throw new NotFoundException('ConteoPasajeros no encontrado');
+      }
+
+      const { from, to } = dateTimeBounds(fechaInicio, fechaFin);
+      const startDate = new Date(from);
+      const endDate = new Date(to);
 
       const [data, total] = await this.conteopasajeroRepository.findAndCount({
         where: {
           numeroSerieContador: numeroSerie,
           fechaHora: Between(startDate, endDate),
         },
-        relations: ['numeroSerieContador2'],
         skip: (page - 1) * limit,
         take: limit,
         order: { fechaHora: 'DESC' },
       });
 
       const conteoPasajeros = data.map((item) => ({
-        ...item,
         id: Number(item.id),
+        entradas: item.entradas,
+        salidas: item.salidas,
+        diferencia: item.diferencia,
+        fechaHora: item.fechaHora,
+        fhRegistro: item.fhRegistro,
+        numeroSerieContador: item.numeroSerieContador,
+        idViaje: item.idViaje != null ? Number(item.idViaje) : null,
+        estatus: item.estatus,
       }));
 
       return {
@@ -936,19 +1051,28 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
         },
       };
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       throw new InternalServerErrorException({
         message: 'Error al obtener conteo pasajeros por Contador y fecha',
-        error: error.message,
       });
     }
   }
 
   // 📈 7. OBTENER RESUMEN POR HORAS DE UN DÍA
-  async getHourlySummary(fecha: string): Promise<any[]> {
-    const startDate = `${fecha} 00:00:00`;
-    const endDate = `${fecha} 23:59:59`;
+  async getHourlySummary(
+    fecha: string,
+    cliente: number,
+    rol: number,
+  ): Promise<any[]> {
+    const day = assertIsoDate(fecha, 'fecha');
+    const startDate = `${day} 00:00:00`;
+    const endDate = `${day} 23:59:59`;
+    const series = await this.seriesContadoresPermitidas(rol, cliente);
+    if (series && series.length === 0) return [];
 
-    return await this.conteopasajeroRepository
+    const qb = this.conteopasajeroRepository
       .createQueryBuilder('cp')
       .select([
         'HOUR(cp.fechaHora) as hora',
@@ -960,15 +1084,24 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
       .where('cp.fechaHora BETWEEN :startDate AND :endDate', {
         startDate,
         endDate,
-      })
-      .groupBy('HOUR(cp.fechaHora)')
-      .orderBy('hora', 'ASC')
-      .getRawMany();
+      });
+    if (series) {
+      qb.andWhere('cp.numeroSerieContador IN (:...series)', { series });
+    }
+    return qb.groupBy('HOUR(cp.fechaHora)').orderBy('hora', 'ASC').getRawMany();
   }
 
   // 📊 8. OBTENER RESUMEN DIARIO DE UN MES
-  async getDailySummary(year: number, month: number): Promise<any[]> {
-    return await this.conteopasajeroRepository
+  async getDailySummary(
+    year: number,
+    month: number,
+    cliente: number,
+    rol: number,
+  ): Promise<any[]> {
+    const series = await this.seriesContadoresPermitidas(rol, cliente);
+    if (series && series.length === 0) return [];
+
+    const qb = this.conteopasajeroRepository
       .createQueryBuilder('cp')
       .select([
         'DATE(cp.fechaHora) as fecha',
@@ -980,10 +1113,11 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
       .where('YEAR(cp.fechaHora) = :year AND MONTH(cp.fechaHora) = :month', {
         year,
         month,
-      })
-      .groupBy('DATE(cp.fechaHora)')
-      .orderBy('fecha', 'ASC')
-      .getRawMany();
+      });
+    if (series) {
+      qb.andWhere('cp.numeroSerieContador IN (:...series)', { series });
+    }
+    return qb.groupBy('DATE(cp.fechaHora)').orderBy('fecha', 'ASC').getRawMany();
   }
 
   // ========================================
@@ -992,8 +1126,20 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
   async update(
     updateConteoPasajerosDto: UpdateConteoPasajerosDto,
     idUser: number,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
+      const series = await this.seriesContadoresPermitidas(rol, cliente);
+      if (
+        series &&
+        !series.includes(String(updateConteoPasajerosDto.numeroSerieContador))
+      ) {
+        throw new NotFoundException(
+          `No se encontró un conteo activo para el contador con número de serie '${updateConteoPasajerosDto.numeroSerieContador}'.`,
+        );
+      }
+
       // Buscar el conteo activo por numeroSerieContador (el más reciente)
       const conteoPasajero = await this.conteopasajeroRepository.findOne({
         where: {
@@ -1109,7 +1255,6 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar conteopasajero',
-        error: error.message,
       });
     }
   }
@@ -1126,6 +1271,7 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
   ): Promise<ApiResponseCommon> {
     try {
       let resultados;
+      const { from, to } = dateTimeBounds(fechaInicio, fechaFin);
 
       switch (rol) {
         case 1:
@@ -1144,10 +1290,11 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
             GROUP BY cp.IdViaje
             ORDER BY cp.IdViaje DESC
             `,
-            [`${fechaInicio} 00:00:00`, `${fechaFin} 23:59:59`],
+            [from, to],
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -1172,7 +1319,7 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
             GROUP BY cp.IdViaje
             ORDER BY cp.IdViaje DESC
             `,
-            [`${fechaInicio} 00:00:00`, `${fechaFin} 23:59:59`, ...ids],
+            [from, to, ...ids],
           );
           break;
       }
@@ -1197,7 +1344,6 @@ WHERE cp.FechaHora BETWEEN '${fechaInicio}TT00:00:00' AND '${fechaFin}T23:59:00'
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener conteos agrupados por viaje',
-        error: error.message,
       });
     }
   }

@@ -1,4 +1,9 @@
 import {
+  clienteHijosDesdeSp,
+  clientesPermitidos,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -18,6 +23,7 @@ import {
   EstatusEnumBitcora,
 } from 'src/common/ApiResponse';
 import { ClientesService } from 'src/clientes/clientes.service';
+import { forbidTenantMove } from 'src/common/tenant/forbid-tenant-move';
 import { Instalaciones } from 'src/entities/Instalaciones';
 import { Clientes } from 'src/entities/Clientes';
 import { EstadoComponente, EstatusEnum } from 'src/common/estatus.enum';
@@ -38,8 +44,20 @@ export class ValidadoresService {
   async createValidador(
     createValidadorDto: CreateValidadorDto,
     idUser: number,
+    clienteActor = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(createValidadorDto.idCliente))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       const Validador = await this.validadoresRepository.findOne({
         where: { numeroSerie: createValidadorDto.numeroSerie },
       });
@@ -105,14 +123,24 @@ export class ValidadoresService {
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar crear el Validador.',
-        error: error.message,
       });
     }
   }
 
   //Obtener todos los Validadores por cliente
-  async findAllListValidadoresClientes(id: number, _cliente: number) {
+  async findAllListValidadoresClientes(
+    id: number,
+    clienteActor: number,
+    rol = 1,
+  ) {
     try {
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(clienteActor);
+        if (!tieneIdsTenant(ids) || !ids.includes(Number(id))) {
+          return { data: [] };
+        }
+      }
+
       // Consulta SQL para obtener validadores DISPONIBLES y ASIGNADOS
       // Para los asignados a instalaciones, se agrega "-Asignado" al numeroSerie
       const validadores = await this.validadoresRepository.query(
@@ -169,29 +197,13 @@ ORDER BY
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al recuperar los Validadores indicados.',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   //Obtener todos los Validadores
@@ -231,6 +243,7 @@ ORDER BY d.Id DESC;
         `);
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -285,7 +298,6 @@ ORDER BY d.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al recuperar los Validadores.',
-        error: error.message,
       });
     }
   }
@@ -414,7 +426,6 @@ WHERE d.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente
       }
       throw new InternalServerErrorException({
         message: `Error al obtener los Validadores  específicos.`,
-        error: error.message,
       });
     }
   }
@@ -508,8 +519,22 @@ ORDER BY d.Id DESC;
 
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al recuperar los datos del Validador.',
-        error: error.message,
       });
+    }
+  }
+
+  private async assertValidadorTenant(
+    validador: { idCliente?: number | null },
+    id: number,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids) || !ids.includes(Number(validador.idCliente))) {
+      throw new NotFoundException(
+        `No se encontró un Validador con ID ${id}.`,
+      );
     }
   }
 
@@ -518,6 +543,8 @@ ORDER BY d.Id DESC;
     id: number,
     idUser: number,
     updateValidadorEstatusDto: UpdateValidadorEstatusDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
       const Validador = await this.validadoresRepository.findOne({
@@ -528,6 +555,7 @@ ORDER BY d.Id DESC;
           `No se encontró un Validador con ID ${id}.`,
         );
       }
+      await this.assertValidadorTenant(Validador, id, cliente, rol);
       const { estatus } = updateValidadorEstatusDto;
       if (estatus === 0) {
         const ValidadorInstalacion = await this.instalacionesRepository.findOne(
@@ -596,7 +624,6 @@ ORDER BY d.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar el estatus del Validador.',
-        error: error.message,
       });
     }
   }
@@ -685,7 +712,6 @@ ORDER BY d.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar el estado del Validador.',
-        error: error.message,
       });
     }
   }
@@ -695,6 +721,8 @@ ORDER BY d.Id DESC;
     id: number,
     idUser: number,
     updateValidadorDto: UpdateValidadorDto,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
       const dispostivoExistente = await this.validadoresRepository.findOne({
@@ -703,6 +731,13 @@ ORDER BY d.Id DESC;
       if (!dispostivoExistente) {
         throw new NotFoundException(`Validador con ID ${id} no encontrado.`);
       }
+      await this.assertValidadorTenant(dispostivoExistente, id, cliente, rol);
+      forbidTenantMove(
+        dispostivoExistente.idCliente,
+        updateValidadorDto as any,
+        'idCliente',
+        'Validador no encontrado',
+      );
 
       //Actualindo Validador
       const dataValidador =
@@ -756,12 +791,16 @@ ORDER BY d.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar los datos del Validador.',
-        error: error.message,
       });
     }
   }
   //Eliminar Validadores
-  async removeValidador(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async removeValidador(
+    id: number,
+    idUser: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
       const Validador = await this.validadoresRepository.findOne({
         where: { id: id },
@@ -771,6 +810,7 @@ ORDER BY d.Id DESC;
           `No se encontró el Validador con ID: ${id}.`,
         );
       }
+      await this.assertValidadorTenant(Validador, id, cliente, rol);
 
       const ValidadorInstalacion = await this.instalacionesRepository.findOne({
         where: { idValidador: Validador.id, estatus: 1 },
@@ -826,7 +866,6 @@ ORDER BY d.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar eliminar el Validador.',
-        error: error.message,
       });
     }
   }

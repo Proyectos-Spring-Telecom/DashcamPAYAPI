@@ -1,12 +1,17 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
+  HttpException,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { TransaccionesRecarga } from 'src/entities/TransaccionesRecarga';
 import axios, { AxiosInstance } from 'axios';
+import { randomInt } from 'crypto';
 import { Pasajeros } from 'src/entities/Pasajeros';
 import { DatosTarjeta } from 'src/entities/DatosTarjeta';
 import { DireccionesTarjeta } from 'src/entities/DireccionesTarjeta';
@@ -18,6 +23,7 @@ import { AssignCardDto } from './dto/assign-card.dto';
 import { DireccionTarjetaDto } from './dto/direccion-tarjeta.dto';
 import { Confirm3DSDto } from './dto/confirm-3ds.dto';
 import { CancelRefundDto } from './dto/cancel-refund.dto';
+import { SecurityFlags } from 'src/common/security-flags';
 import { ProcessPaymentWithTokenDto } from './dto/process-payment-with-token.dto';
 import {
   NetpayReferenceIdResponse,
@@ -29,6 +35,7 @@ import {
   NetpayErrorResponse,
 } from './interfaces/netpay-response.interface';
 import { LoggerService } from 'src/common/logger.service';
+import { clientesPermitidos } from 'src/common/tenant/ownership-resolvers';
 
 @Injectable()
 export class NetpayService {
@@ -51,6 +58,7 @@ export class NetpayService {
     private readonly direccionesTarjetaRepository: Repository<DireccionesTarjeta>,
     @InjectRepository(TokenDirecciones)
     private readonly tokenDireccionesRepository: Repository<TokenDirecciones>,
+    private readonly dataSource: DataSource,
     private readonly loggerService: LoggerService,
   ) {
     this.isProduction =
@@ -157,6 +165,9 @@ export class NetpayService {
    * Maneja errores de la API de Netpay
    */
   private handleError(error: any, _context?: string): never {
+    if (error instanceof HttpException) {
+      throw error;
+    }
     if (error.response) {
       // El servidor respondió con un código de estado de error
       const status = error.response.status;
@@ -178,19 +189,19 @@ export class NetpayService {
 
       const errorMessage =
         error.code === 'ECONNREFUSED'
-          ? `No se pudo conectar al servidor de Netpay. Verifica la URL: ${this.baseUrl}`
+          ? 'No se pudo conectar al servidor de Netpay'
           : error.code === 'ETIMEDOUT'
             ? 'La petición a Netpay expiró (timeout)'
             : error.code === 'ENOTFOUND'
-              ? `No se pudo resolver el host de Netpay. Verifica la URL: ${this.baseUrl}`
-              : `No se recibió respuesta del servidor de Netpay. Código: ${error.code || 'UNKNOWN'}`;
+              ? 'No se pudo resolver el host de Netpay'
+              : 'No se recibió respuesta del servidor de Netpay';
 
       throw new InternalServerErrorException(errorMessage);
     }
 
     // Error al configurar la petición
     throw new InternalServerErrorException(
-      `Error al procesar la petición: ${error.message}`,
+      'Error al procesar la petición a Netpay',
     );
   }
 
@@ -203,35 +214,6 @@ export class NetpayService {
       publicKey: this.publicKey,
       environment: this.isProduction ? 'production' : 'sandbox',
     };
-  }
-
-  /**
-   * Verifica la conectividad con el servidor de Netpay
-   * @returns Información de la conexión
-   */
-  async testConnection(): Promise<{
-    success: boolean;
-    baseUrl: string;
-    environment: string;
-    message: string;
-  }> {
-    try {
-      // Intentar una petición simple para verificar conectividad
-      await this.httpClient.get('/health', { timeout: 5000 });
-      return {
-        success: true,
-        baseUrl: this.baseUrl,
-        environment: this.isProduction ? 'production' : 'sandbox',
-        message: 'Conexión exitosa',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        baseUrl: this.baseUrl,
-        environment: this.isProduction ? 'production' : 'sandbox',
-        message: error.code || 'Error de conexión',
-      };
-    }
   }
 
   /**
@@ -306,8 +288,22 @@ export class NetpayService {
    */
   async processPaymentWithToken(
     processPaymentDto: ProcessPaymentWithTokenDto,
+    actor?: { userId?: number; cliente?: number; rol?: number },
   ): Promise<NetpayPaymentResponse> {
     try {
+      // Exigir referenceID cuando el actor no es SA (rol !== 1)
+      if (
+        actor &&
+        actor.rol != null &&
+        Number(actor.rol) !== 1 &&
+        !processPaymentDto.referenceID
+      ) {
+        throw new ForbiddenException('No autorizado');
+      }
+      await this.assertReferenceIdEnAlcance(
+        processPaymentDto.referenceID,
+        actor,
+      );
       // Preparar payload según el formato exacto de Netpay v3.5/charges
       // Según el curl proporcionado: paymentMethod es string "card", token va directamente
       const payload: any = {
@@ -409,11 +405,13 @@ export class NetpayService {
    */
   async createCustomer(
     createCustomerDto: CreateCustomerDto,
+    actor?: { userId?: number; cliente?: number; rol?: number },
   ): Promise<NetpayCustomerResponse> {
     try {
+      await this.assertPasajeroEnAlcance(createCustomerDto.idPasajero, actor);
       const identifier =
         createCustomerDto.identifier ??
-        Math.floor(1000000000 + Math.random() * 9000000000).toString();
+        randomInt(1000000000, 10000000000).toString();
 
       const trimStr = (v: unknown): string =>
         v === undefined || v === null ? '' : String(v).trim();
@@ -509,20 +507,23 @@ export class NetpayService {
       // Luego asignar la tarjeta con el token ya generado en frontend
       if (createCustomerDto.token && customerId) {
         try {
-          await this.assignCardToCustomer({
-            customerId: String(customerId),
-            token: createCustomerDto.token,
-            preAuth: false,
-            referenceId: createCustomerDto.referenceId,
-            idDireccion: optionalInt(createCustomerDto.idDireccion),
-            nombre: optionalStr(createCustomerDto.nombre) ?? firstName,
-            apellidoPaterno: optionalStr(createCustomerDto.apellidoPaterno),
-            apellidoMaterno: optionalStr(createCustomerDto.apellidoMaterno),
-            email: createCustomerDto.email,
-            telefono:
-              optionalStr(createCustomerDto.telefono) ?? optionalStr(phone),
-            direccion: optionalDireccion(createCustomerDto.direccion),
-          });
+          await this.assignCardToCustomer(
+            {
+              customerId: String(customerId),
+              token: createCustomerDto.token,
+              preAuth: false,
+              referenceId: createCustomerDto.referenceId,
+              idDireccion: optionalInt(createCustomerDto.idDireccion),
+              nombre: optionalStr(createCustomerDto.nombre) ?? firstName,
+              apellidoPaterno: optionalStr(createCustomerDto.apellidoPaterno),
+              apellidoMaterno: optionalStr(createCustomerDto.apellidoMaterno),
+              email: createCustomerDto.email,
+              telefono:
+                optionalStr(createCustomerDto.telefono) ?? optionalStr(phone),
+              direccion: optionalDireccion(createCustomerDto.direccion),
+            },
+            actor,
+          );
         } catch (assignError) {
           this.loggerService.error(
             'NetpayService',
@@ -555,41 +556,44 @@ export class NetpayService {
    */
   async assignCardToCustomer(
     assignCardDto: AssignCardDto,
+    actor?: { userId?: number; cliente?: number; rol?: number },
   ): Promise<NetpayCardResponse> {
     try {
-      let clientIdParam: string | number = assignCardDto.customerId;
-
       if (
-        typeof assignCardDto.customerId === 'string' &&
-        assignCardDto.customerId.trim() !== '' &&
-        !isNaN(Number(assignCardDto.customerId))
+        SecurityFlags.cvv2Forbidden() &&
+        ((assignCardDto as any).cvv2 != null ||
+          (assignCardDto as any).cvv != null)
       ) {
-        clientIdParam = Number(assignCardDto.customerId);
+        throw new BadRequestException(
+          'cvv2 no está permitido en esta operación.',
+        );
       }
-
+      await this.assertCustomerIdEnAlcance(assignCardDto.customerId, actor, true);
       const payload: any = {
         token: assignCardDto.token,
         preAuth: assignCardDto.preAuth ?? false,
       };
 
-      // cvv2 solo se reenvía a NetPay (no se guarda en BD)
-      if (assignCardDto.cvv2) {
-        payload.cvv2 = assignCardDto.cvv2;
-      }
-
       let idDireccionFinal: number | null = null;
 
-      // Si viene idDireccion, solo validar que exista
+      // idDireccion debe pertenecer al mismo customerId (no a otro pasajero)
       if (assignCardDto.idDireccion) {
         const direccionExistente =
           await this.direccionesTarjetaRepository.findOne({
             where: { id: assignCardDto.idDireccion },
           });
-
-        if (!direccionExistente) {
-          throw new BadRequestException(
-            `No se encontró la dirección con ID ${assignCardDto.idDireccion}`,
-          );
+        const datos = direccionExistente?.idDatosTarjeta
+          ? await this.datosTarjetaRepository.findOne({
+              where: { id: direccionExistente.idDatosTarjeta },
+            })
+          : null;
+        if (
+          !direccionExistente ||
+          !datos ||
+          String(datos.customerIdNetPay ?? '') !==
+            String(assignCardDto.customerId)
+        ) {
+          throw new NotFoundException('Dirección no encontrada');
         }
 
         idDireccionFinal = assignCardDto.idDireccion;
@@ -634,7 +638,16 @@ export class NetpayService {
         idDireccionFinal = direccionGuardada.id;
       }
 
-      const assignCardUrl = `${this.netpayEcommerceBaseUrl}/v3/clients/${clientIdParam}/token`;
+      let clientIdParam: string | number = assignCardDto.customerId;
+      if (
+        typeof assignCardDto.customerId === 'string' &&
+        assignCardDto.customerId.trim() !== '' &&
+        !isNaN(Number(assignCardDto.customerId))
+      ) {
+        clientIdParam = Number(assignCardDto.customerId);
+      }
+
+      const assignCardUrl = `${this.netpayEcommerceBaseUrl}/v3/clients/${encodeURIComponent(String(clientIdParam))}/token`;
 
       this.loggerService.debug('NetpayService', 'Assigning card to customer', {
         customerId: assignCardDto.customerId,
@@ -680,8 +693,12 @@ export class NetpayService {
    * @param customerIdNetPay ID del cliente en Netpay
    * @returns Datos de tarjeta con sus direcciones asociadas
    */
-  async getDatosTarjetaByCustomerId(customerIdNetPay: string): Promise<any> {
+  async getDatosTarjetaByCustomerId(
+    customerIdNetPay: string,
+    actor?: { userId?: number; cliente?: number; rol?: number },
+  ): Promise<any> {
     try {
+      await this.assertCustomerIdEnAlcance(customerIdNetPay, actor, true);
       if (!customerIdNetPay) {
         throw new BadRequestException(
           'El parámetro customerIdNetPay es requerido',
@@ -768,7 +785,7 @@ export class NetpayService {
         throw error;
       }
       throw new InternalServerErrorException(
-        `Error al obtener los datos de tarjeta: ${error.message}`,
+        'Error al obtener los datos de tarjeta',
       );
     }
   }
@@ -778,8 +795,12 @@ export class NetpayService {
    * @param customerId ID del cliente (puede ser id string o clientId número)
    * @returns Información del cliente con datos de tarjeta y direcciones
    */
-  async getCustomer(customerId: string): Promise<any> {
+  async getCustomer(
+    customerId: string,
+    actor?: { userId?: number; cliente?: number; rol?: number },
+  ): Promise<any> {
     try {
+      await this.assertCustomerIdEnAlcance(customerId, actor, true);
       // Netpay puede usar tanto el id (string) como el clientId (número)
       // Intentar primero con el clientId como número, si no es válido, usar como string
       let clientIdParam: string | number = customerId;
@@ -791,7 +812,7 @@ export class NetpayService {
 
       // URL completa para obtener cliente - usar endpoint v3/clients
       // El endpoint acepta tanto número como string según el tipo de ID
-      const clientUrl = `${this.netpayEcommerceBaseUrl}/v3/clients/${clientIdParam}`;
+      const clientUrl = `${this.netpayEcommerceBaseUrl}/v3/clients/${encodeURIComponent(String(clientIdParam))}`;
 
       // Usar axios directamente con la URL completa
       const response = await axios.get<NetpayCustomerResponse>(clientUrl, {
@@ -895,25 +916,40 @@ export class NetpayService {
   async deleteCard(
     customerId: string,
     tokenCard: string,
+    actor?: { userId?: number; cliente?: number; rol?: number },
   ): Promise<{ success: boolean; message: string }> {
     try {
-      // Codificar los parámetros para evitar problemas con caracteres especiales
+      await this.assertCustomerIdEnAlcance(customerId, actor, true);
+
+      const tokenLocal = (
+        await this.tokenDireccionesRepository.query(
+          `SELECT td.Id AS id, td.IdDireccion AS idDireccion
+             FROM TokenDirecciones td
+             INNER JOIN DireccionesTarjeta d ON td.IdDireccion = d.Id
+             INNER JOIN DatosTarjeta dt ON d.IdDatosTarjeta = dt.Id
+            WHERE td.TokenCard = ?
+              AND dt.CustomerIdNetPay = ?
+              AND td.Estatus = 1
+            LIMIT 1`,
+          [tokenCard, String(customerId)],
+        )
+      )?.[0];
+      if (!tokenLocal) {
+        throw new NotFoundException('Tarjeta no encontrada');
+      }
+
       const encodedCustomerId = encodeURIComponent(customerId);
       const encodedTokenCard = encodeURIComponent(tokenCard);
-
-      // URL completa para eliminar tarjeta - usar endpoint v3/clients/{clientId}/token/{tokenCard}
       const deleteUrl = `${this.netpayEcommerceBaseUrl}/v3/clients/${encodedCustomerId}/token/${encodedTokenCard}`;
 
-      // Usar axios directamente con la URL completa
       await axios.delete(deleteUrl, {
         headers: this.getAuthHeaders(),
         timeout: 30000,
       });
 
-      // ✅ Si la eliminación en Netpay fue exitosa, actualizar estatus en base de datos
       const tokenDireccion = await this.tokenDireccionesRepository.findOne({
-        where: { tokenCard: tokenCard },
-        relations: ['idDireccion2'], // Cargar la relación con DireccionesTarjeta
+        where: { id: Number(tokenLocal.id) },
+        relations: ['idDireccion2'],
       });
 
       if (tokenDireccion) {
@@ -925,7 +961,7 @@ export class NetpayService {
           const direccionTarjeta =
             await this.direccionesTarjetaRepository.findOne({
               where: { id: tokenDireccion.idDireccion },
-              relations: ['idDatosTarjeta2'], // Cargar la relación con DatosTarjeta
+              relations: ['idDatosTarjeta2'],
             });
 
           if (direccionTarjeta) {
@@ -979,6 +1015,7 @@ export class NetpayService {
    */
   async processPaymentWithSavedCard(
     paymentSavedCardDto: PaymentSavedCardDto,
+    actor?: { userId?: number; cliente?: number; rol?: number },
   ): Promise<NetpayPaymentResponse> {
     // Para tarjeta guardada, se requiere referenceID según el curl proporcionado
     if (!paymentSavedCardDto.referenceId) {
@@ -988,6 +1025,10 @@ export class NetpayService {
     }
 
     try {
+      await this.assertReferenceIdEnAlcance(
+        paymentSavedCardDto.referenceId,
+        actor,
+      );
       // Preparar payload según el formato exacto de Netpay v3.5/charges para tarjeta guardada
       // Orden exacto según el curl proporcionado (NO incluir token, customerId, cardId)
       // IMPORTANTE: Para tarjeta guardada solo se usa referenceID, NO token
@@ -1111,11 +1152,16 @@ export class NetpayService {
    */
   async confirm3DSPayment(
     confirm3DSDto: Confirm3DSDto,
+    actor?: { userId?: number; cliente?: number; rol?: number },
   ): Promise<NetpayPaymentResponse> {
     try {
+      await this.assertRefundTokenEnAlcance(
+        confirm3DSDto.transaccionTokenId,
+        actor,
+      );
       // URL completa para confirmar transacción 3DS
       // Formato: /v3.5/charges/{transaccionTokenId}/confirm?processorTransactionId={processorTransactionId}
-      const confirmUrl = `${this.netpayEcommerceBaseUrl}/v3.5/charges/${confirm3DSDto.transaccionTokenId}/confirm?processorTransactionId=${confirm3DSDto.processorTransactionId}`;
+      const confirmUrl = `${this.netpayEcommerceBaseUrl}/v3.5/charges/${encodeURIComponent(confirm3DSDto.transaccionTokenId)}/confirm?processorTransactionId=${encodeURIComponent(confirm3DSDto.processorTransactionId)}`;
 
       // Usar axios directamente con la URL completa
       const response = await axios.post<NetpayPaymentResponse>(
@@ -1141,10 +1187,12 @@ export class NetpayService {
    */
   async getTransactionDetails(
     transactionTokenId: string,
+    actor?: { userId?: number; cliente?: number; rol?: number },
   ): Promise<NetpayTransactionDetailResponse> {
     try {
+      await this.assertRefundTokenEnAlcance(transactionTokenId, actor);
       // URL completa para consultar transacción - usar endpoint v3/transactions/{transactionTokenId}
-      const transactionUrl = `${this.netpayEcommerceBaseUrl}/v3/transactions/${transactionTokenId}`;
+      const transactionUrl = `${this.netpayEcommerceBaseUrl}/v3/transactions/${encodeURIComponent(transactionTokenId)}`;
 
       // Usar axios directamente con la URL completa
       const response = await axios.get<NetpayTransactionDetailResponse>(
@@ -1169,8 +1217,14 @@ export class NetpayService {
    */
   async cancelOrRefund(
     cancelRefundDto: CancelRefundDto,
+    actor?: { userId?: number; cliente?: number; rol?: number },
   ): Promise<NetpayTransactionDetailResponse> {
     try {
+      await this.assertRefundTokenEnAlcance(cancelRefundDto.tokenId, actor);
+      const pendingRevert = await this.assertRefundPending(
+        cancelRefundDto.tokenId,
+        cancelRefundDto.amount,
+      );
       // Construir payload según el formato de Netpay
       const payload: any = {};
 
@@ -1188,7 +1242,7 @@ export class NetpayService {
         ? 'https://gateway.netpay-api.com/reports'
         : 'https://gateway.netpay-api.com/reports-sandbox';
 
-      const refundUrl = `${reportsBaseUrl}/v2/transactions/${cancelRefundDto.tokenId}/refund`;
+      const refundUrl = `${reportsBaseUrl}/v2/transactions/${encodeURIComponent(cancelRefundDto.tokenId)}/refund`;
 
       // Usar axios directamente con la URL completa
       // Usar headers especiales para reports (X-Netpay-Apikey)
@@ -1201,9 +1255,232 @@ export class NetpayService {
         },
       );
 
+      if (pendingRevert) {
+        try {
+          await this.revertSaldoRecarga(pendingRevert);
+        } catch (revertError) {
+          this.loggerService.error(
+            'NetpayService',
+            'NetPay reembolsó pero no se pudo revertir el saldo',
+            revertError,
+          );
+        }
+      }
+
       return response.data;
     } catch (error) {
       this.handleError(error, 'cancelOrRefund');
+    }
+  }
+
+  private async assertRefundPending(
+    tokenId?: string,
+    requestedAmount?: string,
+  ): Promise<{ recargaId: number; serie: string; amount: number } | null> {
+    if (!tokenId) return null;
+    let recarga: TransaccionesRecarga | null;
+    try {
+      recarga = await this.dataSource
+        .getRepository(TransaccionesRecarga)
+        .findOne({ where: { transactionTokenIdNetPay: tokenId } });
+    } catch (error) {
+      const msg = String((error as { message?: string })?.message ?? '');
+      if (!/MontoReembolsado/i.test(msg)) {
+        throw error;
+      }
+      const rows = await this.dataSource.query(
+        `SELECT Id AS id, Monto AS monto, NumeroSerieMonedero AS numeroSerieMonedero
+           FROM TransaccionesRecarga
+          WHERE TransactionTokenIdNetPay = ?
+          LIMIT 1`,
+        [tokenId],
+      );
+      recarga = rows?.[0]
+        ? ({
+            id: rows[0].id,
+            monto: rows[0].monto,
+            numeroSerieMonedero: rows[0].numeroSerieMonedero,
+            montoReembolsado: 0,
+          } as TransaccionesRecarga)
+        : null;
+    }
+    if (!recarga) return null;
+
+    const ya = Number(recarga.montoReembolsado ?? 0);
+    const total = Number(recarga.monto);
+    const remaining = Math.round((total - ya) * 100) / 100;
+    if (remaining <= 0) {
+      throw new BadRequestException('La transacción ya fue reembolsada');
+    }
+
+    let amount = remaining;
+    if (requestedAmount != null && requestedAmount !== '') {
+      amount = Number(requestedAmount);
+      if (!Number.isFinite(amount) || amount <= 0 || amount > remaining) {
+        throw new BadRequestException('Monto de reembolso inválido');
+      }
+    }
+
+    return {
+      recargaId: Number(recarga.id),
+      serie: recarga.numeroSerieMonedero,
+      amount,
+    };
+  }
+
+  private async revertSaldoRecarga(pending: {
+    recargaId: number;
+    serie: string;
+    amount: number;
+  }): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        `UPDATE Monederos
+            SET Saldo = CASE WHEN Saldo >= ? THEN Saldo - ? ELSE 0 END
+          WHERE NumeroSerie = ? AND Estatus = 1`,
+        [pending.amount, pending.amount, pending.serie],
+      );
+      try {
+        await manager.query(
+          `UPDATE TransaccionesRecarga
+              SET MontoReembolsado = MontoReembolsado + ?
+            WHERE Id = ?`,
+          [pending.amount, pending.recargaId],
+        );
+      } catch (error) {
+        const msg = String((error as { message?: string })?.message ?? '');
+        if (!/MontoReembolsado/i.test(msg)) {
+          throw error;
+        }
+      }
+    });
+  }
+
+  private async assertRefundTokenEnAlcance(
+    tokenId?: string,
+    actor?: { userId?: number; cliente?: number; rol?: number },
+  ) {
+    if (!tokenId) return;
+    if (!actor || actor.rol == null) {
+      throw new ForbiddenException('No autorizado');
+    }
+    if (Number(actor.rol) === 1) return;
+    const row = (
+      await this.pasajeroRepository.query(
+        `SELECT m.IdCliente AS idCliente
+           FROM TransaccionesRecarga tr
+           INNER JOIN Monederos m ON m.NumeroSerie = tr.NumeroSerieMonedero
+          WHERE tr.TransactionTokenIdNetPay = ?
+          LIMIT 1`,
+        [tokenId],
+      )
+    )?.[0];
+    if (!row) throw new NotFoundException('Transacción no encontrada');
+    const ids = await clientesPermitidos(
+      this.pasajeroRepository.manager,
+      Number(actor.cliente),
+    );
+    if (!ids.includes(Number(row.idCliente))) {
+      throw new NotFoundException('Transacción no encontrada');
+    }
+  }
+
+  private async assertReferenceIdEnAlcance(
+    referenceId?: string,
+    actor?: { userId?: number; cliente?: number; rol?: number },
+  ) {
+    // Fail-closed para no-SA: actor presente y falta referenceId → Forbidden.
+    // SA (rol=1): bypass de ownership solo con referenceId; sin él no aplica cargo.
+    if (!referenceId) {
+      if (actor && actor.rol != null && Number(actor.rol) !== 1) {
+        throw new ForbiddenException('No autorizado');
+      }
+      return;
+    }
+    if (!actor || actor.rol == null) {
+      throw new ForbiddenException('No autorizado');
+    }
+    if (Number(actor.rol) === 1) return;
+    const row = (
+      await this.pasajeroRepository.query(
+        `SELECT p.Id AS id
+           FROM TokenDirecciones td
+           INNER JOIN DireccionesTarjeta d ON td.IdDireccion = d.Id
+           INNER JOIN DatosTarjeta dt ON d.IdDatosTarjeta = dt.Id
+           INNER JOIN Pasajeros p ON p.CustomerIdNetPay = dt.CustomerIdNetPay
+          WHERE td.ReferenceId = ? LIMIT 1`,
+        [referenceId],
+      )
+    )?.[0];
+    if (!row) throw new NotFoundException('Tarjeta no encontrada');
+    await this.assertPasajeroEnAlcance(Number(row.id), actor);
+  }
+
+  private async assertCustomerIdEnAlcance(
+    customerId?: string | number,
+    actor?: { userId?: number; cliente?: number; rol?: number },
+    _requireMapped = true,
+  ) {
+    if (customerId == null || customerId === '') {
+      if (actor && actor.rol != null) {
+        throw new ForbiddenException('No autorizado');
+      }
+      return;
+    }
+    if (!actor || actor.rol == null) {
+      throw new ForbiddenException('No autorizado');
+    }
+    if (Number(actor.rol) === 1) return;
+    const row = (
+      await this.pasajeroRepository.query(
+        `SELECT p.Id AS id
+           FROM Pasajeros p
+          WHERE p.CustomerIdNetPay = ? LIMIT 1`,
+        [String(customerId)],
+      )
+    )?.[0];
+    if (!row) {
+      throw new NotFoundException('Cliente no encontrado');
+    }
+    await this.assertPasajeroEnAlcance(Number(row.id), actor);
+  }
+
+  private async assertPasajeroEnAlcance(
+    idPasajero?: number,
+    actor?: { userId?: number; cliente?: number; rol?: number },
+  ) {
+    if (idPasajero == null) {
+      if (actor && actor.rol != null) {
+        throw new ForbiddenException('No autorizado');
+      }
+      return;
+    }
+    if (!actor || actor.rol == null) {
+      throw new ForbiddenException('No autorizado');
+    }
+    if (Number(actor.rol) === 1) return;
+    const row = (
+      await this.pasajeroRepository.query(
+        `SELECT p.Id AS id, p.IdUsuario AS idUsuario, u.IdCliente AS idCliente
+           FROM Pasajeros p
+           INNER JOIN Usuarios u ON p.IdUsuario = u.Id
+          WHERE p.Id = ? LIMIT 1`,
+        [idPasajero],
+      )
+    )?.[0];
+    if (!row) throw new NotFoundException('Pasajero no encontrado');
+    if (Number(actor.rol) === 9) {
+      if (Number(row.idUsuario) !== Number(actor.userId)) {
+        throw new NotFoundException('Pasajero no encontrado');
+      }
+      return;
+    }
+    const ids = await clientesPermitidos(
+      this.pasajeroRepository.manager,
+      Number(actor.cliente),
+    );
+    if (!ids.includes(Number(row.idCliente))) {
+      throw new NotFoundException('Pasajero no encontrado');
     }
   }
 }

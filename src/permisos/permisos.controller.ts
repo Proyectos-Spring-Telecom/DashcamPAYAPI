@@ -19,14 +19,17 @@ import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { UpdatePermisoEstatusDto } from './dto/update-permiso-estatus.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Roles, ROLES_CONOCIDOS } from 'src/guard/roles.decorator';
 
 @ApiTags('Permisos')
 @ApiBearerAuth('bearer-token')
 @Controller('permisos')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2)
 export class PermisosController {
   constructor(private readonly permisosService: PermisosService) {}
 
+  @Roles(1, 2)
   @Post()
   async createPermioso(
     @Body() createPermiso: CreatePermisoDto,
@@ -49,6 +52,7 @@ export class PermisosController {
     return await this.permisosService.findAllList();
   }
 
+  @Roles(...ROLES_CONOCIDOS)
   @Get('permisosAgrupados')
   async findAllAgrupado(@Req() req): Promise<any[]> {
     const idUsuario = req.user.userId;
@@ -62,6 +66,7 @@ export class PermisosController {
     return await this.permisosService.findOne(+id);
   }
 
+  @Roles(1, 2)
   @Put(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
@@ -72,6 +77,7 @@ export class PermisosController {
     return await this.permisosService.update(id, updatePermisoDto, idUser);
   }
 
+  @Roles(1, 2)
   @Patch(':id/estatus')
   async updatePermisoEstatus(
     @Param('id') id: string,
@@ -86,6 +92,7 @@ export class PermisosController {
     );
   }
 
+  @Roles(1, 2)
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
