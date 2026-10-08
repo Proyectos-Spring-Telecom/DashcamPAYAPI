@@ -11,5 +11,5 @@ export function nowDb(): Date {
 
 export function formatFechaDb(fecha: Date = nowDb()): string {
   const pad = (n: number) => (n < 10 ? '0' + n : String(n));
-  return `${fecha.getFullYear()}-${pad(fecha.getMonth() + 1)}-${pad(fecha.getDate())} ${pad(fecha.getHours())}:${pad(fecha.getMinutes())}:${pad(fecha.getSeconds())}`;
+  return `${fecha.getUTCFullYear()}-${pad(fecha.getUTCMonth() + 1)}-${pad(fecha.getUTCDate())} ${pad(fecha.getUTCHours())}:${pad(fecha.getUTCMinutes())}:${pad(fecha.getUTCSeconds())}`;
 }

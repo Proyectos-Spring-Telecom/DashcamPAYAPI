@@ -444,7 +444,7 @@ ORDER BY Id ASC
   async getClientesPublicos(): Promise<ApiResponseCommon> {
     try {
       const clientes = await this.clienteRepository.find({
-        where: { estatus: EstatusEnum.ACTIVO },
+        where: { estatus: EstatusEnum.ACTIVO, permiteRegistroPublico: 1 },
         select: ['id', 'nombre'],
         order: { id: 'ASC' },
       });

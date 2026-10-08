@@ -7,7 +7,12 @@ export function stableStringify(value: unknown): string {
     return `[${value.map((item) => stableStringify(item)).join(',')}]`;
   }
   const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
+  // Igual que JSON.stringify (lo que se guarda en la columna JSON): las claves
+  // con undefined no existen. Antes se hasheaban como null y el registro nunca
+  // volvía a verificar (p. ej. un DTO con campos opcionales sin enviar).
+  const keys = Object.keys(obj)
+    .filter((key) => obj[key] !== undefined)
+    .sort();
   return `{${keys
     .map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`)
     .join(',')}}`;

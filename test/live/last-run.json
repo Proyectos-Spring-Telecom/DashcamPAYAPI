@@ -1,0 +1,307 @@
+{
+  "fecha": "2026-10-07T06:47:46.479Z",
+  "api": "http://localhost:3000",
+  "resultados": [
+    {
+      "grupo": "R1",
+      "nombre": "la columna Codigo acepta el hash de 64 caracteres",
+      "ok": true,
+      "ms": 118,
+      "detalle": "Codigo CHAR(64)"
+    },
+    {
+      "grupo": "R1",
+      "nombre": "verify con el OTP correcto confirma el correo",
+      "ok": true,
+      "ms": 424,
+      "detalle": "200 y EmailConfirmado=1"
+    },
+    {
+      "grupo": "R1",
+      "nombre": "el OTP de un usuario no sirve para otro",
+      "ok": true,
+      "ms": 282,
+      "detalle": "400"
+    },
+    {
+      "grupo": "R1",
+      "nombre": "el OTP se invalida al quinto intento fallido",
+      "ok": true,
+      "ms": 710,
+      "detalle": "Intentos=5, Usado=0; el correcto ya no pasa"
+    },
+    {
+      "grupo": "R1",
+      "nombre": "verify sin userName se rechaza",
+      "ok": true,
+      "ms": 15,
+      "detalle": "400"
+    },
+    {
+      "grupo": "H-03",
+      "nombre": "recuperación con usuario inexistente responde igual que con uno real",
+      "ok": true,
+      "ms": 88,
+      "detalle": "201 genérico"
+    },
+    {
+      "grupo": "H-03",
+      "nombre": "reset sin token Bearer se rechaza aunque traiga código",
+      "ok": true,
+      "ms": 111,
+      "detalle": "401"
+    },
+    {
+      "grupo": "H-03",
+      "nombre": "el token de reset sirve una sola vez",
+      "ok": true,
+      "ms": 493,
+      "detalle": "1º 201, 2º 401"
+    },
+    {
+      "grupo": "H-03",
+      "nombre": "un token de reset sin tv (emitido antes) no sirve",
+      "ok": true,
+      "ms": 140,
+      "detalle": "401"
+    },
+    {
+      "grupo": "H-03",
+      "nombre": "el token de reset de A no cambia la contraseña de B",
+      "ok": true,
+      "ms": 175,
+      "detalle": "403"
+    },
+    {
+      "grupo": "R4",
+      "nombre": "GET /transacciones/list responde para el rol 1",
+      "ok": true,
+      "ms": 602,
+      "detalle": "200"
+    },
+    {
+      "grupo": "R4",
+      "nombre": "GET /transacciones/DEBITO/:id devuelve el débito pedido",
+      "ok": true,
+      "ms": 622,
+      "detalle": "200, id 313"
+    },
+    {
+      "grupo": "JWT",
+      "nombre": "token sin typ se rechaza",
+      "ok": true,
+      "ms": 81,
+      "detalle": "401"
+    },
+    {
+      "grupo": "JWT",
+      "nombre": "token sin iss/aud se rechaza",
+      "ok": true,
+      "ms": 67,
+      "detalle": "401"
+    },
+    {
+      "grupo": "JWT",
+      "nombre": "el rol del token no manda: un pasajero que se firma rol 1 sigue siendo pasajero",
+      "ok": true,
+      "ms": 92,
+      "detalle": "403"
+    },
+    {
+      "grupo": "JWT",
+      "nombre": "desactivar al usuario corta su token al instante",
+      "ok": true,
+      "ms": 518,
+      "detalle": "401"
+    },
+    {
+      "grupo": "R4",
+      "nombre": "GET /transacciones/list responde para el rol 2 (rama default)",
+      "ok": true,
+      "ms": 604,
+      "detalle": "200"
+    },
+    {
+      "grupo": "Refresh",
+      "nombre": "5 refresh en paralelo con el mismo token: solo uno obtiene sesión nueva",
+      "ok": true,
+      "ms": 736,
+      "detalle": "1 de 5 (200,401,401,401,401)"
+    },
+    {
+      "grupo": "Tenant",
+      "nombre": "un id mal formado responde 404 antes de consultar la BD",
+      "ok": true,
+      "ms": 524,
+      "detalle": "404"
+    },
+    {
+      "grupo": "R3",
+      "nombre": "5 recargas en paralelo con la misma clave acreditan una sola vez",
+      "ok": true,
+      "ms": 967,
+      "detalle": "estados 201,409,409,409,409; 1 recarga, saldo 50, reserva COMPLETADA"
+    },
+    {
+      "grupo": "R3",
+      "nombre": "la misma clave con otro monto se rechaza (409) y no acredita",
+      "ok": true,
+      "ms": 1145,
+      "detalle": "409; saldo 20"
+    },
+    {
+      "grupo": "V2-15",
+      "nombre": "la clave de la recarga de otro monedero no devuelve esa recarga",
+      "ok": true,
+      "ms": 1228,
+      "detalle": "409"
+    },
+    {
+      "grupo": "R3",
+      "nombre": "si la recarga falla antes de cobrar, la clave se libera",
+      "ok": true,
+      "ms": 849,
+      "detalle": "404; reserva liberada"
+    },
+    {
+      "grupo": "R2",
+      "nombre": "10 recargas en paralelo terminan y la bitácora llega después del COMMIT",
+      "ok": true,
+      "ms": 3670,
+      "detalle": "10 en 1928 ms; saldo 50; 10 registros de bitácora"
+    },
+    {
+      "grupo": "DEB",
+      "nombre": "un débito simple cobra la tarifa",
+      "ok": true,
+      "ms": 1740,
+      "detalle": "saldo 80"
+    },
+    {
+      "grupo": "H-08",
+      "nombre": "5 débitos en paralelo con la misma clave cobran una sola vez",
+      "ok": true,
+      "ms": 1328,
+      "detalle": "1 débito, saldo 80, estados 201,201,201,201,201"
+    },
+    {
+      "grupo": "H-08",
+      "nombre": "5 débitos en paralelo con claves distintas: lo cobrado cuadra con el saldo y nunca sobregira",
+      "ok": true,
+      "ms": 4684,
+      "detalle": "3 aprobados, cobrado 50.00, saldo 0"
+    },
+    {
+      "grupo": "V2-15",
+      "nombre": "la clave de un débito de otro monedero da 409",
+      "ok": true,
+      "ms": 1034,
+      "detalle": "409"
+    },
+    {
+      "grupo": "V2-16",
+      "nombre": "el rechazo se historiza como fila nueva con IdTransaccionOrigen",
+      "ok": true,
+      "ms": 889,
+      "detalle": "histórico +1, origen 322"
+    },
+    {
+      "grupo": "H-02",
+      "nombre": "un admin no otorga permisos que no tiene",
+      "ok": true,
+      "ms": 1237,
+      "detalle": "propio 201, ajeno 403"
+    },
+    {
+      "grupo": "H-02",
+      "nombre": "el alta exige contraseña de 12 o más",
+      "ok": true,
+      "ms": 613,
+      "detalle": "400"
+    },
+    {
+      "grupo": "H-02",
+      "nombre": "un PUT sin estatus no reactiva al usuario dado de baja",
+      "ok": true,
+      "ms": 894,
+      "detalle": "sigue inactivo"
+    },
+    {
+      "grupo": "H-02",
+      "nombre": "cambiar el rol corta la sesión vigente del usuario",
+      "ok": true,
+      "ms": 1402,
+      "detalle": "token anterior 401"
+    },
+    {
+      "grupo": "N-03",
+      "nombre": "el extravío no acepta un destino con saldo",
+      "ok": true,
+      "ms": 1147,
+      "detalle": "400; destino intacto"
+    },
+    {
+      "grupo": "N-03",
+      "nombre": "el extravío a un destino vacío traspasa el saldo exacto",
+      "ok": true,
+      "ms": 1191,
+      "detalle": "destino 70, origen 0"
+    },
+    {
+      "grupo": "H-17",
+      "nombre": "el alta de monedero no acepta un pasajero de otro cliente",
+      "ok": true,
+      "ms": 765,
+      "detalle": "404"
+    },
+    {
+      "grupo": "N-07",
+      "nombre": "rutas.update no acepta un idZonaFin de otro cliente",
+      "ok": true,
+      "ms": 934,
+      "detalle": "404; ruta intacta"
+    },
+    {
+      "grupo": "H-64",
+      "nombre": "/clientes/public omite al cliente con el registro cerrado",
+      "ok": true,
+      "ms": 109,
+      "detalle": "ids visibles 1,4,6,7"
+    },
+    {
+      "grupo": "H-64",
+      "nombre": "el registro de pasajero en un cliente cerrado se rechaza sin crear nada",
+      "ok": true,
+      "ms": 141,
+      "detalle": "400; sin usuario"
+    },
+    {
+      "grupo": "M-013",
+      "nombre": "la bitácora escrita en esta corrida verifica íntegra",
+      "ok": true,
+      "ms": 6168,
+      "detalle": "9/9 íntegros"
+    },
+    {
+      "grupo": "Tarjeta",
+      "nombre": "caja/admin no puede recargar con tarjeta (403 antes de llamar a NetPay)",
+      "ok": true,
+      "ms": 840,
+      "detalle": "403"
+    },
+    {
+      "grupo": "Tarjeta",
+      "nombre": "caja no puede cobrar una tarjeta guardada",
+      "ok": true,
+      "ms": 608,
+      "detalle": "403"
+    },
+    {
+      "grupo": "D-12",
+      "nombre": "pasajero desactivado: sin login, token anterior inválido y débito rechazado; al reactivar vuelve todo",
+      "ok": true,
+      "ms": 3787,
+      "detalle": "baja: login 401, token 401, débito 400; alta: login 200, débito 201 (saldo 80)"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import { clienteHijosDesdeSp, tieneIdsTenant } from 'src/common/tenant/ownership-resolvers';
 import {
   BadRequestException,
@@ -540,6 +541,12 @@ WHERE c.Id IN (${placeholders})
         cliente,
         rol,
       );
+      // N-07: la FK padre nueva también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.mantenimientoKilometrajeRepository.manager.connection,
+        { cliente, rol },
+        { instalacion: updateMantenimientoKilometrajeDto.idInstalacion },
+      );
 
       await this.mantenimientoKilometrajeRepository.update(
         id,
@@ -871,7 +878,7 @@ WHERE c.Id IN (${placeholders})
           // Filtrar posiciones del día actual
           const posicionesDelDia = listaPosiciones.filter((pos: any) => {
             const fecha = new Date(pos.fechaHora);
-            return fecha.getDate() === dia;
+            return fecha.getUTCDate() === dia;
           });
 
           // Sumar las distancias del día

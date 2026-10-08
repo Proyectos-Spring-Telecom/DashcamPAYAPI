@@ -40,12 +40,13 @@ import { Viajes } from 'src/entities/Viajes';
 import { RefreshSessions } from 'src/entities/RefreshSessions';
 import { LoggerService } from 'src/common/logger.service';
 import { Validadores } from 'src/entities/Validadores';
-import { createHash, randomInt, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomInt, randomUUID } from 'crypto';
 import { IsNull } from 'typeorm';
 import { JwtTyp } from './jwt-types';
 import { SecurityFlags } from 'src/common/security-flags';
 import { clientesPermitidos } from 'src/common/tenant/ownership-resolvers';
 import { isMissingTokenVersionColumn } from './token-version';
+import { hashOtp, otpMatchesHash } from 'src/common/otp-hash';
 
 @Injectable()
 export class AuthService {
@@ -88,13 +89,18 @@ export class AuthService {
     return secret;
   }
 
-  private signPurposeToken(
+  /**
+   * `tv` ata el token a la TokenVersion vigente: al cambiar la contraseña se
+   * incrementa y el mismo token de reset ya no sirve (uso único, H-03).
+   */
+  private async signPurposeToken(
     userId: number,
     email: string,
     typ: typeof JwtTyp.EMAIL_CONFIRM | typeof JwtTyp.PWD_RESET,
-  ): string {
+  ): Promise<string> {
+    const tv = await this.currentTokenVersion(userId);
     return this.jwtService.sign(
-      { id: userId, email, typ },
+      { id: userId, email, typ, tv },
       {
         secret: this.purposeSecret(),
         expiresIn: process.env.JWT_CONFIRMACION || '15m',
@@ -112,10 +118,11 @@ export class AuthService {
     return token;
   }
 
-  private verifyPurposeOrAccessToken(token: string): {
+  private verifyPurposeToken(token: string): {
     id?: number;
     email?: string;
     typ?: string;
+    tv?: number;
   } {
     try {
       return this.jwtService.verify(token, {
@@ -123,66 +130,54 @@ export class AuthService {
         algorithms: ['HS256'],
       });
     } catch {
-      try {
-        return this.jwtService.verify(token, {
-          secret: process.env.JWT_SECRET,
-          algorithms: ['HS256'],
-        });
-      } catch {
-        throw new UnauthorizedException('Token inválido o expirado');
-      }
+      throw new UnauthorizedException('Token inválido o expirado');
     }
   }
 
-  private assertPasswordChangeAuthorized(
+  /**
+   * El cambio de contraseña exige siempre el token PWD_RESET que llega por
+   * correo; el OTP, si se envía, es un factor adicional, no un sustituto.
+   */
+  private async assertPasswordChangeAuthorized(
     loginAuthResetDto: LoginAuthResetDto,
-    authorization?: string,
-  ): void {
-    if (loginAuthResetDto.codigo) {
-      return;
-    }
+    authorization: string | undefined,
+    user: Usuarios,
+  ): Promise<void> {
     const token = this.extractBearer(authorization);
     if (!token) {
-      throw new UnauthorizedException(
-        'Se requiere token de restablecimiento o código OTP',
-      );
+      throw new UnauthorizedException('Se requiere token de restablecimiento');
     }
-    const payload = this.verifyPurposeOrAccessToken(token);
-    const email = String(payload.email || '').toLowerCase();
-    const target = String(loginAuthResetDto.userName || '').toLowerCase();
-    if (payload.typ === JwtTyp.EMAIL_CONFIRM) {
+    const payload = this.verifyPurposeToken(token);
+    if (payload.typ !== JwtTyp.PWD_RESET) {
       throw new UnauthorizedException('Token no válido para esta ruta');
     }
-    if (email !== target) {
+    const email = String(payload.email || '').toLowerCase();
+    const target = String(loginAuthResetDto.userName || '').toLowerCase();
+    if (email !== target || Number(payload.id) !== Number(user.id)) {
       throw new ForbiddenException(
         'No se puede cambiar la contraseña de otro usuario',
       );
     }
-    // Solo token de propósito pwd_reset (o OTP en body). ACCESS no basta.
-    if (payload.typ !== JwtTyp.PWD_RESET) {
-      throw new UnauthorizedException('Token no válido para esta ruta');
+    const tv = await this.currentTokenVersion(Number(user.id));
+    if (payload.tv === undefined || Number(payload.tv) !== tv) {
+      throw new UnauthorizedException('El enlace ya fue usado o expiró');
     }
   }
 
-  private async otpMatches(plain: string, stored: string): Promise<boolean> {
-    if (!stored) return false;
-    // Solo hashes bcrypt (OTP ya se almacena hasheado).
-    if (!stored.startsWith('$2')) {
-      return false;
-    }
-    return bcrypt.compare(plain, stored);
-  }
-
-  private async consumeResetOtp(userId: number, codigo: string): Promise<void> {
+  /**
+   * Compara el OTP vigente y cuenta intentos fallidos; al llegar a
+   * OTP_MAX_ATTEMPTS el código se invalida. Devuelve el registro a consumir.
+   */
+  private async checkOtp(
+    idUsuario: number,
+    tipo: TipoCodigoAutenticacion,
+    codigo: string,
+  ): Promise<CodigoAutenticacion> {
     const registro = await this.codigoAutenticacioRepository.findOne({
-      where: {
-        idUsuario: userId,
-        tipo: TipoCodigoAutenticacion.RECUPERACION_CONTRASENA,
-        usado: EstatusEnum.ACTIVO,
-      },
+      where: { idUsuario, tipo, usado: EstatusEnum.ACTIVO },
       order: { id: 'DESC' },
     });
-    if (!registro || !(await this.otpMatches(codigo, registro.codigo))) {
+    if (!registro) {
       throw new BadRequestException('Código inválido o ya usado');
     }
     if (new Date() > registro.fechaExpiracion) {
@@ -192,10 +187,32 @@ export class AuthService {
       });
       throw new BadRequestException('El código ha expirado');
     }
+    if (!otpMatchesHash(idUsuario, tipo, codigo, registro.codigo)) {
+      const maxIntentos = Number(process.env.OTP_MAX_ATTEMPTS ?? 5);
+      const nuevosIntentos = (registro.intentos ?? 0) + 1;
+      if (nuevosIntentos >= maxIntentos) {
+        await this.codigoAutenticacioRepository.update(registro.id, {
+          intentos: nuevosIntentos,
+          usado: EstatusEnum.INACTIVO,
+          estatus: EstatusEnum.INACTIVO,
+        });
+        throw new BadRequestException(
+          'Demasiados intentos. Solicita un nuevo código.',
+        );
+      }
+      await this.codigoAutenticacioRepository.update(registro.id, {
+        intentos: nuevosIntentos,
+      });
+      throw new BadRequestException('Código inválido');
+    }
+    return registro;
+  }
+
+  private async consumeOtp(registro: CodigoAutenticacion): Promise<void> {
     await this.codigoAutenticacioRepository.update(registro.id, {
       usado: EstatusEnum.INACTIVO,
       estatus: EstatusEnum.INACTIVO,
-      fechaUso: this.formatFechaLocal(new Date()),
+      fechaUso: nowDb(),
     });
   }
 
@@ -314,7 +331,7 @@ export class AuthService {
   }
 
   private formatFechaLocal(fecha: Date): string {
-    return `${fecha.getFullYear()}-${this.padFecha(fecha.getMonth() + 1)}-${this.padFecha(fecha.getDate())} ${this.padFecha(fecha.getHours())}:${this.padFecha(fecha.getMinutes())}:${this.padFecha(fecha.getSeconds())}`;
+    return `${fecha.getUTCFullYear()}-${this.padFecha(fecha.getUTCMonth() + 1)}-${this.padFecha(fecha.getUTCDate())} ${this.padFecha(fecha.getUTCHours())}:${this.padFecha(fecha.getUTCMinutes())}:${this.padFecha(fecha.getUTCSeconds())}`;
   }
 
   private fetchOperadorDatosByUserId(userId: number) {
@@ -516,11 +533,9 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
     const maxIntentos = 100;
 
     do {
-      // Generar número de serie aleatorio con formato MON-XXXX donde XXXX son números aleatorios
-      // Usar timestamp y número aleatorio para mayor unicidad
-      const timestamp = Date.now().toString().slice(-6); // Últimos 6 dígitos del timestamp
-      const numeroAleatorio = randomInt(1000, 10000);
-      numeroSerie = `MON-${timestamp}-${numeroAleatorio}`;
+      // 64 bits de azar: la serie viaja en el QR de pago y con el formato
+      // anterior (timestamp + 4 dígitos, ~13 bits) era adivinable.
+      numeroSerie = `MON-${randomBytes(8).toString('hex').toUpperCase()}`;
 
       // Verificar si ya existe
       const monederoExistente = await this.monederosRepository.findOne({
@@ -550,10 +565,14 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
 
       const assertClienteActivo = async (idCliente: number) => {
         const rows = await this.monederosRepository.manager.query(
-          'SELECT Id, Estatus FROM Clientes WHERE Id = ? LIMIT 1',
+          'SELECT Id, Estatus, PermiteRegistroPublico FROM Clientes WHERE Id = ? LIMIT 1',
           [idCliente],
         );
-        if (!rows?.length || Number(rows[0].Estatus) !== 1) {
+        if (
+          !rows?.length ||
+          Number(rows[0].Estatus) !== 1 ||
+          Number(rows[0].PermiteRegistroPublico) !== 1
+        ) {
           throw new BadRequestException(
             'El cliente no está disponible para registro.',
           );
@@ -816,7 +835,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         );
       }
 
-      const token = this.signPurposeToken(
+      const token = await this.signPurposeToken(
         Number(userSave.id),
         userSave.userName,
         JwtTyp.EMAIL_CONFIRM,
@@ -853,7 +872,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         }
         const fechaDesfasada = nowDb();
 
-        const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+        const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())} ${pad(fechaDesfasada.getUTCHours())}:${pad(fechaDesfasada.getUTCMinutes())}:${pad(fechaDesfasada.getUTCSeconds())}`;
 
         await this.monederoService.updateMonedero(
           monederos.data.id,
@@ -948,8 +967,28 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         ),
     );
 
+    const anterior = user.validadorId ?? null;
     await this.usuariosRepository.update(user.id, { validadorId: serie });
     user.validadorId = serie;
+
+    // Regla de negocio (V2-01): el validador se asigna al operador que inicia
+    // sesión en él. Queda rastro de cada cambio para poder auditarlo.
+    this.bitacoraLogger.registrar([
+      'Autenticación',
+      `Validador ${serie} asignado al operador ${user.userName} al iniciar sesión`,
+      'UPDATE',
+      {
+        idUsuario: Number(user.id),
+        numeroSerieAnterior: anterior,
+        numeroSerieNuevo: serie,
+        idUsuariosDesplazados: ocupantes
+          .filter((otro) => Number(otro.id) !== Number(user.id))
+          .map((otro) => Number(otro.id)),
+      },
+      Number(user.id),
+      EnumModulos.USUARIOS,
+      EstatusEnumBitcora.SUCCESS,
+    ]);
   }
 
   // ========================================
@@ -1178,84 +1217,26 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
   // ========================================
   async verifyUser(codigoPasajeroAutenticacion: CodigoPasajeroAutenticacion) {
     try {
-      const filtro: {
-        tipo: number;
-        usado: number;
-        idUsuario?: number;
-      } = {
-        tipo: TipoCodigoAutenticacion.CONFIRMACION_CORREO,
-        usado: EstatusEnum.ACTIVO,
-      };
-
-      if (codigoPasajeroAutenticacion.userName) {
-        const dueño = await this.usuariosRepository.findOne({
-          where: { userName: codigoPasajeroAutenticacion.userName },
-        });
-        if (!dueño) {
-          throw new BadRequestException('Usuario no encontrado');
-        }
-        filtro.idUsuario = dueño.id;
-      } else {
-        this.loggerService.warn(
-          'AuthService',
-          'verify sin userName (modo compatible)',
-        );
-        if (SecurityFlags.verifyUserName()) {
-          throw new BadRequestException('El campo userName es obligatorio');
-        }
+      // El OTP va atado al usuario (HMAC con IdUsuario), así que sin userName
+      // no hay nada que comparar; ya no existe el modo "último OTP global".
+      if (!codigoPasajeroAutenticacion.userName) {
+        throw new BadRequestException('El campo userName es obligatorio');
       }
-
-      const registro = await this.codigoAutenticacioRepository.findOne({
-        where: filtro,
-        order: { id: 'DESC' },
+      const user = await this.usuariosRepository.findOne({
+        where: { userName: codigoPasajeroAutenticacion.userName },
       });
-
-      if (!registro) {
+      if (!user) {
         throw new BadRequestException('Código inválido o ya usado');
       }
 
-      if (new Date() > registro.fechaExpiracion) {
-        await this.codigoAutenticacioRepository.update(registro.id, {
-          usado: EstatusEnum.INACTIVO,
-          estatus: EstatusEnum.INACTIVO,
-        });
-        throw new BadRequestException('El código ha expirado');
-      }
-
-      if (
-        !(await this.otpMatches(
-          codigoPasajeroAutenticacion.codigo,
-          registro.codigo,
-        ))
-      ) {
-        const maxIntentos = Number(process.env.OTP_MAX_ATTEMPTS ?? 5);
-        const nuevosIntentos = (registro.intentos ?? 0) + 1;
-
-        if (nuevosIntentos >= maxIntentos) {
-          await this.codigoAutenticacioRepository.update(registro.id, {
-            intentos: nuevosIntentos,
-            usado: EstatusEnum.INACTIVO,
-            estatus: EstatusEnum.INACTIVO,
-          });
-          throw new BadRequestException(
-            'Demasiados intentos. Solicita un nuevo código.',
-          );
-        }
-
-        await this.codigoAutenticacioRepository.update(registro.id, {
-          intentos: nuevosIntentos,
-        });
-        throw new BadRequestException('Código inválido');
-      }
-
-      const user = await this.usuariosRepository.findOne({
-        where: { id: registro.idUsuario },
-      });
-      if (!user) throw new BadRequestException('Usuario no encontrado');
-
-      const fechaActual = this.formatFechaDesfasada();
+      const registro = await this.checkOtp(
+        Number(user.id),
+        TipoCodigoAutenticacion.CONFIRMACION_CORREO,
+        codigoPasajeroAutenticacion.codigo,
+      );
 
       await this.usuariosRepository.update(user.id, { emailConfirmado: 1 });
+      await this.consumeOtp(registro);
 
       const querylogger = { id: user.id, EmailConfirmado: 1 };
       await this.bitacoraLogger.logToBitacora(
@@ -1267,12 +1248,6 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         2,
         EstatusEnumBitcora.SUCCESS,
       );
-
-      await this.codigoAutenticacioRepository.update(registro.id, {
-        usado: EstatusEnum.INACTIVO,
-        estatus: EstatusEnum.INACTIVO,
-        fechaUso: fechaActual,
-      });
 
       return `La verificación del usuario ${user.nombre} se ha completado con éxito.
 Muchas gracias por su preferencia.`;
@@ -1287,6 +1262,10 @@ Muchas gracias por su preferencia.`;
     }
   }
 
+  /** Misma respuesta exista o no la cuenta, para no revelar usuarios. */
+  private static readonly RECUPERACION_ENVIADA =
+    'Si la cuenta existe, enviamos un correo con las instrucciones.';
+
   // ========================================
   //enviar correo para recuperar contraseña
   // ========================================
@@ -1294,19 +1273,17 @@ Muchas gracias por su preferencia.`;
     loginAuthConfirmacionDto: LoginAuthConfirmacionDto,
   ) {
     try {
-      //Buscamos el usuario por correo
       const user = await this.usuariosRepository.findOne({
         where: { userName: loginAuthConfirmacionDto.userName },
       });
-      if (!user) throw new BadRequestException('Usuario no encontrado');
+      if (!user) {
+        await this.burnPasswordTime(String(loginAuthConfirmacionDto.userName));
+        return AuthService.RECUPERACION_ENVIADA;
+      }
 
-      //Generamos el codigo
-      const _codigo = await this.generarCodigo(
-        user.id,
-        TipoCodigoAutenticacion.RECUPERACION_CONTRASENA,
-      );
-
-      const token = this.signPurposeToken(
+      // El correo solo lleva el enlace con el token PWD_RESET; ya no se genera
+      // un OTP de recuperación que nunca se enviaba y se podía forzar.
+      const token = await this.signPurposeToken(
         Number(user.id),
         user.userName,
         JwtTyp.PWD_RESET,
@@ -1318,7 +1295,7 @@ Muchas gracias por su preferencia.`;
         name,
         token,
       );
-      return `Se ha enviado un correo con el codigo.`;
+      return AuthService.RECUPERACION_ENVIADA;
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -1335,7 +1312,7 @@ Muchas gracias por su preferencia.`;
   // ========================================
   async generarCodigo(idUsuario: number, tipo: number): Promise<string> {
     const codigo = randomInt(100000, 1000000).toString();
-    const codigoHash = await bcrypt.hash(codigo, 10);
+    const codigoHash = hashOtp(idUsuario, tipo, codigo);
 
     const ahora = new Date();
     const expiracionMs = 15 * 60 * 1000;
@@ -1385,14 +1362,16 @@ Muchas gracias por su preferencia.`;
       const user = await this.usuariosRepository.findOne({
         where: { userName: loginAuthConfirmacionDto.userName },
       });
-      if (!user) throw new NotFoundException('Usuario no encontrado.');
+      if (!user || Number(user.emailConfirmado) === 1) {
+        return AuthService.RECUPERACION_ENVIADA;
+      }
 
       const codigo = await this.generarCodigo(
         user.id,
         TipoCodigoAutenticacion.CONFIRMACION_CORREO,
       );
 
-      const token = this.signPurposeToken(
+      const token = await this.signPurposeToken(
         Number(user.id),
         user.userName,
         JwtTyp.EMAIL_CONFIRM,
@@ -1405,7 +1384,7 @@ Muchas gracias por su preferencia.`;
         token,
         codigo,
       );
-      return `Se ha enviado un correo con el codigo de autenticación.`;
+      return AuthService.RECUPERACION_ENVIADA;
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -1425,29 +1404,39 @@ Muchas gracias por su preferencia.`;
     authorization?: string,
   ) {
     try {
-      this.assertPasswordChangeAuthorized(loginAuthResetDto, authorization);
-
       const user = await this.usuariosRepository.findOne({
         where: { userName: loginAuthResetDto.userName },
       });
-      if (!user) throw new BadRequestException('Usuario no encontrado');
+      if (!user) throw new UnauthorizedException('Token inválido o expirado');
+
+      await this.assertPasswordChangeAuthorized(
+        loginAuthResetDto,
+        authorization,
+        user,
+      );
 
       if (loginAuthResetDto.codigo) {
-        await this.consumeResetOtp(Number(user.id), loginAuthResetDto.codigo);
+        const registro = await this.checkOtp(
+          Number(user.id),
+          TipoCodigoAutenticacion.RECUPERACION_CONTRASENA,
+          loginAuthResetDto.codigo,
+        );
+        await this.consumeOtp(registro);
       }
 
-      const hashedPassword = await bcrypt.hash(loginAuthResetDto.password, 10); //encriptamos la contraseña
-      loginAuthResetDto.password = hashedPassword;
+      const hashedPassword = await bcrypt.hash(loginAuthResetDto.password, 10);
       await this.usuariosRepository.update(user.id, {
         passwordHash: hashedPassword,
+        intentosFallidos: 0,
+        bloqueadoHasta: null,
       });
+      // Invalida el token de reset usado, los access y los refresh vigentes.
       await this.bumpTokenVersion(Number(user.id));
-      //-----Registro en la bitacora----- SUCCESS
-      const querylogger = { id: user.id, EmailConfirmado: 1 };
+      const querylogger = { id: user.id };
       await this.bitacoraLogger.logToBitacora(
         'Usuarios',
         `Se actualizo la contraseña del usuarios con ID: ${user.id}`,
-        'CREATE',
+        'UPDATE',
         querylogger,
         Number(user.id),
         2,
@@ -1499,10 +1488,27 @@ Muchas gracias por su preferencia.`;
         throw new UnauthorizedException('Refresh token expirado');
       }
 
+      // Se reclama la sesión antes de emitir tokens: con el UPDATE condicionado
+      // solo una de dos peticiones simultáneas con el mismo refresh gana; antes
+      // las dos obtenían una sesión nueva.
+      const reclamo = await this.refreshSessionsRepository.update(
+        { id: session.id, tokenHash, revokedAt: IsNull() },
+        { revokedAt: new Date() },
+      );
+      if ((reclamo.affected ?? 0) !== 1) {
+        await this.refreshSessionsRepository.update(
+          { idUsuario: session.idUsuario, revokedAt: IsNull() },
+          { revokedAt: new Date() },
+        );
+        throw new UnauthorizedException(
+          'Refresh token ya utilizado. Sesiones revocadas por seguridad.',
+        );
+      }
+
       const user = await this.usuariosRepository.findOne({
         where: { id: session.idUsuario },
       });
-      if (!user || user.estatus !== 1) {
+      if (!user || Number(user.estatus) !== 1) {
         throw new UnauthorizedException('Usuario no válido');
       }
 
@@ -1526,7 +1532,6 @@ Muchas gracias por su preferencia.`;
         order: { id: 'DESC' },
       });
       await this.refreshSessionsRepository.update(session.id, {
-        revokedAt: new Date(),
         replacedById: nuevaSesion ? nuevaSesion.id : null,
       });
 

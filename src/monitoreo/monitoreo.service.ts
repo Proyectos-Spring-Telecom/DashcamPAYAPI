@@ -317,7 +317,7 @@ ORDER BY up.Id DESC;
       }
       const fechaDesfasada = nowDb();
       // Solo la fecha del momento
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())}`;
       const { NumeroSerieValidador } = recorridoMonitoreoDto;
 
       // Usar parámetros preparados para evitar SQL injection
@@ -620,7 +620,7 @@ ORDER BY v.Id ASC, p.FechaHora DESC;
         // Formatear fechaHora a formato HH:mm
         const fechaHora = item.fechaHora ? new Date(item.fechaHora) : null;
         const ultimoPing = fechaHora
-          ? `${String(fechaHora.getHours()).padStart(2, '0')}:${String(fechaHora.getMinutes()).padStart(2, '0')}`
+          ? `${String(fechaHora.getUTCHours()).padStart(2, '0')}:${String(fechaHora.getUTCMinutes()).padStart(2, '0')}`
           : null;
 
         // Determinar estado basado en turno, viaje y posición
@@ -847,7 +847,7 @@ LIMIT 1;
       // Formatear fechaHora a formato HH:mm
       const fechaHora = item.fechaHora ? new Date(item.fechaHora) : null;
       const ultimoPing = fechaHora
-        ? `${String(fechaHora.getHours()).padStart(2, '0')}:${String(fechaHora.getMinutes()).padStart(2, '0')}`
+        ? `${String(fechaHora.getUTCHours()).padStart(2, '0')}:${String(fechaHora.getUTCMinutes()).padStart(2, '0')}`
         : null;
 
       // Determinar estado basado en turno, viaje y posición

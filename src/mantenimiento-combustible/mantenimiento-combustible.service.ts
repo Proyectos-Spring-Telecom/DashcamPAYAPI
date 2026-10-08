@@ -1,3 +1,4 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import {
   clienteHijosDesdeSp,
   tieneIdsTenant,
@@ -509,6 +510,15 @@ AND mc.Id = ?
         mantenimiento.idInstalacion,
         cliente,
         rol,
+      );
+      // N-07: la FK padre nueva también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.mantenimientoCombustibleRepository.manager.connection,
+        { cliente, rol },
+        {
+          instalacion: updateMantenimientoCombustibleDto.idInstalacion,
+          operador: updateMantenimientoCombustibleDto.idOperador,
+        },
       );
 
       await this.mantenimientoCombustibleRepository.update(

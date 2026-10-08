@@ -78,7 +78,8 @@ export class UpdateUsuarioDto {
     description: 'Estatus del usuario (1=Activo, 0=Inactivo)',
     example: 1,
   })
-  estatus?: number = 1;
+  // Sin default: antes cada PUT reactivaba al usuario (H-02).
+  estatus?: number;
 
   @IsOptional()
   @IsInt()

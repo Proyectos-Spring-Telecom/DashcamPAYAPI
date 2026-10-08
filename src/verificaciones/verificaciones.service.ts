@@ -1,3 +1,4 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import {
   clienteHijosDesdeSp,
   tieneIdsTenant,
@@ -704,6 +705,12 @@ LIMIT 1
   ): Promise<ApiCrudResponse> {
     try {
       await this.assertVerificacionTenant(id, idCliente, rol);
+      // N-07: la FK padre nueva también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.verificacionesRepository.manager.connection,
+        { cliente: idCliente, rol },
+        { instalacion: updateVerificacionesDto.idInstalacion },
+      );
       const verificacion = await this.verificacionesRepository.findOne({
         where: { id: id },
       });

@@ -78,6 +78,35 @@ export class MonederosService {
         }
       }
 
+      // H-17: el pasajero debe existir, estar activo, ser del mismo cliente que
+      // el monedero y no tener ya otro monedero activo.
+      if (createMonederoDto.idPasajero != null) {
+        const [pas] = await this.dataSource.query(
+          `SELECT p.Id AS id, u.IdCliente AS idCliente
+             FROM Pasajeros p
+             LEFT JOIN Usuarios u ON u.Id = p.IdUsuario
+            WHERE p.Id = ? AND p.Estatus = 1`,
+          [Number(createMonederoDto.idPasajero)],
+        );
+        if (
+          !pas ||
+          Number(pas.idCliente) !== Number(createMonederoDto.idCliente)
+        ) {
+          throw new NotFoundException('Pasajero no encontrado');
+        }
+        const yaTiene = await this.monederoRepository.findOne({
+          where: {
+            idPasajero: Number(createMonederoDto.idPasajero),
+            estatus: EnumEstatusMonederos.ACTIVO,
+          },
+        });
+        if (yaTiene) {
+          throw new BadRequestException(
+            'El pasajero ya tiene un monedero activo.',
+          );
+        }
+      }
+
       // Validar que el numeroSerie no esté duplicado
       const monederoPorSerie = await this.monederoRepository.findOne({
         where: { numeroSerie: createMonederoDto.numeroSerie },
@@ -107,7 +136,7 @@ export class MonederosService {
 
       const fechaDesfasada = nowDb();
 
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())} ${pad(fechaDesfasada.getUTCHours())}:${pad(fechaDesfasada.getUTCMinutes())}:${pad(fechaDesfasada.getUTCSeconds())}`;
 
       //Añadimos fecha
       createMonederoDto.fechaActivacion = fechaActual;
@@ -1431,19 +1460,22 @@ ORDER BY m.Id DESC;
 
     const descontado = (result.affected ?? 0) > 0;
 
-    // --- Registro en la bitácora ---
+    // Bitácora fuera de la transacción del cobro: se escribe tras el COMMIT (R2).
     const querylogger = { numeroSerie, monto };
-    await this.bitacoraLogger.logToBitacora(
-      'Monederos',
-      descontado
-        ? `Descuento atómico de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`
-        : `Descuento atómico RECHAZADO (saldo insuficiente) de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`,
-      'UPDATE',
-      querylogger,
-      idUser,
-      EnumModulos.MONEDEROS,
-      descontado ? EstatusEnumBitcora.SUCCESS : EstatusEnumBitcora.ERROR,
-      descontado ? undefined : 'Saldo insuficiente',
+    this.bitacoraLogger.registrar(
+      [
+        'Monederos',
+        descontado
+          ? `Descuento atómico de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`
+          : `Descuento atómico RECHAZADO (saldo insuficiente) de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`,
+        'UPDATE',
+        querylogger,
+        idUser,
+        EnumModulos.MONEDEROS,
+        descontado ? EstatusEnumBitcora.SUCCESS : EstatusEnumBitcora.ERROR,
+        descontado ? undefined : 'Saldo insuficiente',
+      ],
+      manager,
     );
 
     return descontado;
@@ -1479,17 +1511,20 @@ ORDER BY m.Id DESC;
     const incrementado = (result.affected ?? 0) > 0;
 
     const querylogger = { numeroSerie, monto };
-    await this.bitacoraLogger.logToBitacora(
-      'Monederos',
-      incrementado
-        ? `Incremento atómico de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`
-        : `Incremento atómico RECHAZADO (monedero inactivo o inexistente) de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`,
-      'UPDATE',
-      querylogger,
-      idUser,
-      EnumModulos.MONEDEROS,
-      incrementado ? EstatusEnumBitcora.SUCCESS : EstatusEnumBitcora.ERROR,
-      incrementado ? undefined : 'Monedero no disponible',
+    this.bitacoraLogger.registrar(
+      [
+        'Monederos',
+        incrementado
+          ? `Incremento atómico de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`
+          : `Incremento atómico RECHAZADO (monedero inactivo o inexistente) de $${Number(monto).toFixed(2)} al monedero ${numeroSerie}.`,
+        'UPDATE',
+        querylogger,
+        idUser,
+        EnumModulos.MONEDEROS,
+        incrementado ? EstatusEnumBitcora.SUCCESS : EstatusEnumBitcora.ERROR,
+        incrementado ? undefined : 'Monedero no disponible',
+      ],
+      manager,
     );
 
     return incrementado;
@@ -1797,7 +1832,13 @@ ORDER BY m.Id DESC;
         ) {
           throw new NotFoundException('El monedero no fue encontrado.');
         }
-        if (!destino || destino.idPasajero != null) {
+        // N-03: el destino debe estar sin asignar y vacío; antes se le sumaba
+        // el saldo, así que un monedero con saldo "se recargaba" con el traspaso.
+        if (
+          !destino ||
+          destino.idPasajero != null ||
+          Number(destino.saldo || 0) !== 0
+        ) {
           throw new BadRequestException(
             'El monedero destino no está disponible.',
           );
@@ -1805,7 +1846,7 @@ ORDER BY m.Id DESC;
 
         const saldoLocked = Number(origen.saldo || 0);
         await repo.update(idDestino, {
-          saldo: Number(destino.saldo || 0) + saldoLocked,
+          saldo: saldoLocked,
           fechaActivacion: fechaDesfasada,
           idPasajero: origen.idPasajero,
           idCliente: origen.idCliente,

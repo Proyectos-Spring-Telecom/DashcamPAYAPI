@@ -5,11 +5,16 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Usuarios } from 'src/entities/Usuarios';
-import { isAccessTokenTyp } from './jwt-types';
-import {
-  isMissingTokenVersionColumn,
-  isTokenVersionAccepted,
-} from './token-version';
+import { JwtTyp, jwtAudience, jwtIssuer } from './jwt-types';
+import { isTokenVersionAccepted } from './token-version';
+
+export interface AuthUser {
+  userId: number;
+  email: string;
+  cliente: number | null;
+  rol: number;
+  idOperador?: number;
+}
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
@@ -22,33 +27,27 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       secretOrKey: configService.get<string>('JWT_SECRET'),
       algorithms: ['HS256'],
+      issuer: jwtIssuer(),
+      audience: jwtAudience(),
     });
   }
 
-  async validate(payload: any) {
-    if (!isAccessTokenTyp(payload?.typ)) {
+  /**
+   * Rol, cliente y estatus salen de la BD en cada petición, no del payload:
+   * un cambio de rol o una baja surten efecto de inmediato. Se devuelven como
+   * number porque IdRol/IdCliente son BIGINT y TypeORM los entrega como string,
+   * lo que hacía que todo `switch (rol) { case 1: … }` cayera en `default`.
+   */
+  async validate(payload: any): Promise<AuthUser> {
+    if (payload?.typ !== JwtTyp.ACCESS) {
       throw new UnauthorizedException('Token no válido para esta ruta');
     }
 
-    let user: Pick<Usuarios, 'id' | 'tokenVersion' | 'estatus'> | null;
-    try {
-      user = await this.usuariosRepository.findOne({
-        where: { id: payload.id },
-        select: ['id', 'tokenVersion', 'estatus'],
-      });
-    } catch (error) {
-      if (!isMissingTokenVersionColumn(error)) {
-        throw error;
-      }
-      user = await this.usuariosRepository.findOne({
-        where: { id: payload.id },
-        select: ['id', 'estatus'],
-      });
-      if (user) {
-        user.tokenVersion = 0;
-      }
-    }
-    if (!user || user.estatus !== 1) {
+    const user = await this.usuariosRepository.findOne({
+      where: { id: payload.id },
+      select: ['id', 'userName', 'tokenVersion', 'estatus', 'idRol', 'idCliente'],
+    });
+    if (!user || Number(user.estatus) !== 1) {
       throw new UnauthorizedException('Token no válido para esta ruta');
     }
 
@@ -57,11 +56,12 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     }
 
     return {
-      userId: payload.id,
-      email: payload.email,
-      cliente: payload.cliente,
-      rol: payload.rol,
-      idOperador: payload.idOperador,
+      userId: Number(user.id),
+      email: user.userName,
+      cliente: user.idCliente == null ? null : Number(user.idCliente),
+      rol: Number(user.idRol),
+      idOperador:
+        payload.idOperador == null ? undefined : Number(payload.idOperador),
     };
   }
 }

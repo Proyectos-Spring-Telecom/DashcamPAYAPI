@@ -64,6 +64,15 @@ export class TenantOwnershipGuard implements CanActivate {
     // Sin id en la ruta no hay objeto que validar aquí.
     if (id === undefined || id === null) return true;
 
+    // Formato antes de consultar: un id raro ("1 OR 1", "1e3", " 7") no debe
+    // llegar al resolver ni distinguirse de uno inexistente.
+    const formato = meta.resolver.endsWith('BySerie')
+      ? /^[A-Za-z0-9_-]{1,100}$/
+      : /^\d{1,19}$/;
+    if (!formato.test(String(id))) {
+      throw new NotFoundException('Recurso no encontrado.');
+    }
+
     const resolver = ownershipResolvers[meta.resolver];
     if (!resolver) {
       // Error de configuración: mejor fallar cerrado que dejar pasar.
