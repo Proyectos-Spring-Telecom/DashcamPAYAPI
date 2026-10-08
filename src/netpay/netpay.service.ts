@@ -104,9 +104,12 @@ export class NetpayService {
       );
     }
 
+    // Único cliente HTTP hacia NetPay (H-74): timeout y sin seguir redirecciones,
+    // para que una respuesta 3xx no reenvíe la llave privada a otro host.
     this.httpClient = axios.create({
       baseURL: this.baseUrl,
       timeout: 30000,
+      maxRedirects: 0,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -349,7 +352,7 @@ export class NetpayService {
 
       // Usar axios directamente con la URL completa
       // Incluir User-Agent header como en el curl de ejemplo
-      const response = await axios.post<NetpayPaymentResponse>(
+      const response = await this.httpClient.post<NetpayPaymentResponse>(
         paymentUrl,
         payload,
         {
@@ -474,7 +477,7 @@ export class NetpayService {
         hasPhone: !!payload.phone,
       });
 
-      const response = await axios.post<NetpayCustomerResponse>(
+      const response = await this.httpClient.post<NetpayCustomerResponse>(
         clientsUrl,
         payload,
         {
@@ -654,7 +657,7 @@ export class NetpayService {
         hasToken: !!assignCardDto.token,
       });
 
-      const response = await axios.put<NetpayCardResponse>(
+      const response = await this.httpClient.put<NetpayCardResponse>(
         assignCardUrl,
         payload,
         {
@@ -815,7 +818,7 @@ export class NetpayService {
       const clientUrl = `${this.netpayEcommerceBaseUrl}/v3/clients/${encodeURIComponent(String(clientIdParam))}`;
 
       // Usar axios directamente con la URL completa
-      const response = await axios.get<NetpayCustomerResponse>(clientUrl, {
+      const response = await this.httpClient.get<NetpayCustomerResponse>(clientUrl, {
         headers: this.getAuthHeaders(),
         timeout: 30000,
       });
@@ -942,7 +945,7 @@ export class NetpayService {
       const encodedTokenCard = encodeURIComponent(tokenCard);
       const deleteUrl = `${this.netpayEcommerceBaseUrl}/v3/clients/${encodedCustomerId}/token/${encodedTokenCard}`;
 
-      await axios.delete(deleteUrl, {
+      await this.httpClient.delete(deleteUrl, {
         headers: this.getAuthHeaders(),
         timeout: 30000,
       });
@@ -1126,7 +1129,7 @@ export class NetpayService {
 
       // Usar axios directamente con la URL completa
       // Incluir User-Agent header como en el curl de ejemplo
-      const response = await axios.post<NetpayPaymentResponse>(
+      const response = await this.httpClient.post<NetpayPaymentResponse>(
         paymentUrl,
         finalPayload,
         {
@@ -1164,7 +1167,7 @@ export class NetpayService {
       const confirmUrl = `${this.netpayEcommerceBaseUrl}/v3.5/charges/${encodeURIComponent(confirm3DSDto.transaccionTokenId)}/confirm?processorTransactionId=${encodeURIComponent(confirm3DSDto.processorTransactionId)}`;
 
       // Usar axios directamente con la URL completa
-      const response = await axios.post<NetpayPaymentResponse>(
+      const response = await this.httpClient.post<NetpayPaymentResponse>(
         confirmUrl,
         {}, // Body vacío según el curl proporcionado
         {
@@ -1195,7 +1198,7 @@ export class NetpayService {
       const transactionUrl = `${this.netpayEcommerceBaseUrl}/v3/transactions/${encodeURIComponent(transactionTokenId)}`;
 
       // Usar axios directamente con la URL completa
-      const response = await axios.get<NetpayTransactionDetailResponse>(
+      const response = await this.httpClient.get<NetpayTransactionDetailResponse>(
         transactionUrl,
         {
           headers: this.getAuthHeaders(false), // No incluir User-Agent para este endpoint
@@ -1246,7 +1249,7 @@ export class NetpayService {
 
       // Usar axios directamente con la URL completa
       // Usar headers especiales para reports (X-Netpay-Apikey)
-      const response = await axios.put<NetpayTransactionDetailResponse>(
+      const response = await this.httpClient.put<NetpayTransactionDetailResponse>(
         refundUrl,
         payload,
         {
@@ -1271,6 +1274,23 @@ export class NetpayService {
     } catch (error) {
       this.handleError(error, 'cancelOrRefund');
     }
+  }
+
+  /**
+   * Reembolso de compensación del sistema (R3): NetPay cobró pero la recarga no
+   * se pudo guardar. Lo dispara la API, no un usuario, así que no pasa por el
+   * chequeo de actor; y no hay saldo que revertir porque nunca se acreditó.
+   * Los errores se propagan para que el llamador deje la recarga por conciliar.
+   */
+  async reembolsarCompensacion(tokenId: string): Promise<void> {
+    const reportsBaseUrl = this.isProduction
+      ? 'https://gateway.netpay-api.com/reports'
+      : 'https://gateway.netpay-api.com/reports-sandbox';
+    await this.httpClient.put(
+      `${reportsBaseUrl}/v2/transactions/${encodeURIComponent(tokenId)}/refund`,
+      { motive: 'Compensación: la recarga no se pudo registrar' },
+      { headers: this.getReportsAuthHeaders(), timeout: 30000 },
+    );
   }
 
   private async assertRefundPending(

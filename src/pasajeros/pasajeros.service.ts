@@ -14,7 +14,7 @@ import { CreatePasajeroDto } from './dto/create-pasajero.dto';
 import { UpdatePasajeroDto } from './dto/update-pasajero.dto';
 import { UpdatePasajeroEstatusDto } from './dto/update-pasajeros-estatus.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { Pasajeros } from 'src/entities/Pasajeros';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import {
@@ -26,6 +26,7 @@ import { Clientes } from 'src/entities/Clientes';
 import { CreatePasajeroAfiliacionDto } from './dto/create-pasajero-afiliacion.dto';
 import * as bcrypt from 'bcrypt';
 import { Usuarios } from 'src/entities/Usuarios';
+import { RefreshSessions } from 'src/entities/RefreshSessions';
 import { UsuariosPermisos } from 'src/entities/UsuariosPermisos';
 import {
   EnumModulos,
@@ -354,7 +355,7 @@ export class PasajerosService {
 
       const fechaDesfasada = nowDb();
 
-      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())} ${pad(fechaDesfasada.getUTCHours())}:${pad(fechaDesfasada.getUTCMinutes())}:${pad(fechaDesfasada.getUTCSeconds())}`;
 
       // Validar que monederos existe
       if (!monederos) {
@@ -818,41 +819,49 @@ ORDER BY p.Id DESC;
   // ========================================
   async findOnePasajero(id: number, cliente = 0, rol = 1) {
     try {
-      if (Number(rol) === 1) {
-        const pasajeroExistente = await this.pasajeroRepository.findOne({
-          where: { id: id },
-        });
-        if (!pasajeroExistente) {
+      // Ambos caminos devuelven la entidad (camelCase): antes el de tenant
+      // hacía SELECT p.* y el formulario de edición recibía PascalCase vacío.
+      let idsTenant: number[] | null = null;
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
           throw new NotFoundException(
             `No se encontró un pasajero con ID: ${id}.`,
           );
         }
-        return { data: pasajeroExistente };
+        idsTenant = ids;
       }
 
-      const { ids, placeholders } = await this.clienteHijos(cliente);
-      if (!tieneIdsTenant(ids)) {
+      const pasajeroExistente = await this.pasajeroRepository.findOne({
+        where: { id: id },
+      });
+      if (!pasajeroExistente) {
         throw new NotFoundException(
           `No se encontró un pasajero con ID: ${id}.`,
         );
       }
 
-      const rows = await this.pasajeroRepository.query(
-        `
-SELECT p.*
-FROM Pasajeros p
-INNER JOIN Monederos m ON m.IdPasajero = p.Id
-WHERE p.Id = ? AND m.IdCliente IN (${placeholders})
-LIMIT 1
-        `,
-        [id, ...ids],
-      );
-      if (!rows?.length) {
+      const monederos = await this.monederosRepository.find({
+        where: {
+          idPasajero: id,
+          ...(idsTenant ? { idCliente: In(idsTenant) } : {}),
+        },
+        order: { id: 'ASC' },
+        take: 1,
+      });
+      if (idsTenant && !monederos.length) {
         throw new NotFoundException(
           `No se encontró un pasajero con ID: ${id}.`,
         );
       }
-      return { data: rows[0] };
+      const monedero = monederos[0];
+      return {
+        data: {
+          ...pasajeroExistente,
+          numeroSerieMonedero: monedero?.numeroSerie ?? null,
+          idTipoPasajero: monedero?.idTipoPasajero ?? null,
+        },
+      };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -1165,7 +1174,27 @@ LIMIT 1
         );
       }
       const { estatus } = updatePasajeroEstatusDto;
-      await this.pasajeroRepository.update(id, { estatus });
+      // Desactivar al pasajero desactiva también su usuario y corta sus
+      // sesiones; los cobros se rechazan en el débito (Pasajeros.Estatus).
+      // Los monederos no se tocan: Estatus 0 en Monederos significa "sin asignar".
+      await this.pasajeroRepository.manager.transaction(async (manager) => {
+        await manager.update(Pasajeros, id, { estatus });
+        if (pasajero.idUsuario) {
+          const idUsuario = Number(pasajero.idUsuario);
+          await manager.update(Usuarios, idUsuario, { estatus });
+          await manager.increment(
+            Usuarios,
+            { id: idUsuario },
+            'tokenVersion',
+            1,
+          );
+          await manager.update(
+            RefreshSessions,
+            { idUsuario, revokedAt: IsNull() },
+            { revokedAt: new Date() },
+          );
+        }
+      });
 
       //-----Registro en la bitacora----- SUCCESS
       const querylogger = { updatePasajeroEstatusDto };

@@ -5,8 +5,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = path.join(root, 'src');
 
 const ALLOW = new Set([
@@ -95,6 +96,14 @@ for (const file of walk(src)) {
   while ((call = queryArg.exec(text))) used.add(call[1]);
 
   for (const lit of templatesOf(text)) {
+    // mysql2 cuenta cualquier ? como placeholder, también dentro de comentarios SQL.
+    if (/\b(SELECT|UPDATE|DELETE|INSERT|WHERE)\b/i.test(lit.expr)) {
+      const comments = lit.expr.match(/--[^\n]*|\/\*[\s\S]*?\*\//g) || [];
+      if (comments.some((c) => c.includes('?'))) {
+        const line = text.slice(0, lit.index).split('\n').length;
+        failures.push(`${rel}:${line} ? dentro de un comentario SQL`);
+      }
+    }
     if (!lit.expr.includes('${')) continue;
     const direct = text.slice(Math.max(0, lit.index - 20), lit.index).includes('.query(');
     const before = text.slice(Math.max(0, lit.index - 80), lit.index);

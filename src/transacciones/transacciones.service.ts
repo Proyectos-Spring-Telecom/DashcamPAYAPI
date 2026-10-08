@@ -1,6 +1,7 @@
 import { formatFechaDb, nowDb } from 'src/common/clock';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   Injectable,
@@ -68,6 +69,7 @@ import { QRCodes } from 'src/entities/QRCodes';
 import { GetTransaccioneDto } from './dto/get-transacciones.dto';
 import { GetHistoricoRecargasDto } from './dto/get-historico-recargas.dto';
 import haversine from 'haversine-distance';
+import { KeyedMutex } from 'src/common/keyed-mutex';
 
 class IdempotenciaDuplicadaError extends Error {
   constructor(public readonly clave: string) {
@@ -81,6 +83,13 @@ class SaldoInsuficienteTxError extends Error {
     super('SALDO_INSUFICIENTE_TX');
     this.name = 'SaldoInsuficienteTxError';
   }
+}
+
+/** Reserva de claveIdempotencia de una recarga (tabla ReservasRecarga). */
+interface ReservaRecarga {
+  clave: string;
+  estado: 'EN_PROCESO' | 'PENDIENTE_CONCILIAR';
+  tokenId?: string;
 }
 
 @Injectable()
@@ -238,7 +247,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
             {
               monto: parseFloat(cargo.toFixed(2)),
               controlTransaccion: EnumControlTransacciones.PAGADO,
-              fechaHoraFinal: formatFechaDb(),
+              fechaHoraFinal: nowDb(),
             },
           );
           if (!cierre.affected) {
@@ -903,12 +912,117 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
     return distanciaAcumulada;
   }
 
-  //Funcion para transaccion Recarga
+  // ========================================
+  // Recarga con la claveIdempotencia reservada antes de cobrar (R3 / V2-15)
+  // ========================================
   async createTransaccionRecarga(
     createTransaccioneRecargaDto: CreateTransaccioneRecargaDto,
     idUser: number,
     rol = 0,
     cliente = 0,
+  ): Promise<ApiCrudResponse> {
+    const clave = createTransaccioneRecargaDto.claveIdempotencia?.trim() || null;
+    if (!clave) {
+      return this.procesarRecarga(createTransaccioneRecargaDto, idUser, rol, cliente, null);
+    }
+
+    const previa = await this.recargaPorClave(clave, createTransaccioneRecargaDto);
+    if (previa) return previa;
+
+    // INSERT IGNORE sobre la PK: solo una petición con esta clave llega a NetPay.
+    const insert: { affectedRows?: number } =
+      await this.transaccionesrecargaRepository.query(
+        `INSERT IGNORE INTO ReservasRecarga
+           (ClaveIdempotencia, NumeroSerieMonedero, Monto, IdUsuario, Estado)
+         VALUES (?, ?, ?, ?, 'EN_PROCESO')`,
+        [
+          clave,
+          createTransaccioneRecargaDto.numeroSerieMonedero,
+          Number(createTransaccioneRecargaDto.monto),
+          idUser,
+        ],
+      );
+    if (Number(insert?.affectedRows ?? 0) !== 1) {
+      const ganadora = await this.recargaPorClave(clave, createTransaccioneRecargaDto);
+      if (ganadora) return ganadora;
+      throw new ConflictException(
+        'Ya hay una recarga en proceso con esa claveIdempotencia.',
+      );
+    }
+
+    const reserva: ReservaRecarga = { clave, estado: 'EN_PROCESO' };
+    try {
+      const result = await this.procesarRecarga(
+        createTransaccioneRecargaDto,
+        idUser,
+        rol,
+        cliente,
+        reserva,
+      );
+      await this.transaccionesrecargaRepository.query(
+        `UPDATE ReservasRecarga SET Estado = 'COMPLETADA', IdTransaccionRecarga = ?
+          WHERE ClaveIdempotencia = ?`,
+        [Number(result.data?.id) || null, clave],
+      );
+      return result;
+    } catch (error) {
+      if (reserva.estado === 'PENDIENTE_CONCILIAR') {
+        // NetPay cobró, no hubo recarga ni reembolso: la clave queda tomada
+        // para que un reintento no cobre otra vez, y la fila queda por conciliar.
+        await this.transaccionesrecargaRepository.query(
+          `UPDATE ReservasRecarga SET Estado = 'PENDIENTE_CONCILIAR', TransactionTokenIdNetPay = ?
+            WHERE ClaveIdempotencia = ?`,
+          [reserva.tokenId ?? null, clave],
+        );
+      } else {
+        // No se cobró, o se cobró y se reembolsó: el cliente puede reintentar.
+        await this.transaccionesrecargaRepository.query(
+          'DELETE FROM ReservasRecarga WHERE ClaveIdempotencia = ? AND Estado = ?',
+          [clave, 'EN_PROCESO'],
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Respuesta idempotente si la clave ya produjo una recarga. Una clave usada
+   * para otro monedero u otro monto es un error del cliente, no un reintento:
+   * antes se devolvía la recarga ajena como si fuera la propia (V2-15).
+   */
+  private async recargaPorClave(
+    clave: string,
+    dto: CreateTransaccioneRecargaDto,
+  ): Promise<ApiCrudResponse | null> {
+    const previa = await this.transaccionesrecargaRepository.findOne({
+      where: { claveIdempotencia: clave },
+      order: { id: 'ASC' },
+    });
+    if (!previa) return null;
+    if (
+      previa.numeroSerieMonedero !== dto.numeroSerieMonedero ||
+      Number(previa.monto) !== Number(dto.monto)
+    ) {
+      throw new ConflictException(
+        'La claveIdempotencia ya se usó para otra recarga.',
+      );
+    }
+    return {
+      status: 'success',
+      message: 'Transacción ya procesada (idempotencia)',
+      data: {
+        id: Number(previa.id),
+        nombre: previa.numeroSerieMonedero || '',
+      },
+    };
+  }
+
+  private async procesarRecarga(
+    createTransaccioneRecargaDto: CreateTransaccioneRecargaDto,
+    idUser: number,
+    rol: number,
+    cliente: number,
+    reserva: ReservaRecarga | null,
   ): Promise<ApiCrudResponse> {
     try {
       // Validar que idMetodoPago sea obligatorio
@@ -936,6 +1050,13 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           EnumMetodoPago.EFECTIVO ||
         createTransaccioneRecargaDto.idMetodoPago ===
           EnumMetodoPago.TRANSFERENCIA;
+      // Regla de negocio: la tarjeta solo la usa el pasajero desde su propia
+      // sesión; caja, administración y operadores recargan en efectivo.
+      if (!esEfectivoOTransferencia && Number(rol) !== 9) {
+        throw new ForbiddenException(
+          'Las recargas con tarjeta solo las hace el pasajero desde su sesión.',
+        );
+      }
       if (esEfectivoOTransferencia && Number(rol) === 9) {
         throw new ForbiddenException(
           'El rol de pasajero no puede recargar en efectivo.',
@@ -958,23 +1079,12 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           'El campo claveIdempotencia es obligatorio',
         );
       }
-      if (claveIdempotencia) {
-        const recargaPrevia = await this.transaccionesrecargaRepository.findOne(
-          {
-            where: { claveIdempotencia },
-            order: { id: 'ASC' },
-          },
+      if (claveIdempotencia && !reserva) {
+        const previa = await this.recargaPorClave(
+          claveIdempotencia,
+          createTransaccioneRecargaDto,
         );
-        if (recargaPrevia) {
-          return {
-            status: 'success',
-            message: 'Transacción ya procesada (idempotencia)',
-            data: {
-              id: Number(recargaPrevia.id),
-              nombre: recargaPrevia.numeroSerieMonedero || '',
-            },
-          };
-        }
+        if (previa) return previa;
       }
 
       const monedero = await this.monederosService.findOneMonederoBySerie(
@@ -1173,20 +1283,42 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         const tokenId = pagoNetpayResponse?.transactionTokenId;
         if (tokenId) {
           try {
-            await this.netpayService.cancelOrRefund({ tokenId });
-          } catch {
-            await this.bitacoraLogger.logToBitacora(
+            // Llamada de sistema: cancelOrRefund exige actor y lanzaba Forbidden (R3).
+            await this.netpayService.reembolsarCompensacion(tokenId);
+          } catch (refundError) {
+            this.logger.error(
+              `Cobro NetPay ${tokenId} sin recarga ni reembolso: queda PENDIENTE_CONCILIAR (${(refundError as Error)?.message})`,
+            );
+            if (reserva) {
+              reserva.estado = 'PENDIENTE_CONCILIAR';
+              reserva.tokenId = tokenId;
+            } else {
+              await this.transaccionesrecargaRepository.query(
+                `INSERT INTO ReservasRecarga
+                   (ClaveIdempotencia, NumeroSerieMonedero, Monto, IdUsuario, Estado, TransactionTokenIdNetPay)
+                 VALUES (?, ?, ?, ?, 'PENDIENTE_CONCILIAR', ?)`,
+                [
+                  `sin-clave:${tokenId}`.slice(0, 100),
+                  createTransaccioneRecargaDto.numeroSerieMonedero,
+                  Number(createTransaccioneRecargaDto.monto),
+                  idUser,
+                  tokenId,
+                ],
+              );
+            }
+            this.bitacoraLogger.registrar([
               'Transacciones',
-              'Compensación NetPay fallida tras error al persistir recarga',
+              'Compensación NetPay fallida tras error al persistir recarga: PENDIENTE_CONCILIAR',
               'CREATE',
               {
                 numeroSerieMonedero:
                   createTransaccioneRecargaDto.numeroSerieMonedero,
+                transactionTokenIdNetPay: tokenId,
               },
               idUser,
               EnumModulos.TRANSACCIONES,
               EstatusEnumBitcora.ERROR,
-            );
+            ]);
           }
         }
         throw commitError;
@@ -1220,7 +1352,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       };
       return result;
     } catch (error) {
-      // --- Registro en la bit?cora --- ERROR
+      // --- Registro en la bitácora --- ERROR
       const querylogger = {
         numeroSerieMonedero: createTransaccioneRecargaDto.numeroSerieMonedero,
         idMetodoPago: createTransaccioneRecargaDto.idMetodoPago,
@@ -1245,7 +1377,52 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Respuesta idempotente de un débito. Si la clave pertenece a otro monedero
+   * es 409: antes se devolvía la transacción ajena como propia (V2-15).
+   */
+  private async debitoPorClave(
+    clave: string,
+    numeroSerieMonedero: string,
+  ): Promise<ApiCrudResponse | null> {
+    const previa = await this.transaccionesdebitoRepository.findOne({
+      where: { claveIdempotencia: clave },
+      order: { id: 'ASC' },
+    });
+    if (!previa) return null;
+    if (previa.numeroSerieMonedero !== numeroSerieMonedero) {
+      throw new ConflictException(
+        'La claveIdempotencia ya se usó para otro monedero.',
+      );
+    }
+    return {
+      status: 'success',
+      message: 'Transacción ya procesada (idempotencia)',
+      data: {
+        id: Number(previa.id),
+        nombre: previa.numeroSerieMonedero || '',
+      },
+    };
+  }
+
+  private readonly lockMonedero = new KeyedMutex();
+
+  /** Un débito a la vez por monedero (H-08): dos lecturas de la misma tarjeta no se cruzan. */
   async createTransaccionDebitoPrueba(
+    createTransaccioneDebitoDto: CreateTransaccioneDebitoDto,
+    idUser: number,
+    cliente: number,
+  ): Promise<ApiCrudResponse> {
+    const llave =
+      createTransaccioneDebitoDto.esQR === true
+        ? `serie:${createTransaccioneDebitoDto.numeroSerieMonedero ?? ''}`
+        : `card:${createTransaccioneDebitoDto.idCard ?? ''}`;
+    return this.lockMonedero.run(llave, () =>
+      this.procesarDebito(createTransaccioneDebitoDto, idUser, cliente),
+    );
+  }
+
+  private async procesarDebito(
     createTransaccioneDebitoDto: CreateTransaccioneDebitoDto,
     idUser: number,
     cliente: number,
@@ -1266,25 +1443,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           'El campo claveIdempotencia es obligatorio',
         );
       }
-      if (claveIdempotencia) {
-        const transaccionPrevia =
-          await this.transaccionesdebitoRepository.findOne({
-            where: { claveIdempotencia },
-            order: { id: 'ASC' },
-          });
-
-        if (transaccionPrevia) {
-          return {
-            status: 'success',
-            message: 'Transacción ya procesada (idempotencia)',
-            data: {
-              id: Number(transaccionPrevia.id),
-              nombre: transaccionPrevia.numeroSerieMonedero || '',
-            },
-          };
-        }
-      }
-
       // 2?? Buscamos el monedero
       let monedero;
       if (createTransaccioneDebitoDto.esQR === true) {
@@ -1309,6 +1467,18 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         throw new BadRequestException('Monedero no encontrado');
       }
       await this.assertMonederoEnTenant(Number(monedero.idCliente), cliente);
+      // Pasajero desactivado: no se cobra (el monedero sigue en Estatus 1
+      // porque ahí 0 significa "sin asignar").
+      if (monedero.idPasajero) {
+        const pasajero = await this.pasajeroRepository.findOne({
+          where: { id: monedero.idPasajero },
+          select: { id: true, estatus: true },
+        });
+        if (pasajero && Number(pasajero.estatus) !== 1) {
+          estado = EstadoTransaccion.ERROR;
+          throw new BadRequestException('Pasajero desactivado');
+        }
+      }
       if (createTransaccioneDebitoDto.numeroSerieValidador) {
         const validador = await this.validadorRepository.findOne({
           where: {
@@ -1323,6 +1493,15 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           throw new BadRequestException('Monedero no encontrado');
         }
         await this.assertMonederoEnTenant(Number(validador.idCliente), cliente);
+      }
+
+      // Idempotencia ya con el monedero resuelto, para comparar contra él (V2-15).
+      if (claveIdempotencia) {
+        const previa = await this.debitoPorClave(
+          claveIdempotencia,
+          monedero.numeroSerie,
+        );
+        if (previa) return previa;
       }
 
       // ===== NUEVA LÓGICA: Detectar y cerrar transacciones abiertas con esMultiple = true =====
@@ -1373,7 +1552,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
 
               if (varianteUpdate) {
                 const tarifa = await this.tarifasRepository.findOne({
-                  where: { idVariante: viaje.idVariante },
+                  where: { idVariante: viaje.idVariante, estatus: 1 },
                 });
 
                 if (tarifa) {
@@ -1570,11 +1749,8 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
 
             // Cierre + descuento en la misma TX: si otra petición ya cerró
             // (affected=0) se revierte el descuento al hacer rollback.
-            const fechaDesfasada = nowDb();
-            const fechaHoraFinal = fechaDesfasada
-              .toISOString()
-              .slice(0, 19)
-              .replace('T', ' ');
+            // Date, no texto: un string se reinterpreta con la zona del equipo.
+            const fechaHoraFinal = nowDb();
 
             try {
               await this.dataSource.transaction(async (manager) => {
@@ -1696,6 +1872,10 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
             `El viaje con ID ${createTransaccioneDebitoDto.idViaje} no existe`,
           );
         }
+        // No se cobra en un viaje cerrado (al cerrarse queda con Fin y Estatus 0).
+        if (viaje.fin || Number(viaje.estatus) !== 1) {
+          throw new BadRequestException('El viaje está cerrado');
+        }
 
         // Guardar la variante para calcular la distancia
         // Asegurarnos de obtener la variante completa con todos sus campos
@@ -1733,7 +1913,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
 
         // Obtener la tarifa de la variante
         const tarifa = await this.tarifasRepository.findOne({
-          where: { idVariante: viaje.idVariante },
+          where: { idVariante: viaje.idVariante, estatus: 1 },
         });
 
         // Construir el objeto con la misma estructura que el query anterior
@@ -1776,17 +1956,19 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
             ta.TipoTarifa,
             ta.CostoPorEstacion,
             ta.CantidadEstacionesBase
-          FROM DashCamDev.Instalaciones i
-          JOIN DashCamDev.Validadores v ON i.IdValidador = v.Id
-          JOIN DashCamDev.Turnos t ON t.IdInstalacion = i.Id
-          JOIN DashCamDev.Viajes vi ON vi.IdTurno = t.Id
-          JOIN DashCamDev.Variantes va ON va.Id = vi.IdVariante
-          JOIN DashCamDev.Tarifas ta ON ta.IdVariante = va.Id
+          FROM Instalaciones i
+          JOIN Validadores v ON i.IdValidador = v.Id
+          JOIN Turnos t ON t.IdInstalacion = i.Id
+          JOIN Viajes vi ON vi.IdTurno = t.Id
+          JOIN Variantes va ON va.Id = vi.IdVariante
+          JOIN Tarifas ta ON ta.IdVariante = va.Id AND ta.Estatus = 1
           WHERE v.NumeroSerie = ?
             AND DATE(vi.Inicio) = CURDATE()
             AND vi.Inicio <= NOW()
             AND t.Estatus = 1
             AND vi.EstadoActual = 1
+            AND vi.Estatus = 1
+            AND vi.Fin IS NULL
           LIMIT 1
           `,
           [createTransaccioneDebitoDto.numeroSerieValidador],
@@ -1811,7 +1993,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         !infoValidadorViaje[0].TipoTarifa
       ) {
         throw new BadRequestException(
-          'No se pudo obtener la informaci?n de tarifa del viaje',
+          'La variante del viaje no tiene una tarifa activa',
         );
       }
 
@@ -1823,380 +2005,85 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
 
       const esTarifaPorEstaciones = tipoTarifa === EnumTipoTarifa.ESTACIONES;
 
-      // ===== NUEVA LÓGICA: Manejo de tarifas ABIERTAS con monedero físico (esQR = false) =====
-      // Si la tarifa es ABIERTA y el pago es con monedero físico (esQR = false)
-      if (
-        tipoTarifa === EnumTipoTarifa.ABIERTA &&
-        !createTransaccioneDebitoDto.esQR
-      ) {
+      // D-15: con tarifa abierta o por estaciones el pasajero valida al subir y
+      // al bajar, con tarjeta o con QR. Si tiene viajes abiertos (no múltiples),
+      // esta validación los cierra en este punto. Si alguno es del mismo viaje
+      // (mismo camión) es la bajada: se cobra y no se abre otro. Si es de otro
+      // viaje, olvidó validar al bajar: se cierra y se abre el nuevo.
+      const abiertasIndividuales =
+        await this.transaccionesdebitoRepository.find({
+          where: {
+            numeroSerieMonedero: monedero.numeroSerie,
+            controlTransaccion: EnumControlTransacciones.ABIERTA,
+            esMultiple: 0,
+            latitudFinal: IsNull(),
+            longitudFinal: IsNull(),
+          },
+          order: { id: 'ASC' },
+        });
+      if (abiertasIndividuales.length > 0) {
+        const fechaHoraActual = nowDb();
+        const ultima = abiertasIndividuales[abiertasIndividuales.length - 1];
+        const inicioUltima = new Date(
+          ultima.fechaHoraInicio ?? ultima.fhRegistro,
+        );
+        const minutos =
+          (fechaHoraActual.getTime() - inicioUltima.getTime()) / 60000;
+        const mismoViaje = (t: TransaccionesDebito) =>
+          idViaje !== null && Number(t.idViaje) === idViaje;
 
-        // Buscar la última transacción abierta con esQR = 0 (false) para este monedero
-        const ultimaTransaccionAbiertaFisica =
-          await this.transaccionesdebitoRepository.findOne({
-            where: {
-              numeroSerieMonedero: monedero.numeroSerie,
-              controlTransaccion: EnumControlTransacciones.ABIERTA,
-              esQR: 0, // esQR = false (monedero físico)
-              latitudFinal: IsNull(),
-              longitudFinal: IsNull(),
+        // Validación repetida al subir (menos de 1 minuto, mismo viaje): no se cobra ni se abre otro.
+        if (mismoViaje(ultima) && minutos < 1) {
+          return {
+            status: 'success',
+            message: 'Viaje ya iniciado',
+            data: {
+              id: Number(ultima.id),
+              cantidadPasajes: 1,
+              nombre: monedero?.numeroSerie || '',
             },
-            order: {
-              id: 'DESC', // Más reciente primero
-            },
-          });
+          };
+        }
 
-        if (ultimaTransaccionAbiertaFisica) {
-          // Calcular el tiempo transcurrido desde fechaHoraInicio
-          const fechaHoraActual = nowDb();
-
-          const fechaHoraInicioTransaccion =
-            ultimaTransaccionAbiertaFisica.fechaHoraInicio
-              ? new Date(ultimaTransaccionAbiertaFisica.fechaHoraInicio)
-              : new Date(ultimaTransaccionAbiertaFisica.fhRegistro);
-
-          const tiempoTranscurridoMs =
-            fechaHoraActual.getTime() - fechaHoraInicioTransaccion.getTime();
-          const tiempoTranscurridoMinutos = tiempoTranscurridoMs / (1000 * 60); // Convertir a minutos
-
-
-          // Si ya pasó más de 1 minuto, cerrar todas las transacciones abiertas con esQR = false
-          if (tiempoTranscurridoMinutos >= 1) {
-
-            // Buscar TODAS las transacciones abiertas con esQR = 0 (false) para este monedero
-            const todasTransaccionesAbiertasFisicas =
-              await this.transaccionesdebitoRepository.find({
-                where: {
-                  numeroSerieMonedero: monedero.numeroSerie,
-                  controlTransaccion: EnumControlTransacciones.ABIERTA,
-                  esQR: 0, // esQR = false (monedero físico)
-                  latitudFinal: IsNull(),
-                  longitudFinal: IsNull(),
-                },
-                order: {
-                  id: 'ASC', // Ordenar por ID ascendente para procesar consecutivamente
-                },
-              });
-
-            if (
-              todasTransaccionesAbiertasFisicas &&
-              todasTransaccionesAbiertasFisicas.length > 0
-            ) {
-
-              // Usar las coordenadas iniciales de la nueva transacción como coordenadas finales
-              const latitudFinal = createTransaccioneDebitoDto.latitud;
-              const longitudFinal = createTransaccioneDebitoDto.longitud;
-
-              // Procesar cada transacción abierta
-              for (const transaccionAbiertaFisica of todasTransaccionesAbiertasFisicas) {
-
-                // Obtener variante y tarifa de la transacción existente usando idViaje
-                let varianteUpdate: Variantes | null = null;
-                let tarifaInfoUpdate: any = null;
-
-                if (transaccionAbiertaFisica.idViaje) {
-                  const viaje = await this.viajesRepository.findOne({
-                    where: { id: transaccionAbiertaFisica.idViaje },
-                    relations: ['idVariante2'],
-                  });
-
-                  if (viaje && viaje.idVariante) {
-                    varianteUpdate = await this.variantesRepository.findOne({
-                      where: { id: viaje.idVariante },
-                    });
-
-                    if (varianteUpdate) {
-                      const tarifa = await this.tarifasRepository.findOne({
-                        where: { idVariante: viaje.idVariante },
-                      });
-
-                      if (tarifa) {
-                        tarifaInfoUpdate = {
-                          TarifaBase: tarifa.tarifaBase,
-                          CostoAdicional: tarifa.costoAdicional,
-                          DistanciaBaseKm: tarifa.distanciaBaseKm,
-                          IncrementoCadaMetros: tarifa.incrementoCadaMetros,
-                          TipoTarifa: tarifa.tipoTarifa,
-                          CostoPorEstacion: tarifa.costoPorEstacion,
-                          CantidadEstacionesBase: tarifa.cantidadEstacionesBase,
-                        };
-                      }
-                    }
-                  }
-                }
-
-                // Calcular distancia desde punto inicial hasta punto final usando haversine
-                if (
-                  transaccionAbiertaFisica.latitudInicial &&
-                  transaccionAbiertaFisica.longitudInicial
-                ) {
-                  const puntoInicial = {
-                    latitude: transaccionAbiertaFisica.latitudInicial,
-                    longitude: transaccionAbiertaFisica.longitudInicial,
-                  };
-                  const puntoFinal = {
-                    latitude: latitudFinal,
-                    longitude: longitudFinal,
-                  };
-
-                  // Calcular distancia en metros usando haversine
-                  const distanciaMetros = haversine(puntoInicial, puntoFinal);
-                  const distanciaKm = distanciaMetros / 1000; // Convertir a kilómetros
-
-                  // Calcular monto basado en la distancia
-                  const tarifaBaseUpdate =
-                    Number(transaccionAbiertaFisica.monto) ||
-                    Number(tarifaInfoUpdate?.TarifaBase) ||
-                    0;
-                  let montoCalculado = tarifaBaseUpdate;
-
-                  // Tarifa por estaciones (TipoTarifa=3): calcular por número de estaciones recorridas
-                  if (
-                    tarifaInfoUpdate &&
-                    Number(tarifaInfoUpdate.TipoTarifa) ===
-                      EnumTipoTarifa.ESTACIONES
-                  ) {
-                    const estaciones =
-                      this.obtenerEstacionesDeVariante(varianteUpdate);
-                    const idxInicio = this.encontrarIndiceEstacionMasCercana(
-                      estaciones,
-                      Number(transaccionAbiertaFisica.latitudInicial),
-                      Number(transaccionAbiertaFisica.longitudInicial),
-                    );
-                    const idxFin = this.encontrarIndiceEstacionMasCercana(
-                      estaciones,
-                      Number(latitudFinal),
-                      Number(longitudFinal),
-                    );
-
-                    const costoPorEstacion = tarifaInfoUpdate.CostoPorEstacion
-                      ? Number(tarifaInfoUpdate.CostoPorEstacion)
-                      : 0;
-                    const cantidadBase = tarifaInfoUpdate.CantidadEstacionesBase
-                      ? Number(tarifaInfoUpdate.CantidadEstacionesBase)
-                      : 0;
-                    const estacionesRecorridas =
-                      idxInicio !== -1 && idxFin !== -1
-                        ? Math.abs(idxFin - idxInicio)
-                        : 0;
-                    const extras = Math.max(
-                      0,
-                      estacionesRecorridas - Math.max(0, cantidadBase),
-                    );
-                    montoCalculado = parseFloat(
-                      (
-                        tarifaBaseUpdate +
-                        extras * Math.max(0, costoPorEstacion)
-                      ).toFixed(2),
-                    );
-                  }
-                  // Si es tarifa INCREMENTAL (tipoTarifa === 2) y hay configuración de costo adicional
-                  else if (
-                    tarifaInfoUpdate &&
-                    tarifaInfoUpdate.TipoTarifa === 2
-                  ) {
-                    const costoAdicional = tarifaInfoUpdate.CostoAdicional
-                      ? Number(tarifaInfoUpdate.CostoAdicional)
-                      : 0;
-                    const distanciaBaseKm = tarifaInfoUpdate.DistanciaBaseKm
-                      ? Number(tarifaInfoUpdate.DistanciaBaseKm)
-                      : 0;
-                    const incrementoCadaMetros =
-                      tarifaInfoUpdate.IncrementoCadaMetros
-                        ? Number(tarifaInfoUpdate.IncrementoCadaMetros)
-                        : 0;
-
-                    if (costoAdicional > 0 && incrementoCadaMetros > 0) {
-                      const distanciaBaseMetros = distanciaBaseKm * 1000;
-
-                      // Si la distancia recorrida excede la distancia base, calcular el extra
-                      if (distanciaMetros > distanciaBaseMetros) {
-                        const distanciaExcedente =
-                          distanciaMetros - distanciaBaseMetros;
-                        const numeroIncrementos = Math.ceil(
-                          distanciaExcedente / incrementoCadaMetros,
-                        );
-                        const extraPorDistancia =
-                          numeroIncrementos * costoAdicional;
-                        montoCalculado = tarifaBaseUpdate + extraPorDistancia;
-                      }
-                    }
-                  }
-
-                  // Validar que el monto calculado no exceda el cobro máximo
-                  if (transaccionAbiertaFisica.cobroMaximo) {
-                    const cobroMaximoNum = Number(
-                      transaccionAbiertaFisica.cobroMaximo,
-                    );
-                    if (montoCalculado > cobroMaximoNum) {
-                      montoCalculado = cobroMaximoNum;
-                    }
-                  }
-
-                  // Aplicar descuentos (igual que en el PATCH)
-                  let montoConDescuento = montoCalculado;
-
-                  // PASO 1: Aplicar descuento por tipo de pasajero SOLO cuando la tarifa es ABIERTA o ESTACIONES
-                  const tipoTarifaUpdate =
-                    tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa
-                      ? Number(tarifaInfoUpdate.TipoTarifa)
-                      : null;
-
-                  if (
-                    (tipoTarifaUpdate === EnumTipoTarifa.ABIERTA ||
-                      tipoTarifaUpdate === EnumTipoTarifa.ESTACIONES) &&
-                    monedero.idTipoPasajero
-                  ) {
-                    const tipoPasajero =
-                      await this.CatTiposPasajerosRepository.findOne({
-                        where: { id: monedero.idTipoPasajero },
-                        relations: ['CatTipoDescuento'],
-                      });
-
-                    if (
-                      tipoPasajero &&
-                      tipoPasajero.cantidad &&
-                      tipoPasajero.cantidad > 0 &&
-                      tipoPasajero.idCatTipoDescuento
-                    ) {
-                      const tipoDescuento = Number(
-                        tipoPasajero.idCatTipoDescuento,
-                      );
-                      const cantidad = Number(tipoPasajero.cantidad);
-
-                      // idCatTipoDescuento: 1 = PORCENTAJE, 2 = MONETARIO
-                      if (tipoDescuento === 1) {
-                        const descuentoPorcentual =
-                          (montoConDescuento * cantidad) / 100;
-                        montoConDescuento =
-                          montoConDescuento - descuentoPorcentual;
-                      } else if (tipoDescuento === 2) {
-                        montoConDescuento = montoConDescuento - cantidad;
-                      }
-
-                      if (montoConDescuento < 0) {
-                        montoConDescuento = 0;
-                      }
-                    }
-                  }
-
-                  // PASO 2: Aplicar descuento de transbordo
-                  if (
-                    transaccionAbiertaFisica.descuentoTransbordo !== null &&
-                    transaccionAbiertaFisica.descuentoTransbordo !==
-                      undefined &&
-                    transaccionAbiertaFisica.tipoDescuentoTransbordo !== null
-                  ) {
-                    const descuentoTransbordo = Number(
-                      transaccionAbiertaFisica.descuentoTransbordo,
-                    );
-                    const tipoDescuentoTransbordo = Number(
-                      transaccionAbiertaFisica.tipoDescuentoTransbordo,
-                    );
-
-                    if (descuentoTransbordo > 0) {
-                      if (
-                        tipoDescuentoTransbordo ===
-                        EnumTipoDescuentoTransbordo.MONETARIO
-                      ) {
-                        montoConDescuento =
-                          montoConDescuento - descuentoTransbordo;
-                      } else if (
-                        tipoDescuentoTransbordo ===
-                        EnumTipoDescuentoTransbordo.PORCENTAJE
-                      ) {
-                        const descuentoPorcentual =
-                          (montoConDescuento * descuentoTransbordo) / 100;
-                        montoConDescuento =
-                          montoConDescuento - descuentoPorcentual;
-                      }
-
-                      if (montoConDescuento < 0) {
-                        montoConDescuento = 0;
-                      }
-                    }
-                  }
-
-                  // Descuento ATÓMICO del saldo al cerrar la transacción abierta
-                  // física. Descuenta y valida en una sola sentencia con lock de
-                  // fila, evitando el doble-cobro por concurrencia.
-                  const descontado =
-                    await this.monederosService.descontarSaldoAtomico(
-                      monedero.numeroSerie,
-                      montoConDescuento,
-                      idUser,
-                    );
-
-                  if (!descontado) {
-                    throw new BadRequestException(
-                      `Saldo insuficiente para cerrar transacción abierta física ID: ${transaccionAbiertaFisica.id}`,
-                    );
-                  }
-
-                  // Actualizar monedero local para reflejar el nuevo saldo
-                  monedero.saldo = Number(monedero.saldo) - montoConDescuento;
-
-                  // Obtener fecha actual con desfase de -6 horas
-                  const fechaHoraFinal = fechaHoraActual
-                    .toISOString()
-                    .slice(0, 19)
-                    .replace('T', ' ');
-
-                  // Actualizar la transacción: cerrarla (controlTransaccion = 0)
-                  await this.transaccionesdebitoRepository.update(
-                    transaccionAbiertaFisica.id,
-                    {
-                      idTipoTransaccion: EnumTipoTransaccion.DEBITO,
-                      monto: montoConDescuento,
-                      controlTransaccion: EnumControlTransacciones.PAGADO,
-                      latitudFinal: latitudFinal,
-                      longitudFinal: longitudFinal,
-                      fechaHoraFinal: fechaHoraFinal,
-                      distanciaRecorrida: parseFloat(distanciaKm.toFixed(2)),
-                    },
-                  );
-
-                  // Obtener la transacción actualizada para guardarla en histórico
-                  const transaccionActualizada =
-                    await this.transaccionesdebitoRepository.findOne({
-                      where: { id: transaccionAbiertaFisica.id },
-                    });
-
-                  if (transaccionActualizada) {
-                    const { id: _, ...transaccionBody } =
-                      transaccionActualizada;
-                    await this.historicoTransaccionesDebitoRepository.save(
-                      transaccionBody,
-                    );
-                  }
-
-                }
-              }
-
-              // Actualizar estatus del QR a 0 después de cerrar las transacciones
-              if (monedero.idPasajero) {
-                const qrActivo = await this.qrCodesRepository.findOne({
-                  where: {
-                    idPasajero: monedero.idPasajero,
-                    estatus: 1, // ACTIVO
-                  },
-                  order: {
-                    id: 'DESC', // Más reciente
-                  },
-                });
-
-                if (qrActivo) {
-                  await this.qrCodesRepository.update(qrActivo.id, {
-                    estatus: 0, // INACTIVO
-                  });
-                  qrActualizado = true;
-                }
-              }
-            }
-          } else {
-            // Si el tiempo es < 1 minuto, continuar normalmente (se creará una nueva transacción abierta)
+        let cobradoBajada = 0;
+        let idBajada: number | null = null;
+        for (const abierta of abiertasIndividuales) {
+          const cobrado = await this.cerrarTransaccionAbierta(
+            abierta,
+            monedero,
+            createTransaccioneDebitoDto.latitud,
+            createTransaccioneDebitoDto.longitud,
+            fechaHoraActual,
+            idUser,
+          );
+          if (cobrado !== null && mismoViaje(abierta)) {
+            cobradoBajada += cobrado;
+            idBajada = Number(abierta.id);
           }
-        } else {
-          // No hay transacciones abiertas físicas previas, continuar normalmente
+        }
+
+        // El QR del pasajero queda inactivo al cerrar sus viajes.
+        if (monedero.idPasajero) {
+          const qrActivo = await this.qrCodesRepository.findOne({
+            where: { idPasajero: monedero.idPasajero, estatus: 1 },
+            order: { id: 'DESC' },
+          });
+          if (qrActivo) {
+            await this.qrCodesRepository.update(qrActivo.id, { estatus: 0 });
+            qrActualizado = true;
+          }
+        }
+
+        if (idBajada !== null) {
+          return {
+            status: 'success',
+            message: `Viaje cerrado: $${cobradoBajada.toFixed(2)}`,
+            data: {
+              id: idBajada,
+              cantidadPasajes: 1,
+              nombre: monedero?.numeroSerie || '',
+            },
+          };
         }
       }
 
@@ -2743,20 +2630,11 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         });
       } catch (error) {
         if (error instanceof IdempotenciaDuplicadaError) {
-          const previa = await this.transaccionesdebitoRepository.findOne({
-            where: { claveIdempotencia: error.clave },
-            order: { id: 'ASC' },
-          });
-          if (previa) {
-            return {
-              status: 'success',
-              message: 'Transacción ya procesada (idempotencia)',
-              data: {
-                id: Number(previa.id),
-                nombre: previa.numeroSerieMonedero || '',
-              },
-            };
-          }
+          const previa = await this.debitoPorClave(
+            error.clave,
+            monedero.numeroSerie,
+          );
+          if (previa) return previa;
         }
         if (error instanceof SaldoInsuficienteTxError) {
           estado = transicionarEstado(
@@ -2953,8 +2831,13 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
     });
     await this.transaccionesdebitoRepository.save(newTransaccion);
 
-    //se guarda en el historico
-    await this.historicoTransaccionesDebitoRepository.save(newTransaccion);
+    // Histórico como fila nueva (V2-16): guardar la misma entidad llevaba el Id
+    // de TransaccionesDebito y save() sobrescribía el histórico con ese Id.
+    const { id: liveId, ...rechazoBody } = newTransaccion;
+    await this.historicoTransaccionesDebitoRepository.insert({
+      ...rechazoBody,
+      idTransaccionOrigen: Number(liveId),
+    });
 
     // Registrar en bitácora
     const tipoTarifaTexto =
@@ -2999,6 +2882,293 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
     return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
+  }
+
+  /**
+   * Cierra una transacción ABIERTA (tarifa abierta o por estaciones) en el punto
+   * de la validación actual: calcula el monto con la tarifa de su viaje, aplica
+   * descuentos, descuenta el saldo y la pasa a PAGADO (todo en una TX).
+   * Devuelve el monto cobrado, o null si otra lectura ya la había cerrado.
+   */
+  private async cerrarTransaccionAbierta(
+    transaccionAbiertaFisica: TransaccionesDebito,
+    monedero: Monederos,
+    latitudFinal: number,
+    longitudFinal: number,
+    fechaHoraActual: Date,
+    idUser: number,
+  ): Promise<number | null> {
+    // Obtener variante y tarifa de la transacción existente usando idViaje
+    let varianteUpdate: Variantes | null = null;
+    let tarifaInfoUpdate: any = null;
+
+    if (transaccionAbiertaFisica.idViaje) {
+      const viaje = await this.viajesRepository.findOne({
+        where: { id: transaccionAbiertaFisica.idViaje },
+        relations: ['idVariante2'],
+      });
+
+      if (viaje && viaje.idVariante) {
+        varianteUpdate = await this.variantesRepository.findOne({
+          where: { id: viaje.idVariante },
+        });
+
+        if (varianteUpdate) {
+          const tarifa = await this.tarifasRepository.findOne({
+            where: { idVariante: viaje.idVariante, estatus: 1 },
+          });
+
+          if (tarifa) {
+            tarifaInfoUpdate = {
+              TarifaBase: tarifa.tarifaBase,
+              CostoAdicional: tarifa.costoAdicional,
+              DistanciaBaseKm: tarifa.distanciaBaseKm,
+              IncrementoCadaMetros: tarifa.incrementoCadaMetros,
+              TipoTarifa: tarifa.tipoTarifa,
+              CostoPorEstacion: tarifa.costoPorEstacion,
+              CantidadEstacionesBase: tarifa.cantidadEstacionesBase,
+            };
+          }
+        }
+      }
+    }
+
+    // Calcular distancia desde punto inicial hasta punto final usando haversine
+    if (
+      transaccionAbiertaFisica.latitudInicial &&
+      transaccionAbiertaFisica.longitudInicial
+    ) {
+      const puntoInicial = {
+        latitude: transaccionAbiertaFisica.latitudInicial,
+        longitude: transaccionAbiertaFisica.longitudInicial,
+      };
+      const puntoFinal = {
+        latitude: latitudFinal,
+        longitude: longitudFinal,
+      };
+
+      // Calcular distancia en metros usando haversine
+      const distanciaMetros = haversine(puntoInicial, puntoFinal);
+      const distanciaKm = distanciaMetros / 1000; // Convertir a kilómetros
+
+      // Calcular monto basado en la distancia
+      const tarifaBaseUpdate =
+        Number(transaccionAbiertaFisica.monto) ||
+        Number(tarifaInfoUpdate?.TarifaBase) ||
+        0;
+      let montoCalculado = tarifaBaseUpdate;
+
+      // Tarifa por estaciones (TipoTarifa=3): calcular por número de estaciones recorridas
+      if (
+        tarifaInfoUpdate &&
+        Number(tarifaInfoUpdate.TipoTarifa) === EnumTipoTarifa.ESTACIONES
+      ) {
+        const estaciones = this.obtenerEstacionesDeVariante(varianteUpdate);
+        const idxInicio = this.encontrarIndiceEstacionMasCercana(
+          estaciones,
+          Number(transaccionAbiertaFisica.latitudInicial),
+          Number(transaccionAbiertaFisica.longitudInicial),
+        );
+        const idxFin = this.encontrarIndiceEstacionMasCercana(
+          estaciones,
+          Number(latitudFinal),
+          Number(longitudFinal),
+        );
+
+        const costoPorEstacion = tarifaInfoUpdate.CostoPorEstacion
+          ? Number(tarifaInfoUpdate.CostoPorEstacion)
+          : 0;
+        const cantidadBase = tarifaInfoUpdate.CantidadEstacionesBase
+          ? Number(tarifaInfoUpdate.CantidadEstacionesBase)
+          : 0;
+        const estacionesRecorridas =
+          idxInicio !== -1 && idxFin !== -1 ? Math.abs(idxFin - idxInicio) : 0;
+        const extras = Math.max(
+          0,
+          estacionesRecorridas - Math.max(0, cantidadBase),
+        );
+        montoCalculado = parseFloat(
+          (tarifaBaseUpdate + extras * Math.max(0, costoPorEstacion)).toFixed(
+            2,
+          ),
+        );
+      }
+      // Si es tarifa INCREMENTAL (tipoTarifa === 2) y hay configuración de costo adicional
+      else if (tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa === 2) {
+        const costoAdicional = tarifaInfoUpdate.CostoAdicional
+          ? Number(tarifaInfoUpdate.CostoAdicional)
+          : 0;
+        const distanciaBaseKm = tarifaInfoUpdate.DistanciaBaseKm
+          ? Number(tarifaInfoUpdate.DistanciaBaseKm)
+          : 0;
+        const incrementoCadaMetros = tarifaInfoUpdate.IncrementoCadaMetros
+          ? Number(tarifaInfoUpdate.IncrementoCadaMetros)
+          : 0;
+
+        if (costoAdicional > 0 && incrementoCadaMetros > 0) {
+          const distanciaBaseMetros = distanciaBaseKm * 1000;
+
+          // Si la distancia recorrida excede la distancia base, calcular el extra
+          if (distanciaMetros > distanciaBaseMetros) {
+            const distanciaExcedente = distanciaMetros - distanciaBaseMetros;
+            const numeroIncrementos = Math.ceil(
+              distanciaExcedente / incrementoCadaMetros,
+            );
+            const extraPorDistancia = numeroIncrementos * costoAdicional;
+            montoCalculado = tarifaBaseUpdate + extraPorDistancia;
+          }
+        }
+      }
+
+      // Validar que el monto calculado no exceda el cobro máximo
+      if (transaccionAbiertaFisica.cobroMaximo) {
+        const cobroMaximoNum = Number(transaccionAbiertaFisica.cobroMaximo);
+        if (montoCalculado > cobroMaximoNum) {
+          montoCalculado = cobroMaximoNum;
+        }
+      }
+
+      // Aplicar descuentos (igual que en el PATCH)
+      let montoConDescuento = montoCalculado;
+
+      // PASO 1: Aplicar descuento por tipo de pasajero SOLO cuando la tarifa es ABIERTA o ESTACIONES
+      const tipoTarifaUpdate =
+        tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa
+          ? Number(tarifaInfoUpdate.TipoTarifa)
+          : null;
+
+      if (
+        (tipoTarifaUpdate === EnumTipoTarifa.ABIERTA ||
+          tipoTarifaUpdate === EnumTipoTarifa.ESTACIONES) &&
+        monedero.idTipoPasajero
+      ) {
+        const tipoPasajero = await this.CatTiposPasajerosRepository.findOne({
+          where: { id: monedero.idTipoPasajero },
+          relations: ['CatTipoDescuento'],
+        });
+
+        if (
+          tipoPasajero &&
+          tipoPasajero.cantidad &&
+          tipoPasajero.cantidad > 0 &&
+          tipoPasajero.idCatTipoDescuento
+        ) {
+          const tipoDescuento = Number(tipoPasajero.idCatTipoDescuento);
+          const cantidad = Number(tipoPasajero.cantidad);
+
+          // idCatTipoDescuento: 1 = PORCENTAJE, 2 = MONETARIO
+          if (tipoDescuento === 1) {
+            const descuentoPorcentual = (montoConDescuento * cantidad) / 100;
+            montoConDescuento = montoConDescuento - descuentoPorcentual;
+          } else if (tipoDescuento === 2) {
+            montoConDescuento = montoConDescuento - cantidad;
+          }
+
+          if (montoConDescuento < 0) {
+            montoConDescuento = 0;
+          }
+        }
+      }
+
+      // PASO 2: Aplicar descuento de transbordo
+      if (
+        transaccionAbiertaFisica.descuentoTransbordo !== null &&
+        transaccionAbiertaFisica.descuentoTransbordo !== undefined &&
+        transaccionAbiertaFisica.tipoDescuentoTransbordo !== null
+      ) {
+        const descuentoTransbordo = Number(
+          transaccionAbiertaFisica.descuentoTransbordo,
+        );
+        const tipoDescuentoTransbordo = Number(
+          transaccionAbiertaFisica.tipoDescuentoTransbordo,
+        );
+
+        if (descuentoTransbordo > 0) {
+          if (
+            tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.MONETARIO
+          ) {
+            montoConDescuento = montoConDescuento - descuentoTransbordo;
+          } else if (
+            tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.PORCENTAJE
+          ) {
+            const descuentoPorcentual =
+              (montoConDescuento * descuentoTransbordo) / 100;
+            montoConDescuento = montoConDescuento - descuentoPorcentual;
+          }
+
+          if (montoConDescuento < 0) {
+            montoConDescuento = 0;
+          }
+        }
+      }
+
+      // Date, no texto: un string se reinterpreta con la zona del equipo.
+      const fechaHoraFinal = fechaHoraActual;
+
+      // Descuento, cierre condicionado e histórico en una sola TX
+      // (H-08 / V2-06): si otra lectura de la misma tarjeta ya cerró
+      // esta ABIERTA (affected = 0), se revierte el descuento y no
+      // se cobra dos veces.
+      try {
+        await this.dataSource.transaction(async (manager) => {
+          const descontado = await this.monederosService.descontarSaldoAtomico(
+            monedero.numeroSerie,
+            montoConDescuento,
+            idUser,
+            manager,
+          );
+          if (!descontado) {
+            throw new BadRequestException(
+              `Saldo insuficiente para cerrar transacción abierta física ID: ${transaccionAbiertaFisica.id}`,
+            );
+          }
+
+          const cierre = await manager
+            .getRepository(TransaccionesDebito)
+            .update(
+              {
+                id: transaccionAbiertaFisica.id,
+                controlTransaccion: EnumControlTransacciones.ABIERTA,
+              },
+              {
+                idTipoTransaccion: EnumTipoTransaccion.DEBITO,
+                monto: montoConDescuento,
+                controlTransaccion: EnumControlTransacciones.PAGADO,
+                latitudFinal: latitudFinal,
+                longitudFinal: longitudFinal,
+                fechaHoraFinal: fechaHoraFinal,
+                distanciaRecorrida: parseFloat(distanciaKm.toFixed(2)),
+              },
+            );
+          if (!cierre.affected) {
+            throw new Error('ABIERTA_YA_CERRADA');
+          }
+
+          const transaccionActualizada = await manager
+            .getRepository(TransaccionesDebito)
+            .findOne({ where: { id: transaccionAbiertaFisica.id } });
+          if (transaccionActualizada) {
+            const { id: liveId, ...transaccionBody } = transaccionActualizada;
+            await manager.getRepository(HistoricoTransaccionesDebito).save({
+              ...transaccionBody,
+              idTransaccionOrigen: Number(liveId),
+            });
+          }
+        });
+        monedero.saldo = Number(monedero.saldo) - montoConDescuento;
+      } catch (cierreError) {
+        if (
+          cierreError instanceof Error &&
+          cierreError.message === 'ABIERTA_YA_CERRADA'
+        ) {
+          return null;
+        }
+        throw cierreError;
+      }
+      return montoConDescuento;
+    }
+
+    return null;
   }
 
   private obtenerEstacionesDeVariante(
@@ -3065,7 +3235,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       }
       const fechaDesfasada = nowDb();
       // Solo la fecha del momento
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())}`;
 
       //Si fechaInicio y fechaFin son null arroja las transacciones del dia de la tabla TransaccionesRecarga y TransaccionesDebito
       if (!fechaInicio && !fechaFin) {
@@ -3161,7 +3331,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       }
       const fechaDesfasada = nowDb();
       // Solo la fecha del momento
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())}`;
 
       //Si fechaInicio y fechaFin son null arroja las transacciones del dia de la tabla TransaccionesDebito
       if (!fechaInicio && !fechaFin) {
@@ -3240,7 +3410,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       let transacciones;
       const offset = (page - 1) * limit;
 
-      switch (rol) {
+      switch (Number(rol)) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
             `
@@ -3251,8 +3421,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -3345,8 +3515,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -3428,8 +3598,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -3559,7 +3729,7 @@ AND td.EsQR = 1;
       let transacciones;
       const offset = (page - 1) * limit;
 
-      switch (rol) {
+      switch (Number(rol)) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
             `
@@ -3571,8 +3741,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -3818,8 +3988,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -3979,8 +4149,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -4170,7 +4340,7 @@ AND m.IdCliente IN (${placeholders})
       let totalResult;
       let transacciones;
       const offset = (page - 1) * limit;
-      switch (rol) {
+      switch (Number(rol)) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
             `
@@ -4200,7 +4370,7 @@ SELECT
 
 
 
-    -- Pasajero (v?a Monedero)
+    -- Pasajero (via Monedero)
     p.Id AS idPasajero,
     p.Nombre AS nombrePasajero,
     p.ApellidoPaterno AS apellidoPaternoPasajero,
@@ -4396,7 +4566,7 @@ FROM (
     INNER JOIN CatTiposTransacciones ctt ON td.IdTipoTransaccion = ctt.Id
     INNER JOIN Monederos m ON td.NumeroSerieMonedero = m.NumeroSerie
     INNER JOIN Pasajeros p ON m.IdPasajero = p.Id
-    WHERE p.Id = ?  -- ?? pasajero espec?fico
+    WHERE p.Id = ?
       AND m.Estatus = 1
 
     UNION ALL
@@ -4406,12 +4576,12 @@ FROM (
     INNER JOIN CatTiposTransacciones ctt ON tr.IdTipoTransaccion = ctt.Id
     INNER JOIN Monederos m ON tr.NumeroSerieMonedero = m.NumeroSerie
     INNER JOIN Pasajeros p ON m.IdPasajero = p.Id
-    WHERE p.Id = ?  -- ?? mismo pasajero
+    WHERE p.Id = ?
       AND m.Estatus = 1
 ) AS transacciones_pasajero;
 
   `,
-            [Number(pasajero.id), Number(pasajero.id)], // <-- Aqu? debe ir como segundo argumento de query()
+            [Number(pasajero.id), Number(pasajero.id)], // <-- Aquí debe ir como segundo argumento de query()
           );
 
           break;
@@ -4465,7 +4635,7 @@ FROM (
   INNER JOIN Clientes c
 	ON m.IdCliente = c.Id
 
-  WHERE m.IdCliente IN (${placeholders})   -- ?? aqu? colocas el ID del cliente que quieres consultar
+  WHERE m.IdCliente IN (${placeholders})
 
   UNION ALL
 
@@ -4511,7 +4681,7 @@ FROM (
   INNER JOIN Clientes c
 	ON m.IdCliente = c.Id
 
-  WHERE m.IdCliente IN (${placeholders})   -- ?? aqu? colocas el ID del cliente que quieres consultar
+  WHERE m.IdCliente IN (${placeholders})
 )
 ORDER BY FHRegistro DESC
 LIMIT ? OFFSET ?;
@@ -4528,14 +4698,14 @@ FROM (
   SELECT td.Id
   FROM TransaccionesDebito td
   INNER JOIN Monederos m ON td.NumeroSerieMonedero = m.NumeroSerie
-  WHERE m.IdCliente IN (${placeholders})   -- ?? aqu? colocas el ID del cliente que quieres consultar
+  WHERE m.IdCliente IN (${placeholders})
 
   UNION ALL
 
   SELECT tr.Id
   FROM TransaccionesRecarga tr
   INNER JOIN Monederos m ON tr.NumeroSerieMonedero = m.NumeroSerie
-  WHERE m.IdCliente IN (${placeholders})   -- ?? aqu? colocas el ID del cliente que quieres consultar
+  WHERE m.IdCliente IN (${placeholders})
 ) AS todas;
 
   `,
@@ -4574,6 +4744,7 @@ FROM (
       if (error instanceof HttpException) {
         throw error;
       }
+      this.logger.error(`Error al obtener transacciones: ${(error as Error)?.message}`);
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });
@@ -4595,13 +4766,13 @@ FROM (
       }
       const fechaDesfasada = nowDb();
       // Solo la fecha del momento
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())}`;
 
       fechaInicio = fechaActual;
       fechaFin = fechaActual;
       entidadRecarga = 'TransaccionesRecarga';
       entidadDebito = 'TransaccionesDebito';
-      switch (rol) {
+      switch (Number(rol)) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
             `
@@ -4610,8 +4781,8 @@ SELECT
     td.Id AS id,
     ctt.Nombre AS tipoTransaccion,
     td.Monto AS monto,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
     td.NumeroSerieMonedero AS numeroSerieMonedero,
@@ -4631,7 +4802,7 @@ SELECT
     d.Marca AS marcaValidador,
     d.Modelo AS modeloValidador,
 
-    -- Pasajero (v?a Monedero)
+    -- Pasajero (via Monedero)
     p.Id AS idPasajero,
     p.Nombre AS nombrePasajero,
     p.ApellidoPaterno AS apellidoPaternoPasajero,
@@ -4714,7 +4885,6 @@ ORDER BY FHRegistro DESC
           const { ids, placeholders } = await this.clienteHijos(cliente);
           transacciones = await this.transaccionesrecargaRepository.query(
             `
-(
   SELECT 
       'DEBITO' AS origenTabla,
       td.Id AS id,
@@ -4722,8 +4892,8 @@ ORDER BY FHRegistro DESC
       td.Monto AS monto,
       NULL AS latitudInicial,
       NULL AS longitudInicial,
-      td.LatitudFinal AS latitudFinal,
-      td.LongitudFinal AS longitudFinal,
+      COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+      COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
       NULL AS fechaHoraInicio,
       td.FechaHoraFinal AS fechaHoraFinal,
       td.FHRegistro AS fhRegistro,
@@ -4742,7 +4912,7 @@ ORDER BY FHRegistro DESC
       d.Marca AS marcaDispositivo,
       d.Modelo AS modeloDispositivo,
 
-      -- Pasajero (v?a Monedero)
+      -- Pasajero (via Monedero)
       p.Id AS idPasajero,
       p.Nombre AS nombrePasajero,
       p.ApellidoPaterno AS apellidoPaternoPasajero,
@@ -4845,6 +5015,7 @@ ORDER BY FHRegistro DESC
       if (error instanceof HttpException) {
         throw error;
       }
+      this.logger.error(`Error al obtener transacciones: ${(error as Error)?.message}`);
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });
@@ -4934,6 +5105,7 @@ INNER JOIN Clientes c
       if (error instanceof HttpException) {
         throw error;
       }
+      this.logger.error(`Error al obtener transacciones: ${(error as Error)?.message}`);
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });
@@ -4960,8 +5132,8 @@ SELECT
     td.Id AS id,
     ctt.Nombre AS tipoTransaccion,
     td.Monto AS monto,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
     td.NumeroSerieMonedero AS numeroSerieMonedero,
@@ -4980,7 +5152,7 @@ SELECT
     d.Marca AS marcaValidador,
     d.Modelo AS modeloValidador,
 
-    -- Pasajero (v?a Monedero)
+    -- Pasajero (via Monedero)
     p.Id AS idPasajero,
     p.Nombre AS nombrePasajero,
     p.ApellidoPaterno AS apellidoPaternoPasajero,
@@ -5024,6 +5196,7 @@ INNER JOIN Clientes c
       if (error instanceof HttpException) {
         throw error;
       }
+      this.logger.error(`Error al obtener transacciones: ${(error as Error)?.message}`);
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });
@@ -5064,7 +5237,7 @@ INNER JOIN Clientes c
         return n < 10 ? '0' + n : n;
       }
       const fechaDesfasada = nowDb();
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())}`;
 
       // Construir condición de fechas (separadas para cada tabla)
       // Usar FHRegistro para el filtro de fechas
@@ -5114,7 +5287,7 @@ INNER JOIN Clientes c
       let recargas: any[];
       let totalResult: any[];
 
-      switch (rol) {
+      switch (Number(rol)) {
         case 1:
           // SA = Todas las recargas
           if (usarTablaActual && usarTablaHistorico) {

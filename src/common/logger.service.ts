@@ -53,8 +53,15 @@ export class LoggerService {
             typeof (error as { message?: unknown }).message === 'string'
           ? String((error as { message: string }).message)
           : 'Unknown error';
+    // El código del driver (ER_DUP_ENTRY, ECONNRESET…) no lleva datos y es lo
+    // único que permite diagnosticar; el mensaje sí puede traer valores.
+    const code = (error as { code?: unknown })?.code;
+    const safeCode =
+      typeof code === 'string' && /^[A-Z0-9_]{2,40}$/.test(code) ? code : null;
     return {
-      message: DRIVER_ERROR.test(raw) ? 'Error interno' : raw.slice(0, 200),
+      message: DRIVER_ERROR.test(raw)
+        ? `Error interno${safeCode ? ` (${safeCode})` : ''}`
+        : raw.slice(0, 200),
       name: 'Error',
     };
   }

@@ -4,7 +4,9 @@ import {
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { CreateBitacoraDto } from './dto/create-bitacora.dto';
 import {
@@ -16,12 +18,24 @@ import {
 } from './bitacora-hmac';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Bitacora } from 'src/entities/Bitacora';
-import { DataSource, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  EntitySubscriberInterface,
+  Repository,
+} from 'typeorm';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { Clientes } from 'src/entities/Clientes';
 
+type BitacoraArgs = Parameters<BitacoraLoggerService['logToBitacora']>;
+const PENDIENTES = 'bitacoraPendiente';
+
 @Injectable()
-export class BitacoraLoggerService {
+export class BitacoraLoggerService implements OnModuleDestroy {
+  private readonly logger = new Logger(BitacoraLoggerService.name);
+  /** Escrituras en serie dentro del proceso; el GET_LOCK del encadenamiento queda fuera de la ruta del cobro. */
+  private cola: Promise<void> = Promise.resolve();
+
   constructor(
     @InjectRepository(Bitacora)
     private readonly bitacoraRepository: Repository<Bitacora>,
@@ -29,7 +43,58 @@ export class BitacoraLoggerService {
     private readonly clienteRepository: Repository<Clientes>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
-  ) {}
+  ) {
+    this.dataSource.subscribers.push(this.subscriberTransacciones());
+  }
+
+  /**
+   * Registro de bitácora que no bloquea ni revierte al llamador (R2).
+   * Dentro de una transacción queda pendiente y se encola solo si la
+   * transacción externa confirma; si revierte, se descarta. Un fallo de la
+   * bitácora se loguea y nunca deshace el cobro.
+   */
+  registrar(args: BitacoraArgs, manager?: EntityManager): void {
+    const qr = manager?.queryRunner;
+    if (qr?.isTransactionActive) {
+      const pendientes: BitacoraArgs[] = (qr.data[PENDIENTES] ??= []);
+      pendientes.push(args);
+      return;
+    }
+    this.encolar(args);
+  }
+
+  private encolar(args: BitacoraArgs): void {
+    this.cola = this.cola
+      .then(() => this.logToBitacora(...args))
+      .catch((error) =>
+        this.logger.error(
+          `No se pudo registrar la bitácora: ${(error as Error)?.message}`,
+        ),
+      );
+  }
+
+  private subscriberTransacciones(): EntitySubscriberInterface {
+    return {
+      // Con savepoints el evento también llega al liberar uno: solo cuenta el COMMIT externo.
+      afterTransactionCommit: (event) => {
+        const qr = event.queryRunner;
+        if (qr.isTransactionActive) return;
+        const pendientes = qr.data?.[PENDIENTES] as BitacoraArgs[] | undefined;
+        if (!pendientes?.length) return;
+        delete qr.data[PENDIENTES];
+        pendientes.forEach((args) => this.encolar(args));
+      },
+      afterTransactionRollback: (event) => {
+        const qr = event.queryRunner;
+        if (!qr.isTransactionActive && qr.data) delete qr.data[PENDIENTES];
+      },
+    };
+  }
+
+  /** Espera a que la cola termine antes de apagar el proceso. */
+  async onModuleDestroy(): Promise<void> {
+    await this.cola;
+  }
   createBitacora(_createBitacoraDto: CreateBitacoraDto) {
     return 'This action adds a new bitacora';
   }
@@ -353,7 +418,10 @@ ORDER BY b.FechaCreacion DESC;
     estatus?: string,
     error?: string,
   ) {
-    const fechaCreacion = new Date();
+    // M-013: segundos enteros. FechaCreacion es DATETIME(0) y MySQL REDONDEA
+    // los milisegundos (>= 500 sube un segundo), mientras el hash los truncaba:
+    // cerca de la mitad de los registros verificaban como "alterados".
+    const fechaCreacion = new Date(Math.floor(Date.now() / 1000) * 1000);
     const querySanitizado = this.sanitizeQuery(query);
 
     const descripcionSafe = this.truncate(descripcion, 250);
@@ -532,13 +600,21 @@ ORDER BY b.FechaCreacion DESC;
       fechaCreacion: r.fechaCreacion,
     };
     const secret = process.env.BITACORA_HMAC_SECRET as string;
-    const encadenado = hmacBitacora(
-      bitacoraCanonicalEncadenado(campos, r.hashAnterior),
-      secret,
-    );
-    let valido = hashesIguales(r.hash, encadenado);
-    if (!valido && !r.hashAnterior) {
-      valido = hashesIguales(r.hash, hmacBitacora(bitacoraCanonical(campos), secret));
+    const coincide = (c: typeof campos): boolean =>
+      hashesIguales(
+        r.hash,
+        hmacBitacora(bitacoraCanonicalEncadenado(c, r.hashAnterior), secret),
+      ) ||
+      (!r.hashAnterior &&
+        hashesIguales(r.hash, hmacBitacora(bitacoraCanonical(c), secret)));
+    let valido = coincide(campos);
+    if (!valido && r.fechaCreacion) {
+      // Registros previos al truncado (M-013): MySQL redondeó hacia arriba los
+      // milisegundos que el hash había truncado; se compara con 1 s menos.
+      valido = coincide({
+        ...campos,
+        fechaCreacion: new Date(new Date(r.fechaCreacion).getTime() - 1000),
+      });
     }
     if (valido && r.hashAnterior) {
       const previa: Array<{ Hash?: string | null }> =

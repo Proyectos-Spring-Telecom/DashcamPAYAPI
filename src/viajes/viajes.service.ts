@@ -138,7 +138,7 @@ export class ViajesService {
         return n < 10 ? '0' + n : n;
       }
       const fechaDesfasada = nowDb();
-      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())} ${pad(fechaDesfasada.getUTCHours())}:${pad(fechaDesfasada.getUTCMinutes())}:${pad(fechaDesfasada.getUTCSeconds())}`;
 
       createViajeDto.inicio = fechaDesfasada;
       createViajeDto.estatus = EstatusEnum.ACTIVO;
@@ -274,7 +274,7 @@ export class ViajesService {
         return n < 10 ? '0' + n : n;
       }
       const fechaDesfasada = nowDb();
-      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())} ${pad(fechaDesfasada.getUTCHours())}:${pad(fechaDesfasada.getUTCMinutes())}:${pad(fechaDesfasada.getUTCSeconds())}`;
       // Buscamos el viaje
       const viaje = await this.viajesRepository.findOne({ where: { id } });
       if (!viaje) {

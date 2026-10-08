@@ -55,6 +55,8 @@ export class NetpayController {
   }
 
   @Post('payment/with-token')
+  // Cobro con tarjeta: solo el pasajero, desde su propia sesión.
+  @Roles(9)
   @HttpCode(HttpStatus.OK)
   @ApiExcludeEndpoint()
   @ApiOperation({
@@ -203,6 +205,8 @@ export class NetpayController {
   }
 
   @Post('payment/saved-card')
+  // Cobro con tarjeta: solo el pasajero, desde su propia sesión.
+  @Roles(9)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Procesa un pago con tarjeta guardada',
@@ -223,6 +227,8 @@ export class NetpayController {
   }
 
   @Post('3ds/confirm')
+  // Cobro con tarjeta: solo el pasajero, desde su propia sesión.
+  @Roles(9)
   @HttpCode(HttpStatus.OK)
   @ApiExcludeEndpoint()
   async confirm3DSPayment(

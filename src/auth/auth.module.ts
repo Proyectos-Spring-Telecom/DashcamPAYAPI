@@ -21,6 +21,7 @@ import { Viajes } from 'src/entities/Viajes';
 import { RefreshSessions } from 'src/entities/RefreshSessions';
 import { LoggerService } from 'src/common/logger.service';
 import { Validadores } from 'src/entities/Validadores';
+import { jwtAudience, jwtIssuer } from './jwt-types';
 
 @Module({
   imports: [
@@ -39,6 +40,8 @@ import { Validadores } from 'src/entities/Validadores';
         signOptions: {
           expiresIn: config.get<string>('JWT_EXPIRES_IN'),
           algorithm: 'HS256',
+          issuer: jwtIssuer(),
+          audience: jwtAudience(),
         },
         verifyOptions: { algorithms: ['HS256'] },
       }),

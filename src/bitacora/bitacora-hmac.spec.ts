@@ -14,6 +14,12 @@ describe('bitacora-hmac', () => {
     expect(stableStringify({ a: 1, b: 2 })).toBe('{"a":1,"b":2}');
   });
 
+  it('omite claves undefined igual que el JSON guardado en MySQL', () => {
+    const original = { a: 1, b: undefined, c: { d: undefined, e: 2 } };
+    const guardado = JSON.parse(JSON.stringify(original));
+    expect(stableStringify(original)).toBe(stableStringify(guardado));
+  });
+
   it('parsea query JSON si MySQL lo devolvió como string', () => {
     expect(coerceBitacoraQuery('{"id":7}')).toEqual({ id: 7 });
     expect(coerceBitacoraQuery({ id: 7 })).toEqual({ id: 7 });

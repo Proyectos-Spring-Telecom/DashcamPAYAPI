@@ -209,6 +209,9 @@ export class PasajerosController {
   }
 
   @Patch('customer-netpay/:id')
+  // H-05: el customer de NetPay lo asigna el servidor al registrar al pasajero.
+  // Ningún cliente usa esta ruta; queda solo para soporte (SA).
+  @Roles(1)
   @ApiOperation({
     summary: 'Actualiza el CustomerIdNetPay de un pasajero',
     description:

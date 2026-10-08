@@ -13,7 +13,7 @@ import { CreateTarifaDto } from './dto/create-tarifa.dto';
 import { UpdateTarifaDto } from './dto/update-tarifa.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Tarifas } from 'src/entities/Tarifas';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { Variantes } from 'src/entities/Variantes';
 import { UsuariosZonas } from 'src/entities/UsuariosZonas';
@@ -39,6 +39,27 @@ export class TarifasService {
     private readonly clienteRepository: Repository<Clientes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
+
+  /**
+   * El cobro usa la tarifa activa de la variante: debe haber una sola.
+   */
+  private async assertSinOtraTarifaActiva(
+    idVariante: number,
+    excluirId?: number,
+  ): Promise<void> {
+    const otra = await this.tarifasRepository.findOne({
+      where: {
+        idVariante,
+        estatus: 1,
+        ...(excluirId ? { id: Not(excluirId) } : {}),
+      },
+    });
+    if (otra) {
+      throw new BadRequestException(
+        'La variante ya tiene una tarifa activa. Desactívala antes de activar o crear otra.',
+      );
+    }
+  }
 
   // ========================================
   // 🔹 CREAR UN TARIFA
@@ -69,6 +90,8 @@ export class TarifasService {
         }
       }
 
+      await this.assertSinOtraTarifaActiva(createTarifaDto.idVariante);
+
       // Mapear idTipoTarifa del DTO a tipoTarifa de la entidad
       const { idTipoTarifa, ...restDto } = createTarifaDto;
       const newTarifas = this.tarifasRepository.create({
@@ -84,6 +107,7 @@ export class TarifasService {
 
       let tarifaRegresoSave: Tarifas | null = null;
       if (varianteRegreso) {
+        await this.assertSinOtraTarifaActiva(varianteRegreso.id);
         // Crear también la tarifa para la variante de regreso
         const newTarifaRegreso = this.tarifasRepository.create({
           ...restDto,
@@ -893,6 +917,9 @@ LIMIT 1
 
       //actualizacion de estatus
       const estatus = updateTarifasEstatusDto.estatus;
+      if (Number(estatus) === 1) {
+        await this.assertSinOtraTarifaActiva(tarifa.idVariante, tarifa.id);
+      }
       await this.tarifasRepository.update(id, { estatus: estatus });
 
       // Registro en la bitácora SUCCESS

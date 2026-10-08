@@ -33,6 +33,19 @@ export class BitacoraController {
     return await this.bitacoraService.findAllListBitacora(+cliente, +rol);
   }
 
+  // Debe ir antes de ':page/:limit': Express toma la primera que coincide y el
+  // ClampPageLimitInterceptor convertía "verify" en un límite válido, así que
+  // esta ruta nunca se alcanzaba.
+  @Get(':id/verify')
+  async verifyIntegrity(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    if (Number(req.user.rol) !== 1) {
+      throw new ForbiddenException(
+        'Solo administradores pueden verificar integridad de bitácora.',
+      );
+    }
+    return await this.bitacoraService.verifyIntegrity(id);
+  }
+
   @Get(':page/:limit')
   findAll(
     @Param('page', ParseIntPipe) page: number,
@@ -43,16 +56,6 @@ export class BitacoraController {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return this.bitacoraService.findAll(+cliente, +rol, page, limit);
-  }
-
-  @Get(':id/verify')
-  async verifyIntegrity(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    if (Number(req.user.rol) !== 1) {
-      throw new ForbiddenException(
-        'Solo administradores pueden verificar integridad de bitácora.',
-      );
-    }
-    return await this.bitacoraService.verifyIntegrity(id);
   }
 
   @Get(':id')

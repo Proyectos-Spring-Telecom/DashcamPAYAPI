@@ -80,7 +80,7 @@ export class TurnosService {
         return n < 10 ? '0' + n : n;
       }
       const fechaDesfasada = nowDb();
-      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())} ${pad(fechaDesfasada.getUTCHours())}:${pad(fechaDesfasada.getUTCMinutes())}:${pad(fechaDesfasada.getUTCSeconds())}`;
 
       const { numeroSerieValidador } = createTurnoDto;
 
@@ -851,6 +851,19 @@ LIMIT 1
     }
   }
 
+  /** Un turno no se cierra mientras tenga un viaje activo (Estatus 1 y sin Fin). */
+  private async assertSinViajeActivo(idTurno: number): Promise<void> {
+    const activos: Array<{ Id: number }> = await this.turnosRepository.query(
+      'SELECT Id FROM Viajes WHERE IdTurno = ? AND Estatus = 1 AND Fin IS NULL LIMIT 1',
+      [idTurno],
+    );
+    if (activos.length) {
+      throw new BadRequestException(
+        `No se puede cerrar el turno: el viaje ${activos[0].Id} sigue activo. Ciérralo primero.`,
+      );
+    }
+  }
+
   async updateEstatus(
     id: number,
     idUser: number,
@@ -951,7 +964,7 @@ AND i.Estatus = 1
         return n < 10 ? '0' + n : n;
       }
       const fechaDesfasada = nowDb();
-      const _fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const _fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())} ${pad(fechaDesfasada.getUTCHours())}:${pad(fechaDesfasada.getUTCMinutes())}:${pad(fechaDesfasada.getUTCSeconds())}`;
       // buscamos el turno
       const turnoFind = await this.turnosRepository.findOne({
         where: { id: id },
@@ -972,6 +985,7 @@ AND i.Estatus = 1
           `El turno con ID: ${id} no coincide los valores del turno con el del usuario.`,
         );
       }
+      await this.assertSinViajeActivo(id);
       const body = {
         fin: fechaDesfasada,
         estatus: EstatusEnum.INACTIVO,

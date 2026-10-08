@@ -122,6 +122,10 @@ export class Clientes {
   @Column('tinyint', { name: 'Estatus', default: () => "'1'" })
   estatus: number;
 
+  /** H-64: 1 = aparece en /clientes/public y acepta registro de pasajeros. */
+  @Column('tinyint', { name: 'PermiteRegistroPublico', default: () => "'1'" })
+  permiteRegistroPublico: number;
+
   @OneToMany(() => Contadores, (contadores) => contadores.idCliente2)
   contadores: Contadores[];
 

@@ -610,7 +610,7 @@ ORDER BY u.Id DESC
       }
 
       const fechaDesfasada = nowDb();
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())} ${pad(fechaDesfasada.getUTCHours())}:${pad(fechaDesfasada.getUTCMinutes())}:${pad(fechaDesfasada.getUTCSeconds())}`;
       const bodyOperador = {
         codigoHash: pinPassword,
         actualizacionCodigo: fechaActual,
@@ -759,6 +759,29 @@ ORDER BY u.Id DESC
   }
 
   //Creacion de un usuario
+  /**
+   * H-02: nadie otorga un permiso que no tiene. No es una matriz de roles
+   * (los roles los define cada cliente): solo impide escalar por permisos.
+   * El SA queda exento.
+   */
+  private async assertPermisosOtorgables(
+    permisosIds: number[],
+    idActor: number,
+    rolActor: number,
+  ): Promise<void> {
+    if (Number(rolActor) === 1 || !permisosIds.length) return;
+    const propios = await this.usuariosPermisosRepository.find({
+      where: { idUsuario: idActor, estatus: 1 },
+      select: ['idPermiso'],
+    });
+    const tiene = new Set(propios.map((p) => Number(p.idPermiso)));
+    if (permisosIds.some((p) => !tiene.has(Number(p)))) {
+      throw new ForbiddenException(
+        'No puedes otorgar permisos que tú no tienes.',
+      );
+    }
+  }
+
   async createUsuario(
     createUsuarioDto: CreateUsuarioDto,
     idUser: string,
@@ -766,6 +789,11 @@ ORDER BY u.Id DESC
     clienteActor: number,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertPermisosOtorgables(
+        (createUsuarioDto.permisosIds ?? []).map(Number),
+        Number(idUser),
+        rolActor,
+      );
       const rolNuevo = Number(createUsuarioDto.idRol);
       if (rolNuevo === 1 && Number(rolActor) !== 1) {
         throw new ForbiddenException('No autorizado.');
@@ -924,7 +952,7 @@ ORDER BY u.Id DESC
 
       const fechaDesfasada = nowDb();
 
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())} ${pad(fechaDesfasada.getHours())}:${pad(fechaDesfasada.getMinutes())}:${pad(fechaDesfasada.getSeconds())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())} ${pad(fechaDesfasada.getUTCHours())}:${pad(fechaDesfasada.getUTCMinutes())}:${pad(fechaDesfasada.getUTCSeconds())}`;
 
       await this.usuarioRepository.update(id, {
         passwordHash: hashedPassword,
@@ -1026,9 +1054,34 @@ ORDER BY u.Id DESC
       }
       updateUsuarioDto.emailConfirmado = EstatusEnum.ACTIVO;
 
+      if (Array.isArray(updateUsuarioDto.permisosIds)) {
+        // Solo se revisan los permisos que se agregan; los que ya tiene se conservan.
+        const actuales = await this.usuariosPermisosRepository.find({
+          where: { idUsuario: id, estatus: 1 },
+          select: ['idPermiso'],
+        });
+        const yaTiene = new Set(actuales.map((p) => Number(p.idPermiso)));
+        await this.assertPermisosOtorgables(
+          updateUsuarioDto.permisosIds.map(Number).filter((p) => !yaTiene.has(p)),
+          Number(idUser),
+          Number(rolActor),
+        );
+      }
+
+      const cambiaRol =
+        updateUsuarioDto.idRol !== undefined &&
+        Number(updateUsuarioDto.idRol) !== Number(usuario.idRol);
+      const cambiaEstatus =
+        updateUsuarioDto.estatus !== undefined &&
+        Number(updateUsuarioDto.estatus) !== Number(usuario.estatus);
+
       const { permisosIds: _permisosIds, ...usuarioUpdate } = updateUsuarioDto;
       // ----- ACTUALIZACIÓN DE USUARIO -----
       await this.usuarioRepository.update(id, usuarioUpdate);
+      if (cambiaRol || cambiaEstatus) {
+        // Corta access y refresh vigentes: el nuevo rol o la baja aplican ya.
+        await this.authService.bumpTokenVersion(Number(id));
+      }
       const newUser = await this.usuarioRepository.findOne({
         where: { id: id },
       });

@@ -88,7 +88,9 @@ import { RolesGuard } from './guard/roles.guard';
         JWT_REFRESH_SECRET: Joi.string().required(),
         JWT_REFRESH_EXPIRES: Joi.string().default('7d'),
         JWT_PURPOSE_SECRET: Joi.string().required(),
-        JWT_CONFIRMACION: Joi.string().optional(),
+        JWT_CONFIRMACION: Joi.string().default('15m'),
+        JWT_ISSUER: Joi.string().default('dashcampay-api'),
+        JWT_AUDIENCE: Joi.string().default('dashcampay'),
         RECARGA_MONTO_MAX: Joi.number().default(10000),
         ENFORCE_PIN_BINDING: Joi.string().valid('true', 'false').default('true'),
         ENFORCE_CVV2_FORBIDDEN: Joi.string()
@@ -132,6 +134,7 @@ import { RolesGuard } from './guard/roles.guard';
         MAX_LOGIN_ATTEMPTS: Joi.number().default(10),
         LOCKOUT_MINUTES: Joi.number().default(30),
         OTP_MAX_ATTEMPTS: Joi.number().default(5),
+        OTP_PEPPER: Joi.string().min(32).required(),
         BITACORA_HMAC_SECRET: Joi.string().required(),
         DB_TIME_OFFSET_HOURS: Joi.number().default(-6),
         ABIERTA_TTL_HOURS: Joi.number().default(4),
@@ -171,12 +174,23 @@ import { RolesGuard } from './guard/roles.guard';
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
         migrationsRun: false,
         synchronize: false, //Nunca poner en true
-        dateStrings: false,
+        // DATE (nacimiento, licencias, verificaciones) como 'YYYY-MM-DD': con
+        // Date a medianoche UTC, TypeORM y el front lo pasaban a hora local
+        // (UTC-6) y cada edición de un pasajero le restaba un día.
+        dateStrings: ['DATE'],
         timezone: 'Z',
         ...mysqlSslOption(),
         extra: {
           // Evita que bigint se devuelvan como string
           decimalNumbers: true,
+          // Tras un rato sin tráfico, la red entre la API y MySQL cortaba las
+          // conexiones del pool en silencio y la primera petición daba 500
+          // (ECONNRESET). Keep-alive TCP las mantiene vivas y las ociosas de
+          // más se cierran antes de que alguien las reutilice rotas.
+          enableKeepAlive: true,
+          keepAliveInitialDelay: 10000,
+          maxIdle: 2,
+          idleTimeout: 60000,
         },
       }),
     }),

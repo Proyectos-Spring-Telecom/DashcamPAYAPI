@@ -1,3 +1,4 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import {
   clienteHijosDesdeSp,
   tieneIdsTenant,
@@ -998,6 +999,12 @@ LIMIT 1
           throw new NotFoundException('Ruta no encontrada');
         }
       }
+      // N-07: idZonaFin no se validaba; también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.rutasRepository.manager.connection,
+        { cliente, rol },
+        { zona: updateRutaDto.idZonaFin },
+      );
 
       await this.rutasRepository.update(id, updateRutaDto);
 

@@ -16,10 +16,9 @@ import { Repository } from 'typeorm';
 import { ConnectedUsers } from 'src/entities/ConnectedUsers';
 import { Clientes } from 'src/entities/Clientes';
 import { Usuarios } from 'src/entities/Usuarios';
-import {
-  isMissingTokenVersionColumn,
-  isTokenVersionAccepted,
-} from 'src/auth/token-version';
+import { isOriginAllowed } from 'src/common/cors-origins';
+import { JwtTyp, jwtAudience, jwtIssuer } from 'src/auth/jwt-types';
+import { isTokenVersionAccepted } from 'src/auth/token-version';
 
 interface AuthenticatedSocket extends Socket {
   userId?: number;
@@ -39,7 +38,9 @@ interface SessionData {
 @WebSocketGateway({
   namespace: '/monitoreo',
   cors: {
-    origin: '*',
+    // Misma allowlist que HTTP; '*' con credentials dejaba conectar desde cualquier sitio.
+    origin: (origin: string | undefined, cb: (e: Error | null, ok?: boolean) => void) =>
+      cb(null, isOriginAllowed(origin)),
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -83,9 +84,11 @@ export class MonitoreoGateway
       const payload = this.jwtService.verify(token, {
         secret: this.configService.get<string>('JWT_SECRET'),
         algorithms: ['HS256'],
+        issuer: jwtIssuer(),
+        audience: jwtAudience(),
       });
 
-      if (payload?.typ != null && payload.typ !== 'access') {
+      if (payload?.typ !== JwtTyp.ACCESS) {
         this.logger.warn(
           `Conexión rechazada: token de propósito ${payload.typ} - SocketId: ${client.id}`,
         );
@@ -93,25 +96,12 @@ export class MonitoreoGateway
         return;
       }
 
-      let user: Pick<Usuarios, 'id' | 'tokenVersion' | 'estatus'> | null;
-      try {
-        user = await this.usuariosRepository.findOne({
-          where: { id: payload.id },
-          select: ['id', 'tokenVersion', 'estatus'],
-        });
-      } catch (error) {
-        if (!isMissingTokenVersionColumn(error)) {
-          throw error;
-        }
-        user = await this.usuariosRepository.findOne({
-          where: { id: payload.id },
-          select: ['id', 'estatus'],
-        });
-        if (user) {
-          user.tokenVersion = 0;
-        }
-      }
-      if (!user || user.estatus !== 1) {
+      // Rol y cliente desde la BD (BIGINT → number), igual que JwtStrategy.
+      const user = await this.usuariosRepository.findOne({
+        where: { id: payload.id },
+        select: ['id', 'tokenVersion', 'estatus', 'idRol', 'idCliente'],
+      });
+      if (!user || Number(user.estatus) !== 1) {
         this.logger.warn(
           `Conexión rechazada: usuario inválido - SocketId: ${client.id}`,
         );
@@ -127,9 +117,9 @@ export class MonitoreoGateway
       }
 
       // Asignar datos del usuario al socket
-      client.userId = payload.id;
-      client.cliente = payload.cliente;
-      client.rol = payload.rol;
+      client.userId = Number(user.id);
+      client.cliente = Number(user.idCliente);
+      client.rol = Number(user.idRol);
 
       // Buscar si el usuario ya tiene una sesi?n (activa o inactiva reciente)
       // Prioridad: primero buscar activa, luego inactiva m?s reciente
