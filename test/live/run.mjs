@@ -11,5 +11,7 @@ import './casos/registro.mjs';
 import './casos/bitacora.mjs';
 import './casos/tarjeta.mjs';
 import './casos/pasajero-estatus.mjs';
+import './casos/tarifa-dinamica.mjs';
+import './casos/cors.mjs';
 
 await correr();

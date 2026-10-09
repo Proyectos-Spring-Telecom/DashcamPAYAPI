@@ -22,6 +22,7 @@ import {
 } from 'src/common/ApiResponse';
 import { UpdateInstalacioneEstatusDto } from './dto/update-instalacione-estatus.dto';
 import { forbidTenantMove } from 'src/common/tenant/forbid-tenant-move';
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import { UsuariosInstalaciones } from 'src/entities/UsuariosInstalaciones';
 import { Validadores } from 'src/entities/Validadores';
 import { Contadores } from 'src/entities/Contadores';
@@ -1407,6 +1408,16 @@ ORDER BY i.Id DESC;
             throw new NotFoundException('Recurso no encontrado');
           }
         }
+      }
+      // N-07: los contadores "anteriores" cuyo estado se reescribe también
+      // deben ser del tenant (antes se actualizaban por id sin validar).
+      const anteriores = updateInstalacioneDto.contadoresAnteriores ?? [];
+      for (const contadorAnterior of anteriores) {
+        await assertPadresEnTenant(
+          this.instalacionesRepository.manager.connection,
+          { cliente, rol, userId: idUser },
+          { contador: contadorAnterior?.idContador },
+        );
       }
 
       //verificamos que exista el dispositivo a actualizar

@@ -20,9 +20,11 @@ import { UpdateRolEstatusDto } from './dto/update-rol.dto';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles } from 'src/guard/roles.decorator';
+import { TenantExempt } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Roles')
 @ApiBearerAuth('bearer-token')
+@TenantExempt('Catálogo global sin IdCliente')
 @Controller('roles')
 @UseGuards(JwtAuthGuard)
 @Roles(1, 2)

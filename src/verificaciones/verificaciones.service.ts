@@ -60,6 +60,15 @@ export class VerificacionesService {
     rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      // N-07: las FK padre deben ser del tenant (404 sin revelar existencia).
+      await assertPadresEnTenant(
+        this.verificacionesRepository.manager.connection,
+        { cliente: idCliente, rol },
+        {
+          instalacion: createVerificacionesDto.idInstalacion,
+          operador: createVerificacionesDto.idOperador,
+        },
+      );
       // Validar claves foráneas si se proporcionan
       if (
         createVerificacionesDto.idInstalacion !== undefined &&
@@ -709,7 +718,10 @@ LIMIT 1
       await assertPadresEnTenant(
         this.verificacionesRepository.manager.connection,
         { cliente: idCliente, rol },
-        { instalacion: updateVerificacionesDto.idInstalacion },
+        {
+          instalacion: updateVerificacionesDto.idInstalacion,
+          operador: updateVerificacionesDto.idOperador,
+        },
       );
       const verificacion = await this.verificacionesRepository.findOne({
         where: { id: id },

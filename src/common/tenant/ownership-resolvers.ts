@@ -1,4 +1,32 @@
 import { DataSource } from 'typeorm';
+import { ulid } from 'ulid';
+
+/**
+ * H-66: formato del identificador opaco (ULID = Crockford base32, 26 chars).
+ * Compatible con el id numérico: el lookup acepta ambos durante la transición.
+ */
+export const PUBLIC_ID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+export const NUMERIC_ID_REGEX = /^\d{1,19}$/;
+
+/** true si el identificador recibido tiene forma de PublicId (ULID). */
+export function esPublicId(id: number | string): boolean {
+  return typeof id === 'string' && PUBLIC_ID_REGEX.test(id);
+}
+
+/** Genera un identificador opaco (ULID) para una fila nueva. */
+export function generarPublicId(): string {
+  return ulid();
+}
+
+/**
+ * Resolvers que aceptan tanto el id numérico como el PublicId por `:id`.
+ * El guard relaja el formato SOLO para estos; el resto sigue en `^\d{1,19}$`.
+ */
+export const RESOLVERS_OPAQUE = new Set([
+  'pasajero',
+  'monedero',
+  'transaccionDebito',
+]);
 
 /**
  * Datos del token relevantes para autorización multi-tenant.
@@ -35,10 +63,14 @@ export const ROL_PASAJERO = 9;
  * Conjunto de clientes visibles para el usuario (él mismo + descendientes),
  * usando el mismo `spGetClientes` que los listados.
  */
-type Queryable = { query: (sql: string, params?: unknown[]) => Promise<unknown> };
+type Queryable = {
+  query: (sql: string, params?: unknown[]) => Promise<unknown>;
+};
 
 const hierarchyCache = new Map<number, { ids: number[]; exp: number }>();
-const HIERARCHY_TTL_MS = Number(process.env.CLIENTES_HIERARCHY_TTL_MS ?? 60_000);
+const HIERARCHY_TTL_MS = Number(
+  process.env.CLIENTES_HIERARCHY_TTL_MS ?? 60_000,
+);
 
 export function invalidateClientesPermitidos(cliente?: number): void {
   if (cliente == null) {
@@ -186,9 +218,26 @@ export const ownershipResolvers: Record<string, OwnershipResolver> = {
   cliente: async (ds, id, user) => clienteEnAlcance(ds, user, Number(id)),
 
   // --- Recursos que cuelgan del monedero (rol Pasajero por IdPasajero) ---
-  monedero: porClienteOPasajero(
-    'SELECT IdCliente, IdPasajero FROM Monederos WHERE Id = ? LIMIT 1',
-  ),
+  // H-66: acepta Id numérico o PublicId (ULID). Columna elegida desde lista
+  // fija interna, no desde entrada del usuario (el valor viaja por `?`).
+  monedero: async (ds, id, user) => {
+    const col = esPublicId(id) ? 'PublicId' : 'Id';
+    const row = (
+      await ds.query(
+        'SELECT IdCliente, IdPasajero FROM Monederos WHERE ' +
+          col +
+          ' = ? LIMIT 1',
+        [id],
+      )
+    )?.[0];
+    if (!row) return false;
+    return pertenecePorClienteOPasajero(
+      ds,
+      user,
+      row.IdCliente != null ? Number(row.IdCliente) : null,
+      row.IdPasajero != null ? Number(row.IdPasajero) : null,
+    );
+  },
   monederoBySerie: async (ds, id, user) => {
     const row = (
       await ds.query(
@@ -204,19 +253,33 @@ export const ownershipResolvers: Record<string, OwnershipResolver> = {
       row.IdPasajero != null ? Number(row.IdPasajero) : null,
     );
   },
+  // H-66: acepta Id numérico o PublicId (ULID) del pasajero.
   pasajero: async (ds, id, user) => {
     if (Number(user.rol) === ROL_PASAJERO) {
       const pid = await pasajeroIdDeUsuario(ds, user.userId);
-      return pid !== null && Number(id) === pid;
+      if (pid === null) return false;
+      if (esPublicId(id)) {
+        const prop = (
+          await ds.query(
+            'SELECT Id FROM Pasajeros WHERE PublicId = ? LIMIT 1',
+            [id],
+          )
+        )?.[0];
+        return prop?.Id != null && Number(prop.Id) === pid;
+      }
+      return Number(id) === pid;
     }
     // Otros roles: el pasajero pertenece vía el cliente de su monedero.
+    const col = esPublicId(id) ? 'p.PublicId' : 'p.Id';
     const row = (
       await ds.query(
-        `SELECT m.IdCliente AS IdCliente
-           FROM Pasajeros p
-           INNER JOIN Monederos m ON m.IdPasajero = p.Id
-          WHERE p.Id = ?
-          ORDER BY m.Id ASC LIMIT 1`,
+        'SELECT m.IdCliente AS IdCliente' +
+          ' FROM Pasajeros p' +
+          ' INNER JOIN Monederos m ON m.IdPasajero = p.Id' +
+          ' WHERE ' +
+          col +
+          ' = ?' +
+          ' ORDER BY m.Id ASC LIMIT 1',
         [id],
       )
     )?.[0];
@@ -227,12 +290,28 @@ export const ownershipResolvers: Record<string, OwnershipResolver> = {
       row.IdCliente != null ? Number(row.IdCliente) : null,
     );
   },
-  transaccionDebito: porClienteOPasajero(
-    `SELECT m.IdCliente AS IdCliente, m.IdPasajero AS IdPasajero
-       FROM TransaccionesDebito td
-       INNER JOIN Monederos m ON td.NumeroSerieMonedero = m.NumeroSerie
-      WHERE td.Id = ? LIMIT 1`,
-  ),
+  // H-66: acepta Id numérico o PublicId (ULID) de la transacción débito.
+  transaccionDebito: async (ds, id, user) => {
+    const col = esPublicId(id) ? 'td.PublicId' : 'td.Id';
+    const row = (
+      await ds.query(
+        'SELECT m.IdCliente AS IdCliente, m.IdPasajero AS IdPasajero' +
+          ' FROM TransaccionesDebito td' +
+          ' INNER JOIN Monederos m ON td.NumeroSerieMonedero = m.NumeroSerie' +
+          ' WHERE ' +
+          col +
+          ' = ? LIMIT 1',
+        [id],
+      )
+    )?.[0];
+    if (!row) return false;
+    return pertenecePorClienteOPasajero(
+      ds,
+      user,
+      row.IdCliente != null ? Number(row.IdCliente) : null,
+      row.IdPasajero != null ? Number(row.IdPasajero) : null,
+    );
+  },
   transaccionRecarga: porClienteOPasajero(
     `SELECT m.IdCliente AS IdCliente, m.IdPasajero AS IdPasajero
        FROM TransaccionesRecarga tr

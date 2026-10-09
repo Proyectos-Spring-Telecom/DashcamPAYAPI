@@ -18,6 +18,8 @@ import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UpdatePosicionesDto } from './dto/update-posicione.dto';
+import { Public } from 'src/guard/public.decorator';
+import { DeviceOrJwtGuard, DispositivoCredencial } from './device-auth.guard';
 
 @ApiTags('Posiciones')
 @ApiBearerAuth('bearer-token')
@@ -26,10 +28,22 @@ import { UpdatePosicionesDto } from './dto/update-posicione.dto';
 export class PosicionesController {
   constructor(private readonly posicionesService: PosicionesService) {}
 
+  // Ingesta: acepta credencial de dispositivo (x-device-token) O, en transición,
+  // el JWT de operador. @Public desactiva los guards globales (JwtAuthGuard /
+  // RolesGuard) para habilitar la vía de dispositivo; DeviceOrJwtGuard aplica la
+  // autenticación real (dispositivo o JWT + @Roles).
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @Public()
+  @UseGuards(DeviceOrJwtGuard)
+  @DispositivoCredencial('validador')
   @Roles(1, 2, 3)
   create(@Body() createPosicionesDto: CreatePosicionesDto, @Request() req) {
+    if (req.deviceAuth) {
+      return this.posicionesService.create(createPosicionesDto, {
+        device: true,
+        numeroSerieValidador: req.deviceAuth.numeroSerie,
+      });
+    }
     return this.posicionesService.create(createPosicionesDto, {
       userId: Number(req.user.userId),
       cliente: Number(req.user.cliente),

@@ -20,9 +20,11 @@ import { UpdatePermisoEstatusDto } from './dto/update-permiso-estatus.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles, ROLES_CONOCIDOS } from 'src/guard/roles.decorator';
+import { TenantExempt } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Permisos')
 @ApiBearerAuth('bearer-token')
+@TenantExempt('Catálogo global sin IdCliente')
 @Controller('permisos')
 @UseGuards(JwtAuthGuard)
 @Roles(1, 2)

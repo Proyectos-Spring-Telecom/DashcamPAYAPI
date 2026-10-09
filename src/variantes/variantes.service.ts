@@ -1,3 +1,4 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import {
   clienteHijosDesdeSp,
   tieneIdsTenant,
@@ -50,6 +51,12 @@ export class VariantesService {
     createVarianteDto: CreateVarianteDto,
   ) {
     try {
+      // N-07: 404 uniforme (no revelar si la ruta existe en otro tenant).
+      await assertPadresEnTenant(
+        this.variantesRepository.manager.connection,
+        { cliente, rol, userId: idUser },
+        { ruta: createVarianteDto.idRuta },
+      );
       const ruta = await this.rutasRepository.findOne({
         where: { id: createVarianteDto.idRuta },
         relations: ['idZona2'],

@@ -14,6 +14,7 @@ import {
 import {
   clientesPermitidos,
   clienteHijosDesdeSp,
+  esPublicId,
   tieneIdsTenant,
 } from 'src/common/tenant/ownership-resolvers';
 import { SecurityFlags } from 'src/common/security-flags';
@@ -202,11 +203,12 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
             where: { numeroSerie: tx.numeroSerieMonedero },
           });
           const cobro = Number(tx.cobroMaximo ?? tx.monto ?? 0);
-          let cargo = Math.min(Math.max(cobro, 0), Math.max(Number(monedero?.saldo ?? 0), 0));
+          let cargo = Math.min(
+            Math.max(cobro, 0),
+            Math.max(Number(monedero?.saldo ?? 0), 0),
+          );
 
-          const monederoActivo =
-            monedero &&
-            Number(monedero.estatus) === 1;
+          const monederoActivo = monedero && Number(monedero.estatus) === 1;
 
           if (cargo > 0 && monederoActivo) {
             let descontado = await this.monederosService.descontarSaldoAtomico(
@@ -239,17 +241,19 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
             cargo = 0;
           }
 
-          const cierre = await manager.getRepository(TransaccionesDebito).update(
-            {
-              id: tx.id,
-              controlTransaccion: EnumControlTransacciones.ABIERTA,
-            },
-            {
-              monto: parseFloat(cargo.toFixed(2)),
-              controlTransaccion: EnumControlTransacciones.PAGADO,
-              fechaHoraFinal: nowDb(),
-            },
-          );
+          const cierre = await manager
+            .getRepository(TransaccionesDebito)
+            .update(
+              {
+                id: tx.id,
+                controlTransaccion: EnumControlTransacciones.ABIERTA,
+              },
+              {
+                monto: parseFloat(cargo.toFixed(2)),
+                controlTransaccion: EnumControlTransacciones.PAGADO,
+                fechaHoraFinal: nowDb(),
+              },
+            );
           if (!cierre.affected) {
             throw new Error('ABIERTA_YA_CERRADA');
           }
@@ -514,7 +518,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       // Imprimir en consola el cálculo detallado
 
       if (puntoMasCercanoIndex !== -1 && puntoMasCercano) {
-
         if (puntoMasCercanoIndex === 0) {
         } else {
           // Calcular distancia desde el punto más cercano hasta el punto 1
@@ -543,7 +546,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         }
       } else {
       }
-
 
       // Imprimir detalle punto por punto del recorrido completo para mostrar el tamaño total
       let distanciaAcumuladaRecorridoCompleto = 0;
@@ -597,7 +599,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
               distanciaExcedente / incrementoCadaMetros,
             );
             extraPotencial = numeroIncrementos * costoAdicional;
-
           } else {
           }
         } else {
@@ -607,7 +608,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         }
       } else {
       }
-
 
       return isNaN(distanciaEnKm) || distanciaEnKm < 0 ? 0 : distanciaEnKm;
     } catch (error) {
@@ -716,7 +716,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           distanciaRestanteMetros =
             distanciaAlPuntoMasCercano +
             distanciaDesdePuntoMasCercanoHastaUltimo;
-
         } else {
           // Si no se encuentra punto cercano, calcular distancia directa al último punto
           distanciaRestanteMetros = haversine(puntoInicial, ultimoPunto);
@@ -743,7 +742,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       );
       const extraMaximo = numeroIncrementos * costoAdicional;
       const cobroMaximo = tarifaBase + extraMaximo;
-
 
       return parseFloat(cobroMaximo.toFixed(2));
     } catch (error) {
@@ -921,12 +919,22 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
     rol = 0,
     cliente = 0,
   ): Promise<ApiCrudResponse> {
-    const clave = createTransaccioneRecargaDto.claveIdempotencia?.trim() || null;
+    const clave =
+      createTransaccioneRecargaDto.claveIdempotencia?.trim() || null;
     if (!clave) {
-      return this.procesarRecarga(createTransaccioneRecargaDto, idUser, rol, cliente, null);
+      return this.procesarRecarga(
+        createTransaccioneRecargaDto,
+        idUser,
+        rol,
+        cliente,
+        null,
+      );
     }
 
-    const previa = await this.recargaPorClave(clave, createTransaccioneRecargaDto);
+    const previa = await this.recargaPorClave(
+      clave,
+      createTransaccioneRecargaDto,
+    );
     if (previa) return previa;
 
     // INSERT IGNORE sobre la PK: solo una petición con esta clave llega a NetPay.
@@ -943,7 +951,10 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         ],
       );
     if (Number(insert?.affectedRows ?? 0) !== 1) {
-      const ganadora = await this.recargaPorClave(clave, createTransaccioneRecargaDto);
+      const ganadora = await this.recargaPorClave(
+        clave,
+        createTransaccioneRecargaDto,
+      );
       if (ganadora) return ganadora;
       throw new ConflictException(
         'Ya hay una recarga en proceso con esa claveIdempotencia.',
@@ -1017,6 +1028,123 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /**
+   * H-20: concilia las reservas de recarga que quedaron a medias.
+   *
+   * Barre:
+   *  - EN_PROCESO vencidas (más de `RESERVA_STALE_MINUTES`, default 15): el
+   *    proceso murió entre el reserve y el complete/rollback.
+   *  - PENDIENTE_CONCILIAR: NetPay cobró, la recarga no se guardó y el reembolso
+   *    de compensación también falló.
+   *
+   * Para cada reserva:
+   *  1) Si la recarga SÍ se registró (por clave o por token) → COMPLETADA.
+   *  2) Si no hay recarga pero NetPay cobró (hay token) → refund de SISTEMA
+   *     (sin actor) con `reembolsarCompensacion` → REEMBOLSADA.
+   *  3) EN_PROCESO vencida sin token ni recarga → se deja PENDIENTE_CONCILIAR
+   *     para revisión manual (no se puede confirmar/compensar contra NetPay).
+   *
+   * Idempotente y seguro ante repetición: los UPDATE están condicionados al
+   * estado previo y, tras resolver, la fila deja de ser elegible. No crea
+   * job/cron: un job externo inyecta este servicio y llama este método.
+   */
+  async conciliarReservasPendientes(): Promise<{
+    revisadas: number;
+    resueltas: number;
+  }> {
+    const staleRaw = Number(process.env.RESERVA_STALE_MINUTES ?? 15);
+    const minutos =
+      Number.isFinite(staleRaw) && staleRaw > 0 ? Math.floor(staleRaw) : 15;
+
+    const reservas: Array<{
+      clave: string;
+      serie: string;
+      token: string | null;
+      estado: string;
+    }> = await this.transaccionesrecargaRepository.query(
+      `SELECT ClaveIdempotencia AS clave,
+              NumeroSerieMonedero AS serie,
+              TransactionTokenIdNetPay AS token,
+              Estado AS estado
+         FROM ReservasRecarga
+        WHERE Estado = 'PENDIENTE_CONCILIAR'
+           OR (Estado = 'EN_PROCESO'
+               AND FechaCreacion < (NOW() - INTERVAL ? MINUTE))`,
+      [minutos],
+    );
+
+    let resueltas = 0;
+    for (const r of reservas) {
+      try {
+        // 1) ¿La recarga sí quedó registrada? (reserva colgada tras el COMMIT)
+        const recargaRows: Array<{ id: number }> = r.token
+          ? await this.transaccionesrecargaRepository.query(
+              `SELECT Id AS id FROM TransaccionesRecarga
+                WHERE ClaveIdempotencia = ? OR TransactionTokenIdNetPay = ?
+                ORDER BY Id ASC LIMIT 1`,
+              [r.clave, r.token],
+            )
+          : await this.transaccionesrecargaRepository.query(
+              `SELECT Id AS id FROM TransaccionesRecarga
+                WHERE ClaveIdempotencia = ?
+                ORDER BY Id ASC LIMIT 1`,
+              [r.clave],
+            );
+        const recargaId = recargaRows?.[0]?.id
+          ? Number(recargaRows[0].id)
+          : null;
+
+        if (recargaId) {
+          await this.transaccionesrecargaRepository.query(
+            `UPDATE ReservasRecarga
+                SET Estado = 'COMPLETADA', IdTransaccionRecarga = ?
+              WHERE ClaveIdempotencia = ?
+                AND Estado IN ('EN_PROCESO','PENDIENTE_CONCILIAR')`,
+            [recargaId, r.clave],
+          );
+          resueltas++;
+          continue;
+        }
+
+        // 2) No hay recarga pero NetPay cobró: refund de sistema (sin actor).
+        if (r.token) {
+          await this.netpayService.reembolsarCompensacion(r.token);
+          await this.transaccionesrecargaRepository.query(
+            `UPDATE ReservasRecarga
+                SET Estado = 'REEMBOLSADA'
+              WHERE ClaveIdempotencia = ?
+                AND Estado IN ('EN_PROCESO','PENDIENTE_CONCILIAR')`,
+            [r.clave],
+          );
+          resueltas++;
+          continue;
+        }
+
+        // 3) EN_PROCESO vencida sin token ni recarga: nada que confirmar ni
+        //    compensar en NetPay. Se marca PENDIENTE_CONCILIAR (revisión manual)
+        //    y deja de contarse como "en proceso".
+        await this.transaccionesrecargaRepository.query(
+          `UPDATE ReservasRecarga
+              SET Estado = 'PENDIENTE_CONCILIAR'
+            WHERE ClaveIdempotencia = ? AND Estado = 'EN_PROCESO'`,
+          [r.clave],
+        );
+      } catch (error) {
+        this.logger.error(
+          `[CONCILIACION] no se pudo conciliar la reserva ${r.clave}: ${
+            (error as Error)?.message
+          }`,
+        );
+        // Queda en su estado actual (PENDIENTE) para el siguiente barrido.
+      }
+    }
+
+    this.logger.log(
+      `[CONCILIACION] reservas revisadas=${reservas.length} resueltas=${resueltas}`,
+    );
+    return { revisadas: reservas.length, resueltas };
+  }
+
   private async procesarRecarga(
     createTransaccioneRecargaDto: CreateTransaccioneRecargaDto,
     idUser: number,
@@ -1046,8 +1174,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       }
 
       const esEfectivoOTransferencia =
-        createTransaccioneRecargaDto.idMetodoPago ===
-          EnumMetodoPago.EFECTIVO ||
+        createTransaccioneRecargaDto.idMetodoPago === EnumMetodoPago.EFECTIVO ||
         createTransaccioneRecargaDto.idMetodoPago ===
           EnumMetodoPago.TRANSFERENCIA;
       // Regla de negocio: la tarjeta solo la usa el pasajero desde su propia
@@ -1103,7 +1230,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         createTransaccioneRecargaDto.idMetodoPago ===
           EnumMetodoPago.TARJETA_DEBITO
       ) {
-
         // Validar que se hayan proporcionado todos los datos necesarios
         if (!createTransaccioneRecargaDto.tokenCardNetPay) {
           throw new BadRequestException(
@@ -1229,8 +1355,14 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
 
       let transaccionSave;
       try {
-        transaccionSave = await this.dataSource.transaction(
-        async (manager) => {
+        transaccionSave = await this.dataSource.transaction(async (manager) => {
+          // H-08/H-09/V2-06: lock de BD sobre la fila del monedero ANTES de
+          // mutar el saldo. Serializa la recarga entre instancias; el KeyedMutex
+          // solo cubre concurrencia intra-proceso.
+          await this.monederosService.bloquearMonederoParaActualizar(
+            createTransaccioneRecargaDto.numeroSerieMonedero,
+            manager,
+          );
           const incrementado =
             await this.monederosService.incrementarSaldoAtomico(
               createTransaccioneRecargaDto.numeroSerieMonedero,
@@ -1277,8 +1409,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
                 : null,
           });
           return manager.save(newTransaccion);
-        },
-        );
+        });
       } catch (commitError) {
         const tokenId = pagoNetpayResponse?.transactionTokenId;
         if (tokenId) {
@@ -1438,9 +1569,24 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       // lugar de volver a cobrar. Cubre el reintento del dispositivo (secuencial).
       const claveIdempotencia =
         createTransaccioneDebitoDto.claveIdempotencia?.trim() || null;
-      if (SecurityFlags.idempotencyKey() && !claveIdempotencia) {
-        throw new BadRequestException(
-          'El campo claveIdempotencia es obligatorio',
+      // H-10/V2-03/V2-16: ventana de transición. Por defecto (flag ausente/no
+      // 'true') se ACEPTA el débito sin claveIdempotencia, pero se deja un
+      // WARNING para alertar. Solo con ENFORCE_IDEMPOTENCY_KEY === 'true' se
+      // rechaza con 400. Cuando la clave SÍ viene, el comportamiento (DUP de
+      // otro monedero → 409, reusar la previa del mismo monedero) queda intacto.
+      if (!claveIdempotencia) {
+        if (process.env.ENFORCE_IDEMPOTENCY_KEY === 'true') {
+          throw new BadRequestException(
+            'El campo claveIdempotencia es obligatorio',
+          );
+        }
+        this.logger.warn(
+          `[TRANSICION] débito sin claveIdempotencia (monedero=${
+            createTransaccioneDebitoDto.numeroSerieMonedero ??
+            createTransaccioneDebitoDto.idCard ??
+            'desconocido'
+          }); se procede por ventana de transición. ` +
+            'Active ENFORCE_IDEMPOTENCY_KEY=true para exigirla.',
         );
       }
       // 2?? Buscamos el monedero
@@ -1527,14 +1673,12 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         transaccionesAbiertasMultiple &&
         transaccionesAbiertasMultiple.length > 0
       ) {
-
         // Usar las coordenadas iniciales de la nueva transacción como coordenadas finales
         const latitudFinal = createTransaccioneDebitoDto.latitud;
         const longitudFinal = createTransaccioneDebitoDto.longitud;
 
         // Procesar cada transacción abierta
         for (const transaccionAbierta of transaccionesAbiertasMultiple) {
-
           // Obtener variante y tarifa de la transacción existente usando idViaje
           let varianteUpdate: Variantes | null = null;
           let tarifaInfoUpdate: any = null;
@@ -1812,7 +1956,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
               }
               throw cierreError;
             }
-
           }
         }
 
@@ -1887,11 +2030,19 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           variante = viaje.idVariante2;
         }
 
-        // Obtener el turno con la instalaci?n
-        const turno = await this.turnosRepository.findOne({
-          where: { id: viaje.idTurno },
-          relations: ['idInstalacion2'],
-        });
+        // H-37: turno y tarifa dependen solo del viaje y son independientes
+        // entre sí → se leen en paralelo. instalacion depende de turno, así que
+        // se mantiene secuencial. Los null-checks conservan el mismo orden para
+        // no cambiar qué error se lanza primero ni el resultado del cobro.
+        const [turno, tarifa] = await Promise.all([
+          this.turnosRepository.findOne({
+            where: { id: viaje.idTurno },
+            relations: ['idInstalacion2'],
+          }),
+          this.tarifasRepository.findOne({
+            where: { idVariante: viaje.idVariante, estatus: 1 },
+          }),
+        ]);
 
         if (!turno) {
           throw new NotFoundException(
@@ -1910,11 +2061,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
             `La instalaci?n con ID ${turno.idInstalacion} no existe`,
           );
         }
-
-        // Obtener la tarifa de la variante
-        const tarifa = await this.tarifasRepository.findOne({
-          where: { idVariante: viaje.idVariante, estatus: 1 },
-        });
 
         // Construir el objeto con la misma estructura que el query anterior
         infoValidadorViaje = [
@@ -2001,7 +2147,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       const tipoTarifa = Number(tarifaInfo.TipoTarifa);
       const tarifaBase = Number(tarifaInfo.TarifaBase) || 0;
       const idViaje = tarifaInfo.idViaje ? Number(tarifaInfo.idViaje) : null;
-
 
       const esTarifaPorEstaciones = tipoTarifa === EnumTipoTarifa.ESTACIONES;
 
@@ -2103,7 +2248,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         controlTransaccion = EnumControlTransacciones.PAGADO;
       }
 
-
       // 2.6?? Calculamos el monto seg?n el tipo de tarifa
       // Si TipoTarifa = 1 (Fija), usar TarifaBase
       // Si TipoTarifa = 2 (Abierta), tambi?n usar TarifaBase (o se puede extender la l?gica)
@@ -2196,7 +2340,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
               return fecha >= fechaLimite && fecha < fechaHoraTransaccion;
             });
 
-
             // Buscar el cobro inicial (numeroTransbordo = 0) MÁS RECIENTE dentro del rango
             // Ordenar por fecha descendente para encontrar el más reciente
             const cobrosIniciales = transaccionesFiltradas
@@ -2243,7 +2386,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
                 const numerosTransbordo = transaccionesDesdeCobroInicial
                   .map((t) => t.numeroTransbordo)
                   .filter((n) => n !== null && n !== undefined);
-
 
                 if (numerosTransbordo.length > 0) {
                   const maxNumeroTransbordo = Math.max(...numerosTransbordo);
@@ -2318,7 +2460,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           const tipoDescuento = Number(tipoPasajero.idCatTipoDescuento);
           const cantidad = Number(tipoPasajero.cantidad);
 
-
           // idCatTipoDescuento: 1 = PORCENTAJE, 2 = MONETARIO
           if (tipoDescuento === 1) {
             // Tipo 1: PORCENTAJE - cantidad es el porcentaje a descontar
@@ -2333,7 +2474,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           if (montoConDescuento < 0) {
             montoConDescuento = 0;
           }
-
         } else {
         }
       } else if (tipoTarifa !== EnumTipoTarifa.FIJA) {
@@ -2346,7 +2486,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         tipoDescuentoTransbordo !== null &&
         costoTransbordo > 0
       ) {
-
         // Evaluar el tipo de descuento: 1 = PESOS (resta directa), 2 = PORCENTAJE
         if (tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.MONETARIO) {
           // Tipo 1: PESOS - resta directa sobre el monto ya descontado por tipo de pasajero
@@ -2365,7 +2504,6 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         if (montoConDescuento < 0) {
           montoConDescuento = 0;
         }
-
       }
 
       // Determinar cantidad de pasajes a procesar
@@ -2615,6 +2753,14 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           }
 
           if (controlTransaccion === EnumControlTransacciones.PAGADO) {
+            // H-08/H-09/V2-06: lock de BD sobre la fila del monedero ANTES de
+            // mutar el saldo. Serializa el cobro entre instancias; el KeyedMutex
+            // solo cubre concurrencia intra-proceso. El UPDATE condicional sigue
+            // como defensa.
+            await this.monederosService.bloquearMonederoParaActualizar(
+              monedero.numeroSerie,
+              manager,
+            );
             const descontado =
               await this.monederosService.descontarSaldoAtomico(
                 monedero.numeroSerie,
@@ -3920,7 +4066,6 @@ LIMIT ? OFFSET ?;
             Number(offset),
           ];
 
-
           transacciones =
             await this.historicoTransaccionesRecargaRepository.query(
               queryRecargasRol11,
@@ -4744,7 +4889,9 @@ FROM (
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Error al obtener transacciones: ${(error as Error)?.message}`);
+      this.logger.error(
+        `Error al obtener transacciones: ${(error as Error)?.message}`,
+      );
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });
@@ -5015,7 +5162,9 @@ ORDER BY FHRegistro DESC
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Error al obtener transacciones: ${(error as Error)?.message}`);
+      this.logger.error(
+        `Error al obtener transacciones: ${(error as Error)?.message}`,
+      );
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });
@@ -5105,31 +5254,51 @@ INNER JOIN Clientes c
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Error al obtener transacciones: ${(error as Error)?.message}`);
+      this.logger.error(
+        `Error al obtener transacciones: ${(error as Error)?.message}`,
+      );
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });
     }
   }
 
-  async findOneTransaccionDebito(id: number, cliente = 0, rol = 1) {
+  async findOneTransaccionDebito(id: number | string, cliente = 0, rol = 1) {
     try {
+      // H-66: acepta id numérico o PublicId (ULID); se resuelve a Id numérico.
+      let idNum: number;
+      if (esPublicId(id)) {
+        const row = await this.transaccionesdebitoRepository.findOne({
+          where: { publicId: String(id) },
+        });
+        if (!row) {
+          throw new NotFoundException('Transaccion no encontrada');
+        }
+        idNum = Number(row.id);
+      } else {
+        idNum = Number(id);
+        if (!Number.isInteger(idNum) || idNum <= 0) {
+          throw new NotFoundException('Transaccion no encontrada');
+        }
+      }
+
       let whereSql = 'WHERE td.Id = ?';
-      let params: number[] = [id];
+      let params: number[] = [idNum];
       if (Number(rol) !== 1) {
         const { ids, placeholders } = await this.clienteHijos(cliente);
         if (!tieneIdsTenant(ids)) {
           throw new NotFoundException('Transaccion no encontrada');
         }
         whereSql += ` AND m.IdCliente IN (${placeholders})`;
-        params = [id, ...ids];
+        params = [idNum, ...ids];
       }
 
       const transacciones = await this.transaccionesrecargaRepository.query(
         `
-SELECT 
+SELECT
     'DEBITO' AS origenTabla,
     td.Id AS id,
+    td.PublicId AS publicId,
     ctt.Nombre AS tipoTransaccion,
     td.Monto AS monto,
     COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
@@ -5196,7 +5365,9 @@ INNER JOIN Clientes c
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Error al obtener transacciones: ${(error as Error)?.message}`);
+      this.logger.error(
+        `Error al obtener transacciones: ${(error as Error)?.message}`,
+      );
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });

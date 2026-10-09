@@ -24,7 +24,6 @@ import {
   EnumEstatusMonederos,
   EnumModulos,
   EnumSolicitudPasajero,
-  EnumTipoTransaccion,
   EstatusEnum,
 } from 'src/common/estatus.enum';
 import { Clientes } from 'src/entities/Clientes';
@@ -37,6 +36,8 @@ import * as QRCode from 'qrcode';
 import {
   clientesPermitidos,
   clienteHijosDesdeSp,
+  esPublicId,
+  generarPublicId,
   tieneIdsTenant,
 } from 'src/common/tenant/ownership-resolvers';
 
@@ -145,6 +146,7 @@ export class MonederosService {
       //Guardamos el monedero
       const newMonedero = this.monederoRepository.create({
         ...createMonederoDto,
+        publicId: generarPublicId(), // H-66: id opaco en el alta
         saldo: 0,
         esVirtual: 0, // Monedero físico creado manualmente
       });
@@ -166,32 +168,9 @@ export class MonederosService {
         EstatusEnumBitcora.SUCCESS,
       );
 
-      //Creamos la transaccion en la BD
-      const newTransaccion = await this.transaccionesrecargaRepository.create({
-        idTipoTransaccion: EnumTipoTransaccion.RECARGA,
-        monto: 0,
-        fechaHoraFinal: fechaActual,
-        numeroSerieMonedero: monederoSave.numeroSerie,
-        numeroSerieValidador: null,
-        idMetodoPago: 1,
-      });
-      const _transaccionSave =
-        await this.transaccionesrecargaRepository.save(newTransaccion);
-
-      // --- Registro en la bitácora --- SUCCESS
-      const queryloggerTransacciones = {
-        numeroSerieMonedero: monederoSave.numeroSerie,
-        idTipoTransaccion: EnumTipoTransaccion.RECARGA,
-      };
-      await this.bitacoraLogger.logToBitacora(
-        'Transacciones',
-        `Se realizo una transaccion de tipo ${EnumTipoTransaccion.RECARGA}`,
-        'CREATE',
-        queryloggerTransacciones,
-        idUser,
-        EnumModulos.TRANSACCIONES,
-        EstatusEnumBitcora.SUCCESS,
-      );
+      // H-17: El monedero nace en saldo 0. NO se registra una
+      // TransaccionesRecarga de monto 0 en el alta: no hubo recarga real y
+      // ensuciaba el historial de transacciones.
 
       //API response
       const result: ApiCrudResponse = {
@@ -258,6 +237,7 @@ export class MonederosService {
             `
 SELECT 
     m.Id AS id,
+    m.PublicId AS publicId,
     m.NumeroSerie AS numeroSerie,
     m.Saldo AS saldo,
     m.FechaActivacion AS fechaActivacion,
@@ -333,6 +313,7 @@ INNER JOIN Clientes c ON m.IdCliente = c.Id
             `
 SELECT 
     m.Id AS id,
+    m.PublicId AS publicId,
     m.NumeroSerie AS numeroSerie,
     m.Saldo AS saldo,
     m.FechaActivacion AS fechaActivacion,
@@ -403,6 +384,7 @@ WHERE m.IdPasajero = ? AND m.Estatus = 1
             `
 SELECT 
     m.Id AS id,
+    m.PublicId AS publicId,
     m.NumeroSerie AS numeroSerie,
     m.Saldo AS saldo,
     m.FechaActivacion AS fechaActivacion,
@@ -524,6 +506,7 @@ WHERE c.Id IN (${placeholders})
             `
 SELECT 
     m.Id AS id,
+    m.PublicId AS publicId,
     m.NumeroSerie AS numeroSerie,
     m.Saldo AS saldo,
     m.FechaActivacion AS fechaActivacion,
@@ -601,6 +584,7 @@ WHERE m.Estatus = 1
             `
 SELECT 
     m.Id AS id,
+    m.PublicId AS publicId,
     m.NumeroSerie AS numeroSerie,
     m.Saldo AS saldo,
     m.FechaActivacion AS fechaActivacion,
@@ -671,6 +655,7 @@ WHERE m.IdPasajero = ? AND m.Estatus = 1
             `
 SELECT 
     m.Id AS id,
+    m.PublicId AS publicId,
     m.NumeroSerie AS numeroSerie,
     m.Saldo AS saldo,
     m.FechaActivacion AS fechaActivacion,
@@ -837,6 +822,7 @@ WHERE c.Id IN (${placeholders}) AND m.Estatus = 1
             `
 SELECT 
     m.Id AS id,
+    m.PublicId AS publicId,
     m.NumeroSerie AS numeroSerie,
     m.Saldo AS saldo,
     m.FechaActivacion AS fechaActivacion,
@@ -893,6 +879,7 @@ ORDER BY m.Id DESC;
             `
 SELECT 
     m.Id AS id,
+    m.PublicId AS publicId,
     m.NumeroSerie AS numeroSerie,
     m.Saldo AS saldo,
     m.FechaActivacion AS fechaActivacion,
@@ -942,6 +929,7 @@ ORDER BY m.Id DESC;
             `
 SELECT 
     m.Id AS id,
+    m.PublicId AS publicId,
     m.NumeroSerie AS numeroSerie,
     m.Saldo AS saldo,
     m.FechaActivacion AS fechaActivacion,
@@ -1032,15 +1020,42 @@ ORDER BY m.Id DESC;
   // ========================================
   // 🔹 OBTENER UN MONEDERO POR ID
   // ========================================
+  /**
+   * H-66: resuelve el identificador recibido (numérico o PublicId/ULID) al Id
+   * numérico. Valida el formato también para SA (que no pasa por el guard).
+   */
+  private async resolveIdMonedero(id: number | string): Promise<number> {
+    if (esPublicId(id)) {
+      const row = await this.monederoRepository.findOne({
+        where: { publicId: String(id) },
+      });
+      if (!row) {
+        throw new NotFoundException(
+          `El monedero con ID: ${id} no fue encontrado.`,
+        );
+      }
+      return Number(row.id);
+    }
+    const n = Number(id);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new NotFoundException(
+        `El monedero con ID: ${id} no fue encontrado.`,
+      );
+    }
+    return n;
+  }
+
   async findOneMonedero(
-    id: number,
+    id: number | string,
     cliente = 0,
     rol = 1,
     userId?: number,
   ) {
     try {
+      // H-66: acepta id numérico o PublicId (ULID); se resuelve a Id numérico.
+      const idNum = await this.resolveIdMonedero(id);
       const monedero = await this.monederoRepository.findOne({
-        where: { id: id },
+        where: { id: idNum },
         relations: ['idPasajero2', 'idPasajero2.idUsuario2'],
       });
       if (!monedero) {
@@ -1415,6 +1430,34 @@ ORDER BY m.Id DESC;
   }
 
   // ========================================
+  // 🔹 LOCK PESIMISTA DE FILA (serializa el saldo entre instancias)
+  // ========================================
+  /**
+   * Toma un lock `pessimistic_write` (SELECT ... FOR UPDATE) sobre la fila del
+   * monedero usando el MISMO EntityManager de la transacción del llamador.
+   *
+   * H-08/H-09/V2-06: el `KeyedMutex` del servicio de transacciones solo serializa
+   * dentro de un proceso; este lock de BD es el que serializa el cobro/recarga
+   * ENTRE instancias. Debe llamarse DENTRO de la transacción y ANTES de leer o
+   * mutar el saldo. El UPDATE condicional (`Saldo >= :monto`) sigue como defensa.
+   *
+   * Se usa queryBuilder sin joins para emitir un `FOR UPDATE` limpio solo sobre
+   * la tabla Monederos (evita bloquear filas de tablas relacionadas).
+   *
+   * @returns la fila bloqueada, o null si el monedero no existe.
+   */
+  async bloquearMonederoParaActualizar(
+    numeroSerie: string,
+    manager: EntityManager,
+  ): Promise<Monederos | null> {
+    return manager
+      .createQueryBuilder(Monederos, 'm')
+      .setLock('pessimistic_write')
+      .where('m.NumeroSerie = :numeroSerie', { numeroSerie })
+      .getOne();
+  }
+
+  // ========================================
   // 🔹 DESCUENTO ATÓMICO DE SALDO (previene doble-cobro por concurrencia)
   // ========================================
   /**
@@ -1756,8 +1799,12 @@ ORDER BY m.Id DESC;
   ) {
     try {
       const { correo, numeroSerie } = updateMonederoExtravioDto;
-      const correoNorm = String(correo || '').trim().toLowerCase();
-      const emailJwt = String(emailActor || '').trim().toLowerCase();
+      const correoNorm = String(correo || '')
+        .trim()
+        .toLowerCase();
+      const emailJwt = String(emailActor || '')
+        .trim()
+        .toLowerCase();
 
       if (rolActor === 9) {
         if (!emailJwt || correoNorm !== emailJwt) {
@@ -1885,8 +1932,7 @@ ORDER BY m.Id DESC;
         message: 'Monedero recuperado de manera correcta correctamente.',
         data: {
           id: idDestino,
-          nombre:
-            `${nuevoMonedero.numeroSerie} ${saldoTraspaso} ` || '',
+          nombre: `${nuevoMonedero.numeroSerie} ${saldoTraspaso} ` || '',
         },
       };
       return result;

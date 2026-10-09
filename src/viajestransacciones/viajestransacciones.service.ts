@@ -1,4 +1,5 @@
 import { clienteHijosDesdeSp, tieneIdsTenant } from 'src/common/tenant/ownership-resolvers';
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import {
   HttpException,
   Injectable,
@@ -53,6 +54,15 @@ LIMIT 1
           throw new NotFoundException('Viaje no encontrado');
         }
       }
+      // N-07: las transacciones enlazadas también deben ser del tenant.
+      await assertPadresEnTenant(
+        this.viajestransaccionesRepository.manager.connection,
+        { cliente, rol, userId: idUser },
+        {
+          transaccionDebito: createViajestransaccioneDto.idTransaccionDebito,
+          transaccionRecarga: createViajestransaccioneDto.idTransaccionRecarga,
+        },
+      );
 
       const newViajeTransacciones =
         await this.viajestransaccionesRepository.create(

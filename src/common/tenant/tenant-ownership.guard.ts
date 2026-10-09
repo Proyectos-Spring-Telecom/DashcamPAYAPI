@@ -3,20 +3,37 @@ import {
   ExecutionContext,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import {
+  TENANT_EXEMPT_KEY,
   TENANT_RESOURCE_KEY,
   TenantResourceOptions,
 } from './tenant-resource.decorator';
 import {
   ownershipResolvers,
+  RESOLVERS_OPAQUE,
   ROL_SUPER_ADMIN,
   TenantUser,
 } from './ownership-resolvers';
+
+/** Parámetros de ruta que no identifican un objeto (mismo criterio que lint:tenant). */
+export const PARAMS_NO_OBJETO = new Set([
+  'page',
+  'limit',
+  'fecha',
+  'fechaInicio',
+  'fechaFin',
+  'hora',
+  'year',
+  'month',
+  'estatus',
+  'cp',
+]);
 
 /**
  * Guard de autorización a nivel de objeto (multi-tenant / anti-IDOR).
@@ -26,13 +43,16 @@ import {
  *
  *   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
  *
- * Solo actúa sobre rutas anotadas con `@TenantResource(...)`; el resto pasan
- * sin cambios. Cuando el recurso no pertenece al tenant (o no existe) responde
+ * Valida las rutas anotadas con `@TenantResource(...)`. Una ruta con parámetro
+ * de objeto sin `@TenantResource` ni `@TenantExempt(motivo)` se niega
+ * (fail-closed). Cuando el recurso no pertenece al tenant (o no existe) responde
  * 404, de modo que un id ajeno se comporta igual que un id inexistente y no se
  * filtra la existencia del recurso.
  */
 @Injectable()
 export class TenantOwnershipGuard implements CanActivate {
+  private readonly logger = new Logger(TenantOwnershipGuard.name);
+
   constructor(
     private readonly reflector: Reflector,
     private readonly dataSource: DataSource,
@@ -44,10 +64,25 @@ export class TenantOwnershipGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
-    // Ruta no anotada: el guard no interviene (comportamiento idéntico al actual).
-    if (!meta) return true;
-
     const request = context.switchToHttp().getRequest();
+
+    if (!meta) {
+      const exenta = this.reflector.getAllAndOverride<string>(
+        TENANT_EXEMPT_KEY,
+        [context.getHandler(), context.getClass()],
+      );
+      if (exenta) return true;
+      // Fail-closed: una ruta con parámetro de objeto que pasa por este guard
+      // debe declarar @TenantResource o @TenantExempt(motivo).
+      const params = Object.keys(request.params ?? {}).filter(
+        (p) => !PARAMS_NO_OBJETO.has(p),
+      );
+      if (params.length === 0) return true;
+      this.logger.error(
+        `Ruta sin @TenantResource/@TenantExempt: ${request.method} ${request.route?.path ?? ''}`,
+      );
+      throw new NotFoundException('Recurso no encontrado.');
+    }
     const user = request.user as TenantUser | undefined;
 
     if (!user) {
@@ -66,9 +101,13 @@ export class TenantOwnershipGuard implements CanActivate {
 
     // Formato antes de consultar: un id raro ("1 OR 1", "1e3", " 7") no debe
     // llegar al resolver ni distinguirse de uno inexistente.
+    // H-66: los resolvers opacos aceptan también el PublicId (ULID, 26 chars
+    // Crockford base32). El resto sigue restringido a `^\d{1,19}$`.
     const formato = meta.resolver.endsWith('BySerie')
       ? /^[A-Za-z0-9_-]{1,100}$/
-      : /^\d{1,19}$/;
+      : RESOLVERS_OPAQUE.has(meta.resolver)
+        ? /^(\d{1,19}|[0-9A-HJKMNP-TV-Z]{26})$/
+        : /^\d{1,19}$/;
     if (!formato.test(String(id))) {
       throw new NotFoundException('Recurso no encontrado.');
     }

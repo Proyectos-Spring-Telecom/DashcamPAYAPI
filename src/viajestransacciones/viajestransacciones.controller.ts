@@ -13,7 +13,10 @@ import { CreateViajestransaccioneDto } from './dto/create-viajestransaccione.dto
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
-import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
+import {
+  TenantExempt,
+  TenantResource,
+} from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Viajes transacciones')
@@ -59,6 +62,7 @@ export class ViajestransaccionesController {
   }
 
   @Get('transacciones/:id')
+  @TenantExempt('Viaje filtrado por clienteHijos en findOneTransacciones')
   findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
     return this.viajestransaccionesService.findOneTransacciones(
       +id,

@@ -23,9 +23,11 @@ import {
 } from '@nestjs/swagger';
 import { ApiResponseCommon, ApiCrudResponse } from 'src/common/ApiResponse';
 import { Roles } from 'src/guard/roles.decorator';
+import { TenantExempt } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Catálogo métodos de pago')
 @ApiBearerAuth('bearer-token')
+@TenantExempt('Catálogo global sin IdCliente')
 @Controller('cat-metodo-pago')
 export class CatMetodoPagoController {
   constructor(private readonly catMetodoPagoService: CatMetodoPagoService) {}

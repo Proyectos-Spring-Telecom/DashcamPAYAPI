@@ -195,7 +195,8 @@ export class MonederosController {
 
   @Get(':id')
   @TenantResource('monedero')
-  findOneMonedero(@Param('id', ParseIntPipe) id: number, @Request() req) {
+  // H-66: acepta Id numérico o PublicId (ULID); por eso no usa ParseIntPipe.
+  findOneMonedero(@Param('id') id: string, @Request() req) {
     return this.monederosService.findOneMonedero(
       id,
       +req.user.cliente,

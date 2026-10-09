@@ -70,7 +70,8 @@ export class AuthController {
   @Public()
   @Post('operador/login')
   @HttpCode(200)
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  // H-40: rate-limit específico del login por PIN (más estricto que el resto).
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({
     summary: 'Login operador por PIN (validador)',
     description:

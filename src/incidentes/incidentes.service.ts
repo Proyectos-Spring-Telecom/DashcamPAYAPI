@@ -20,6 +20,7 @@ import {
   EstatusEnumBitcora,
 } from 'src/common/ApiResponse';
 import { clientesPermitidos } from 'src/common/tenant/ownership-resolvers';
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 
 @Injectable()
 export class IncidentesService {
@@ -43,6 +44,15 @@ export class IncidentesService {
     rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      // N-07: las FK padre deben ser del tenant (404 sin revelar existencia).
+      await assertPadresEnTenant(
+        this.dataSource,
+        { cliente: idCliente, rol },
+        {
+          instalacion: createIncidentesDto.idInstalacion,
+          operador: createIncidentesDto.idOperador,
+        },
+      );
       // Validar claves foráneas
       const instalacionExists = await this.instalacionesRepository.findOne({
         where: { id: createIncidentesDto.idInstalacion },
@@ -351,6 +361,15 @@ export class IncidentesService {
       if (!incidente) {
         throw new NotFoundException('Incidente no encontrado');
       }
+      // N-07: la FK padre nueva también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.dataSource,
+        { cliente: idCliente, rol },
+        {
+          instalacion: updateIncidentesDto.idInstalacion,
+          operador: updateIncidentesDto.idOperador,
+        },
+      );
 
       // Subir imagen a S3 si se proporciona un archivo nuevo
       let imagenUrl: string | null = null;

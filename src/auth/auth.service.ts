@@ -48,6 +48,14 @@ import { clientesPermitidos } from 'src/common/tenant/ownership-resolvers';
 import { isMissingTokenVersionColumn } from './token-version';
 import { hashOtp, otpMatchesHash } from 'src/common/otp-hash';
 
+/** Payload de los tokens de propósito (confirmación de correo, reset de contraseña). */
+interface PurposeTokenPayload {
+  id?: number;
+  email?: string;
+  typ?: string;
+  tv?: number;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -118,12 +126,7 @@ export class AuthService {
     return token;
   }
 
-  private verifyPurposeToken(token: string): {
-    id?: number;
-    email?: string;
-    typ?: string;
-    tv?: number;
-  } {
+  private verifyPurposeToken(token: string): PurposeTokenPayload {
     try {
       return this.jwtService.verify(token, {
         secret: this.purposeSecret(),
@@ -135,22 +138,32 @@ export class AuthService {
   }
 
   /**
+   * Valida el Bearer de restablecimiento ANTES de buscar al usuario: sin token
+   * válido la respuesta es la misma exista o no la cuenta (anti-enumeración).
+   */
+  private verifyResetBearer(
+    authorization: string | undefined,
+  ): PurposeTokenPayload {
+    const token = this.extractBearer(authorization);
+    if (!token) {
+      throw new UnauthorizedException('Token inválido o expirado');
+    }
+    const payload = this.verifyPurposeToken(token);
+    if (payload.typ !== JwtTyp.PWD_RESET) {
+      throw new UnauthorizedException('Token inválido o expirado');
+    }
+    return payload;
+  }
+
+  /**
    * El cambio de contraseña exige siempre el token PWD_RESET que llega por
    * correo; el OTP, si se envía, es un factor adicional, no un sustituto.
    */
   private async assertPasswordChangeAuthorized(
     loginAuthResetDto: LoginAuthResetDto,
-    authorization: string | undefined,
+    payload: PurposeTokenPayload,
     user: Usuarios,
   ): Promise<void> {
-    const token = this.extractBearer(authorization);
-    if (!token) {
-      throw new UnauthorizedException('Se requiere token de restablecimiento');
-    }
-    const payload = this.verifyPurposeToken(token);
-    if (payload.typ !== JwtTyp.PWD_RESET) {
-      throw new UnauthorizedException('Token no válido para esta ruta');
-    }
     const email = String(payload.email || '').toLowerCase();
     const target = String(loginAuthResetDto.userName || '').toLowerCase();
     if (email !== target || Number(payload.id) !== Number(user.id)) {
@@ -163,6 +176,13 @@ export class AuthService {
       throw new UnauthorizedException('El enlace ya fue usado o expiró');
     }
   }
+
+  /**
+   * Mismo mensaje para usuario inexistente, sin código, vencido, erróneo o
+   * agotado: el texto no debe revelar si la cuenta existe o tiene OTP pendiente.
+   */
+  private static readonly CODIGO_INVALIDO =
+    'Código inválido o expirado. Si el problema persiste, solicita un nuevo código.';
 
   /**
    * Compara el OTP vigente y cuenta intentos fallidos; al llegar a
@@ -178,14 +198,14 @@ export class AuthService {
       order: { id: 'DESC' },
     });
     if (!registro) {
-      throw new BadRequestException('Código inválido o ya usado');
+      throw new BadRequestException(AuthService.CODIGO_INVALIDO);
     }
     if (new Date() > registro.fechaExpiracion) {
       await this.codigoAutenticacioRepository.update(registro.id, {
         usado: EstatusEnum.INACTIVO,
         estatus: EstatusEnum.INACTIVO,
       });
-      throw new BadRequestException('El código ha expirado');
+      throw new BadRequestException(AuthService.CODIGO_INVALIDO);
     }
     if (!otpMatchesHash(idUsuario, tipo, codigo, registro.codigo)) {
       const maxIntentos = Number(process.env.OTP_MAX_ATTEMPTS ?? 5);
@@ -196,14 +216,12 @@ export class AuthService {
           usado: EstatusEnum.INACTIVO,
           estatus: EstatusEnum.INACTIVO,
         });
-        throw new BadRequestException(
-          'Demasiados intentos. Solicita un nuevo código.',
-        );
+        throw new BadRequestException(AuthService.CODIGO_INVALIDO);
       }
       await this.codigoAutenticacioRepository.update(registro.id, {
         intentos: nuevosIntentos,
       });
-      throw new BadRequestException('Código inválido');
+      throw new BadRequestException(AuthService.CODIGO_INVALIDO);
     }
     return registro;
   }
@@ -239,8 +257,10 @@ export class AuthService {
     }
   }
 
-  private async recordFailedLogin(user: Usuarios): Promise<void> {
-    const maxIntentos = Number(process.env.MAX_LOGIN_ATTEMPTS ?? 10);
+  private async recordFailedLogin(
+    user: Usuarios,
+    maxIntentos = Number(process.env.MAX_LOGIN_ATTEMPTS ?? 10),
+  ): Promise<void> {
     const lockoutMin = Number(process.env.LOCKOUT_MINUTES ?? 30);
     const nuevosIntentos = (user.intentosFallidos ?? 0) + 1;
     const updateData: { intentosFallidos: number; bloqueadoHasta?: string } = {
@@ -848,21 +868,17 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
       );
       //Enviar correo de confirmacion
       const name = `${userSave.nombre} ${userSave.apellidoPaterno} ${userSave.apellidoMaterno ?? ''}`;
-      try {
-        await this.emailService.sendConfirmationEmail(
-          userSave.userName,
-          name,
-          token,
-          codigo,
+      // H-55: sin await, el registro no debe bloquearse ni fallar por el SMTP;
+      // un error de envío solo se registra (mismo patrón que recuperación).
+      void this.emailService
+        .sendConfirmationEmail(userSave.userName, name, token, codigo)
+        .catch((emailError: unknown) =>
+          this.loggerService.error(
+            'AuthService',
+            'Error al enviar correo de confirmación en registro de pasajero',
+            emailError,
+          ),
         );
-      } catch (emailError: unknown) {
-        // Log del error pero no fallar la creación del pasajero
-        this.loggerService.error(
-          'AuthService',
-          'Error al enviar correo de confirmación en registro de pasajero',
-          emailError,
-        );
-      }
 
       //afiliamos el monedero al pasajero y cambiamos estatus activo
       // Actualizar el monedero con el ID del pasajero y activarlo
@@ -1023,7 +1039,12 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         await this.burnPasswordTime(loginAuthPin.codigohash);
       }
       if (!pinValid) {
-        await this.recordFailedLogin(user);
+        // H-40: mismo lockout que el login por contraseña, pero con umbral
+        // propio del PIN (MAX_PIN_ATTEMPTS, análogo a MAX_LOGIN_ATTEMPTS).
+        await this.recordFailedLogin(
+          user,
+          Number(process.env.MAX_PIN_ATTEMPTS ?? 5),
+        );
         try {
           await this.bitacoraLogger.logToBitacora(
             'Autenticación',
@@ -1226,7 +1247,7 @@ LEFT JOIN LicenciasJSON lj ON lj.IdUsuario = du.IdUsuario;
         where: { userName: codigoPasajeroAutenticacion.userName },
       });
       if (!user) {
-        throw new BadRequestException('Código inválido o ya usado');
+        throw new BadRequestException(AuthService.CODIGO_INVALIDO);
       }
 
       const registro = await this.checkOtp(
@@ -1290,11 +1311,17 @@ Muchas gracias por su preferencia.`;
       );
       const name =
         `${user.nombre ?? ''} ${user.apellidoPaterno ?? ''} ${user.apellidoMaterno ?? ''}`.trim();
-      await this.emailService.sendResetPasswordEmail(
-        user.userName,
-        name,
-        token,
-      );
+      // Sin await: el tiempo y el resultado de la respuesta no deben depender
+      // de que la cuenta exista (anti-enumeración); un fallo SMTP se registra.
+      void this.emailService
+        .sendResetPasswordEmail(user.userName, name, token)
+        .catch((error) =>
+          this.loggerService.error(
+            'AuthService',
+            'Envío de correo de recuperación falló',
+            error,
+          ),
+        );
       return AuthService.RECUPERACION_ENVIADA;
     } catch (error) {
       if (error instanceof HttpException) {
@@ -1378,12 +1405,16 @@ Muchas gracias por su preferencia.`;
       );
       const name =
         `${user.nombre ?? ''} ${user.apellidoPaterno ?? ''} ${user.apellidoMaterno ?? ''}`.trim();
-      await this.emailService.sendConfirmationEmail(
-        user.userName,
-        name,
-        token,
-        codigo,
-      );
+      // Sin await, por la misma razón que en recuperarContrasena.
+      void this.emailService
+        .sendConfirmationEmail(user.userName, name, token, codigo)
+        .catch((error) =>
+          this.loggerService.error(
+            'AuthService',
+            'Envío de correo de confirmación falló',
+            error,
+          ),
+        );
       return AuthService.RECUPERACION_ENVIADA;
     } catch (error) {
       if (error instanceof HttpException) {
@@ -1404,6 +1435,7 @@ Muchas gracias por su preferencia.`;
     authorization?: string,
   ) {
     try {
+      const payload = this.verifyResetBearer(authorization);
       const user = await this.usuariosRepository.findOne({
         where: { userName: loginAuthResetDto.userName },
       });
@@ -1411,7 +1443,7 @@ Muchas gracias por su preferencia.`;
 
       await this.assertPasswordChangeAuthorized(
         loginAuthResetDto,
-        authorization,
+        payload,
         user,
       );
 

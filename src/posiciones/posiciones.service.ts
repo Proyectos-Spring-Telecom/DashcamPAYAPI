@@ -1,4 +1,7 @@
-import { clienteHijosDesdeSp, tieneIdsTenant } from 'src/common/tenant/ownership-resolvers';
+import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
 import {
   BadRequestException,
   ForbiddenException,
@@ -52,8 +55,11 @@ export class PosicionesService {
   // ========================================
   async create(
     createPosicionesDto: CreatePosicionesDto,
-    actor: { userId: number; cliente: number; rol: number },
+    actor:
+      | { userId: number; cliente: number; rol: number }
+      | { device: true; numeroSerieValidador: string },
   ): Promise<ApiCrudResponse> {
+    const esDispositivo = 'device' in actor;
     try {
       const lat = Number(createPosicionesDto.latitud);
       const lon = Number(createPosicionesDto.longitud);
@@ -67,27 +73,34 @@ export class PosicionesService {
         throw new BadRequestException('Coordenadas GPS inválidas');
       }
 
-      const usuario = await this.usuariosRepository.findOne({
-        where: { id: actor.userId },
-        select: ['id', 'validadorId', 'idCliente'],
-      });
-      if (!usuario) {
-        throw new ForbiddenException('No autorizado');
-      }
-
       let serie = String(createPosicionesDto.numeroSerieValidador || '').trim();
-      if (Number(actor.rol) === 3) {
-        if (!usuario.validadorId) {
-          throw new ForbiddenException(
-            'El operador no tiene validador asignado.',
-          );
+
+      if (esDispositivo) {
+        // Serie ya verificada por DeviceOrJwtGuard contra la credencial del
+        // dispositivo (Validadores.DeviceTokenHash). No hay usuario operador.
+        serie = actor.numeroSerieValidador;
+      } else {
+        const usuario = await this.usuariosRepository.findOne({
+          where: { id: actor.userId },
+          select: ['id', 'validadorId', 'idCliente'],
+        });
+        if (!usuario) {
+          throw new ForbiddenException('No autorizado');
         }
-        if (serie && serie !== usuario.validadorId) {
-          throw new ForbiddenException(
-            'El validador no coincide con el asignado.',
-          );
+
+        if (Number(actor.rol) === 3) {
+          if (!usuario.validadorId) {
+            throw new ForbiddenException(
+              'El operador no tiene validador asignado.',
+            );
+          }
+          if (serie && serie !== usuario.validadorId) {
+            throw new ForbiddenException(
+              'El validador no coincide con el asignado.',
+            );
+          }
+          serie = usuario.validadorId;
         }
-        serie = usuario.validadorId;
       }
 
       const cuando = new Date(createPosicionesDto.fechaHora);
@@ -123,7 +136,7 @@ export class PosicionesService {
       if (!validador) {
         throw new NotFoundException('Validador no encontrado');
       }
-      if (Number(actor.rol) !== 1) {
+      if (!esDispositivo && Number(actor.rol) !== 1) {
         const { ids } = await this.clienteHijos(Number(actor.cliente));
         if (!ids.includes(Number(validador.idCliente))) {
           throw new NotFoundException('Validador no encontrado');
@@ -140,9 +153,36 @@ export class PosicionesService {
         fechaHora: createPosicionesDto.fechaHora,
         numeroSerieValidador: serie,
       });
-      const posicionSave = await this.posicionesRepository.save(newPosicion, {
-        reload: false,
-      });
+
+      let posicionSave: Posiciones;
+      try {
+        posicionSave = await this.posicionesRepository.save(newPosicion, {
+          reload: false,
+        });
+      } catch (saveError) {
+        // Anti-replay (UQ_Posiciones_Serie_FechaHora): un reenvío con la misma
+        // (NumeroSerieValidador, FechaHora) choca con el índice único. Se
+        // descarta sin romper, respondiendo OK idempotente.
+        if (this.esErrorDuplicado(saveError)) {
+          const dup = await this.posicionesRepository.findOne({
+            where: {
+              numeroSerieValidador: serie,
+              fechaHora: createPosicionesDto.fechaHora,
+            },
+          });
+          if (dup) {
+            return {
+              status: 'success',
+              message: 'Posicion creada correctamente',
+              data: {
+                id: Number(dup.id),
+                nombre: `${Number(dup.id)} ${serie}`,
+              },
+            };
+          }
+        }
+        throw saveError;
+      }
 
       // 🔥 NUEVO: Emitir actualización completa de unidad en tiempo real a usuarios conectados
       try {
@@ -187,7 +227,7 @@ export class PosicionesService {
         'Error al crear la posición',
         'CREATE',
         querylogger,
-        actor.userId,
+        esDispositivo ? 0 : actor.userId,
         24,
         EstatusEnumBitcora.ERROR,
         'Error al crear Posicion',
@@ -267,6 +307,21 @@ export class PosicionesService {
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
     return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
+  }
+
+  /** Detecta violación de índice único (MySQL ER_DUP_ENTRY / errno 1062). */
+  private esErrorDuplicado(error: unknown): boolean {
+    const e = error as {
+      code?: string;
+      errno?: number;
+      driverError?: { code?: string; errno?: number };
+    };
+    return (
+      e?.code === 'ER_DUP_ENTRY' ||
+      e?.errno === 1062 ||
+      e?.driverError?.code === 'ER_DUP_ENTRY' ||
+      e?.driverError?.errno === 1062
+    );
   }
 
   private async consultarPoscionesPaginado(
@@ -634,11 +689,7 @@ ORDER BY p.Id DESC
     }
   }
 
-  async findOne(
-    id: number,
-    cliente = 0,
-    rol = 1,
-  ): Promise<ApiResponseCommon> {
+  async findOne(id: number, cliente = 0, rol = 1): Promise<ApiResponseCommon> {
     try {
       let whereSql = 'WHERE p.Id = ?';
       let params: Array<number> = [id];

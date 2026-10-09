@@ -1,6 +1,6 @@
 // P1 JwtStrategy: rol/cliente desde la BD, typ obligatorio, iss/aud.
 import { createRequire } from 'node:module';
-import { PASSWORD, caso, crearUsuario, esperar, http, login, q } from '../harness.mjs';
+import { PASSWORD, caso, crearUsuario, esperar, firmarProposito, http, login, q } from '../harness.mjs';
 
 const jwt = createRequire(import.meta.url)('jsonwebtoken');
 const firmarAccess = (payload, opts = {}) =>
@@ -67,4 +67,40 @@ caso('Tenant', 'un id mal formado responde 404 antes de consultar la BD', async 
   const r = await http('GET', '/usuarios/1abc', { token });
   esperar(r.status === 404, `status ${r.status}`);
   return '404';
+});
+
+// N-01: los tokens de propósito (confirmación de correo, reset) no son access tokens.
+const RUTAS_AUTENTICADAS = ['/login/me', '/transacciones/list', '/usuarios/list'];
+async function comoBearer(token) {
+  const rs = [];
+  for (const ruta of RUTAS_AUTENTICADAS) rs.push(`${ruta}→${(await http('GET', ruta, { token })).status}`);
+  return rs;
+}
+
+caso('N-01', 'un token de confirmación de correo (email_confirm) usado como Bearer da 401', async () => {
+  const u = await crearUsuario({ rol: 2 });
+  // Igual que el del correo: secreto de propósito, typ email_confirm, tv vigente.
+  const token = firmarProposito({ id: u.id, email: u.userName, typ: 'email_confirm', tv: 0 });
+  const rs = await comoBearer(token);
+  esperar(rs.every((x) => x.endsWith('→401')), rs.join(' '));
+  return rs.join(' ');
+});
+
+caso('N-01', 'un token de reset (pwd_reset) usado como Bearer da 401', async () => {
+  const u = await crearUsuario({ rol: 2 });
+  const token = firmarProposito({ id: u.id, email: u.userName, typ: 'pwd_reset', tv: 0 });
+  const rs = await comoBearer(token);
+  esperar(rs.every((x) => x.endsWith('→401')), rs.join(' '));
+  return rs.join(' ');
+});
+
+caso('N-01', 'un token email_confirm firmado con JWT_SECRET e iss/aud válidos también da 401 (manda typ)', async () => {
+  const u = await crearUsuario({ rol: 2 });
+  const token = firmarAccess(
+    { id: u.id, email: u.userName, cliente: u.cliente, rol: 2, tv: 0, typ: 'email_confirm' },
+    { issuer: 'dashcampay-api', audience: 'dashcampay' },
+  );
+  const rs = await comoBearer(token);
+  esperar(rs.every((x) => x.endsWith('→401')), rs.join(' '));
+  return rs.join(' ');
 });

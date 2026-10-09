@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
+import { JobsModule } from './jobs/jobs.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -101,7 +103,7 @@ import { RolesGuard } from './guard/roles.guard';
           .default('true'),
         ENFORCE_IDEMPOTENCY_KEY: Joi.string()
           .valid('true', 'false')
-          .default('true'),
+          .default('false'),
         ENFORCE_CASH_RECHARGE_ROLES: Joi.string()
           .valid('true', 'false')
           .default('true'),
@@ -139,6 +141,17 @@ import { RolesGuard } from './guard/roles.guard';
         DB_TIME_OFFSET_HOURS: Joi.number().default(-6),
         ABIERTA_TTL_HOURS: Joi.number().default(4),
         ABIERTA_SWEEP_MINUTES: Joi.number().default(15),
+        RESERVA_STALE_MINUTES: Joi.number().default(15),
+        CONCILIACION_ENABLED: Joi.string().valid('true', 'false').default('true'),
+        REDIS_URL: Joi.string().optional(),
+        RETENCION_POSICIONES_DIAS: Joi.number().default(0),
+        RETENCION_BITACORA_DIAS: Joi.number().default(0),
+        RETENCION_REFRESH_DIAS: Joi.number().default(0),
+        RETENCION_OTP_DIAS: Joi.number().default(0),
+        DB_POOL_LIMIT: Joi.number().default(10),
+        DB_SLOW_QUERY_MS: Joi.number().default(2000),
+        TRUST_PROXY_HOPS: Joi.number().default(1),
+        MAX_PIN_ATTEMPTS: Joi.number().default(5),
         DB_SSL: Joi.string().valid('true', 'false').default('false'),
         DB_SSL_REJECT_UNAUTHORIZED: Joi.string()
           .valid('true', 'false')
@@ -158,6 +171,8 @@ import { RolesGuard } from './guard/roles.guard';
         limit: 100,
       },
     ]),
+
+    ScheduleModule.forRoot(),
 
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -180,7 +195,12 @@ import { RolesGuard } from './guard/roles.guard';
         dateStrings: ['DATE'],
         timezone: 'Z',
         ...mysqlSslOption(),
+        // Log de queries que superan el umbral (ms). H-54: visibilidad de
+        // consultas lentas sin cambiar comportamiento.
+        maxQueryExecutionTime: Number(config.get<string>('DB_SLOW_QUERY_MS') ?? 2000),
         extra: {
+          // Tope del pool (H-54): dimensionable por entorno, default conservador.
+          connectionLimit: Number(config.get<string>('DB_POOL_LIMIT') ?? 10),
           // Evita que bigint se devuelvan como string
           decimalNumbers: true,
           // Tras un rato sin tráfico, la red entre la API y MySQL cortaba las
@@ -307,6 +327,8 @@ import { RolesGuard } from './guard/roles.guard';
     CatMetodoPagoModule,
 
     DireccionesModule,
+
+    JobsModule,
   ],
   controllers: [AppController],
   providers: [

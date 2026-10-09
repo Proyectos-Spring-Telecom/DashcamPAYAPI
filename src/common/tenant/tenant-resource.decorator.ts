@@ -31,3 +31,16 @@ export const TenantResource = (options: TenantResourceOptions | string) =>
     TENANT_RESOURCE_KEY,
     typeof options === 'string' ? { resolver: options } : options,
   );
+
+/** Clave de metadata de {@link TenantExempt}. */
+export const TENANT_EXEMPT_KEY = 'tenantExempt';
+
+/**
+ * Exime de forma explícita una ruta con parámetro de objeto de la validación
+ * por resolver (catálogo global, o pertenencia validada en el servicio).
+ * El motivo es obligatorio y queda en el código para revisión.
+ * Sin @TenantResource ni @TenantExempt, el guard niega la ruta (fail-closed)
+ * y `npm run lint:tenant` falla.
+ */
+export const TenantExempt = (motivo: string) =>
+  SetMetadata(TENANT_EXEMPT_KEY, motivo);

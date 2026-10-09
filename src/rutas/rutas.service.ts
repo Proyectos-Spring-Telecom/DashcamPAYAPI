@@ -52,6 +52,17 @@ export class RutasService {
     createRutaDto: CreateRutaDto,
   ): Promise<ApiCrudResponse> {
     try {
+      // N-07: 404 uniforme (no revelar si la zona existe en otro tenant).
+      await assertPadresEnTenant(
+        this.rutasRepository.manager.connection,
+        { cliente, rol, userId: idUser },
+        { zona: createRutaDto.idZona },
+      );
+      await assertPadresEnTenant(
+        this.rutasRepository.manager.connection,
+        { cliente, rol, userId: idUser },
+        { zona: createRutaDto.idZonaFin || undefined },
+      );
       const zona = await this.zonasRepository.findOne({
         where: { id: createRutaDto.idZona },
       });

@@ -1,3 +1,4 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import {
   clienteHijosDesdeSp,
   clientesPermitidos,
@@ -51,6 +52,12 @@ export class OperadoresService {
     rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      // N-07: 404 uniforme (no revelar si el usuario existe en otro tenant).
+      await assertPadresEnTenant(
+        this.operadoresRepository.manager.connection,
+        { cliente: clienteActor, rol, userId: idUser },
+        { usuario: createOperadoreDto.idUsuario },
+      );
       const usuarioTarget = await this.usuariosRepository.findOne({
         where: { id: createOperadoreDto.idUsuario },
         select: { id: true, idCliente: true },

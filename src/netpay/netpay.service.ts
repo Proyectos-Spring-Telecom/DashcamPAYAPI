@@ -411,6 +411,21 @@ export class NetpayService {
     actor?: { userId?: number; cliente?: number; rol?: number },
   ): Promise<NetpayCustomerResponse> {
     try {
+      // H-74: si viene req.user (actor) y es un pasajero (rol 9), el idPasajero
+      // se toma del token, no del body: así no se puede crear/ligar un cliente
+      // NetPay a un pasajero ajeno. Sin actor (llamada interna) no se cambia nada.
+      if (actor && actor.userId != null && Number(actor.rol) === 9) {
+        const row = (
+          await this.pasajeroRepository.query(
+            `SELECT p.Id AS id FROM Pasajeros p WHERE p.IdUsuario = ? LIMIT 1`,
+            [Number(actor.userId)],
+          )
+        )?.[0];
+        if (!row) {
+          throw new NotFoundException('Pasajero no encontrado');
+        }
+        createCustomerDto.idPasajero = Number(row.id);
+      }
       await this.assertPasajeroEnAlcance(createCustomerDto.idPasajero, actor);
       const identifier =
         createCustomerDto.identifier ??
@@ -528,11 +543,15 @@ export class NetpayService {
             actor,
           );
         } catch (assignError) {
+          // H-74: antes se "tragaba" el fallo y se devolvía un cliente a medias
+          // (creado pero sin la tarjeta asignada). Ahora se propaga para que el
+          // llamador sepa que la operación no quedó completa.
           this.loggerService.error(
             'NetpayService',
             'Failed to assign card to customer',
             assignError,
           );
+          throw assignError;
         }
       }
 

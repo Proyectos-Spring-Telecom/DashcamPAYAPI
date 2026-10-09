@@ -87,3 +87,53 @@ caso('V2-16', 'el rechazo se historiza como fila nueva con IdTransaccionOrigen',
   esperar(Number(despues) === Number(antes) + 1 && hist.length === 1, `histórico ${antes}→${despues}, con origen ${hist.length}`);
   return `histórico +1, origen ${viva.Id}`;
 });
+
+// WP-1.6: criterios de concurrencia del núcleo de dinero.
+const ok2xx = (r) => r.status === 200 || r.status === 201;
+// IP distinta por petición paralela: aquí se prueba el bloqueo por monedero, no el throttler.
+const ipParalela = (i) => ({ 'x-forwarded-for': `10.252.${Math.floor(i / 250)}.${(i % 250) + 1}` });
+
+caso('H-08', '15 débitos en paralelo con saldo para uno: exactamente 1 aceptado y el saldo nunca es negativo', async () => {
+  const f = await preparar();
+  const inicial = f.tarifa;
+  const serie = await crearMonedero({ cliente: CLIENTE_DEBITO, saldo: inicial });
+  const rs = await Promise.all(Array.from({ length: 15 }, (_, i) =>
+    http('POST', '/transacciones/debito', { body: debito(f, serie, uid()), token: f.token, headers: ipParalela(i) })));
+  const aceptados = rs.filter(ok2xx).length;
+  const s = await saldo(serie);
+  const [{ cobrado, n }] = await q(
+    'SELECT COALESCE(SUM(Monto), 0) cobrado, COUNT(*) n FROM TransaccionesDebito WHERE NumeroSerieMonedero = ? AND IdTipoTransaccion = 2 AND Monto > 0',
+    [serie],
+  );
+  const estados = rs.map((r) => r.status).sort().join(',');
+  esperar(s >= 0, `saldo negativo ${s} (estados ${estados})`);
+  esperar(aceptados === 1 && Number(n) === 1, `${aceptados} aceptados y ${n} débitos con cobro (estados ${estados})`);
+  esperar(Math.abs(inicial - Number(cobrado) - s) < 0.01, `inicial ${inicial} - cobrado ${cobrado} != saldo ${s}`);
+  return `1 de 15 aceptado, saldo ${s}, estados ${estados}`;
+});
+
+caso('H-08', 'recargas en efectivo y débitos simultáneos sobre el mismo monedero no pierden actualizaciones', async () => {
+  const f = await preparar();
+  const inicial = 10 * f.tarifa;
+  const serie = await crearMonedero({ cliente: CLIENTE_DEBITO, saldo: inicial });
+  const recarga = () => ({ idTipoTransaccion: 1, monto: 7, numeroSerieMonedero: serie, idMetodoPago: 1, claveIdempotencia: uid() });
+  const ops = [];
+  for (let i = 0; i < 5; i++) {
+    ops.push(http('POST', '/transacciones/recarga', { body: recarga(), token: f.token, headers: ipParalela(2 * i) }));
+    ops.push(http('POST', '/transacciones/debito', { body: debito(f, serie, uid()), token: f.token, headers: ipParalela(2 * i + 1) }));
+  }
+  const rs = await Promise.all(ops);
+  const recargas = rs.filter((_, i) => i % 2 === 0);
+  const estados = rs.map((r) => r.status).join(',');
+  esperar(recargas.every(ok2xx), `recargas ${recargas.map((r) => r.status).join(',')} ${JSON.stringify(recargas.find((r) => !ok2xx(r))?.body).slice(0, 200)}`);
+  const [{ recargado }] = await q('SELECT COALESCE(SUM(Monto), 0) recargado FROM TransaccionesRecarga WHERE NumeroSerieMonedero = ?', [serie]);
+  const [{ cobrado, n }] = await q(
+    'SELECT COALESCE(SUM(Monto), 0) cobrado, COUNT(*) n FROM TransaccionesDebito WHERE NumeroSerieMonedero = ? AND IdTipoTransaccion = 2',
+    [serie],
+  );
+  const s = await saldo(serie);
+  esperar(Number(recargado) === 35, `recargado ${recargado} (esperado 35)`);
+  esperar(Math.abs(inicial + Number(recargado) - Number(cobrado) - s) < 0.01,
+    `lost-update: inicial ${inicial} + recargado ${recargado} - cobrado ${cobrado} != saldo ${s} (estados ${estados})`);
+  return `inicial ${inicial} + 35 - ${cobrado} (${n} débitos) = saldo ${s}`;
+});

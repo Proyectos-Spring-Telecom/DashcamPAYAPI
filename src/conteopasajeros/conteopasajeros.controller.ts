@@ -16,12 +16,20 @@ import { CreateConteoPasajerosDto } from './dto/create-conteopasajero.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
-import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
+import {
+  TenantExempt,
+  TenantResource,
+} from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { UpdateConteoPasajerosDto } from './dto/update-conteopasajero.dto';
 import { assertIsoDate } from 'src/common/sql-date';
+import { Public } from 'src/guard/public.decorator';
+import {
+  DeviceOrJwtGuard,
+  DispositivoCredencial,
+} from 'src/posiciones/device-auth.guard';
 
 @ApiTags('Conteo pasajeros')
 @ApiBearerAuth('bearer-token')
@@ -182,8 +190,18 @@ export class ConteopasajerosController {
     );
   }
 
-  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  // Ingesta/consulta por dispositivo contador: acepta x-device-token O JWT de
+  // operador (transición). @Public desactiva los guards globales para habilitar
+  // la vía de dispositivo; DeviceOrJwtGuard aplica la autenticación real. La
+  // serie ya quedó verificada por el guard, por lo que el acceso se limita a su
+  // propia serie (el servicio filtra por numeroSerieContador).
+  @UseGuards(DeviceOrJwtGuard, TenantOwnershipGuard)
+  @Public()
+  @DispositivoCredencial('contador')
   @Get('contador/:numeroSerie/hoy')
+  @TenantExempt(
+    'Serie validada en el servicio contra seriesContadoresPermitidas',
+  )
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async findByContadorToday(
     @Param('numeroSerie') numeroSerie: string,
@@ -192,19 +210,26 @@ export class ConteopasajerosController {
     @Request() req,
   ): Promise<ApiResponseCommon> {
     const today = new Date().toISOString().split('T')[0];
+    const cliente = req.deviceAuth ? 0 : Number(req.user.cliente);
+    const rol = req.deviceAuth ? 1 : Number(req.user.rol);
     return await this.conteopasajerosService.findByContadorAndDatePaginated(
       numeroSerie,
       today,
       today,
       page,
       limit,
-      Number(req.user.cliente),
-      Number(req.user.rol),
+      cliente,
+      rol,
     );
   }
 
-  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @UseGuards(DeviceOrJwtGuard, TenantOwnershipGuard)
+  @Public()
+  @DispositivoCredencial('contador')
   @Get('contador/:numeroSerie/rango/:fechaInicio/:fechaFin')
+  @TenantExempt(
+    'Serie validada en el servicio contra seriesContadoresPermitidas',
+  )
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async findByContadorAndDate(
     @Param('numeroSerie') numeroSerie: string,
@@ -214,14 +239,16 @@ export class ConteopasajerosController {
     @Query('limit') limit: number = 10,
     @Request() req,
   ): Promise<ApiResponseCommon> {
+    const cliente = req.deviceAuth ? 0 : Number(req.user.cliente);
+    const rol = req.deviceAuth ? 1 : Number(req.user.rol);
     return await this.conteopasajerosService.findByContadorAndDatePaginated(
       numeroSerie,
       assertIsoDate(fechaInicio, 'fechaInicio'),
       assertIsoDate(fechaFin, 'fechaFin'),
       page,
       limit,
-      Number(req.user.cliente),
-      Number(req.user.rol),
+      cliente,
+      rol,
     );
   }
 

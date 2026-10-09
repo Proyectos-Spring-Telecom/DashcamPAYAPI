@@ -1,16 +1,18 @@
 /**
- * Lista las rutas con un parámetro de objeto (:id, :numeroSerie…) que pasan por
- * TenantOwnershipGuard sin @TenantResource (ni en el método ni en la clase).
- * El guard las deja pasar y la pertenencia depende de que el servicio la valide.
- * Falla si aparece una ruta nueva que no esté en scripts/tenant-routes-baseline.txt.
+ * Recorre TODOS los controllers y falla si una ruta con parámetro de objeto
+ * (:id, :numeroSerie…) no declara una de estas dos cosas (en el método o en la clase):
+ *   - @TenantResource(...) con TenantOwnershipGuard aplicado, o
+ *   - @TenantExempt('motivo') (catálogo global o pertenencia validada en el servicio).
+ * TenantOwnershipGuard niega en runtime las rutas con parámetro de objeto sin
+ * ninguna de las dos (fail-closed); este lint lo detecta antes del despliegue.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const baselinePath = path.join(root, 'scripts', 'tenant-routes-baseline.txt');
-const NO_OBJETO = new Set(['page', 'limit', 'fecha', 'fechaInicio', 'fechaFin', 'hora', 'year', 'month', 'estatus']);
+// Mismo criterio que PARAMS_NO_OBJETO en tenant-ownership.guard.ts.
+const NO_OBJETO = new Set(['page', 'limit', 'fecha', 'fechaInicio', 'fechaFin', 'hora', 'year', 'month', 'estatus', 'cp']);
 
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -21,13 +23,14 @@ function walk(dir, out = []) {
   return out;
 }
 
-const encontradas = [];
+const sinDeclarar = [];
+const sinGuard = [];
 for (const file of walk(path.join(root, 'src'))) {
   const s = fs.readFileSync(file, 'utf8');
-  if (!s.includes('TenantOwnershipGuard')) continue;
   const cabecera = s.slice(0, s.indexOf('export class'));
   const claseGuard = /@UseGuards\([^)]*TenantOwnershipGuard/.test(cabecera);
   const claseRecurso = /@TenantResource\(/.test(cabecera);
+  const claseExenta = /@TenantExempt\(/.test(cabecera);
   const re = /((?:\s*@[A-Za-z]+\((?:[^()]|\([^()]*\))*\))+)\s*(?:async\s+)?(\w+)\(/g;
   let m;
   while ((m = re.exec(s))) {
@@ -36,23 +39,23 @@ for (const file of walk(path.join(root, 'src'))) {
     if (!ruta) continue;
     const params = [...ruta[2].matchAll(/:(\w+)/g)].map((p) => p[1]).filter((p) => !NO_OBJETO.has(p));
     if (!params.length) continue;
-    if (!(claseGuard || /TenantOwnershipGuard/.test(dec))) continue;
-    if (claseRecurso || /@TenantResource\(/.test(dec)) continue;
-    encontradas.push(`${path.basename(file)} ${ruta[1].toUpperCase()} ${ruta[2]}`);
+    const etiqueta = `${path.relative(root, file).replace(/\\/g, '/')} ${ruta[1].toUpperCase()} ${ruta[2]}`;
+    if (claseExenta || /@TenantExempt\(/.test(dec)) continue;
+    if (!(claseRecurso || /@TenantResource\(/.test(dec))) {
+      sinDeclarar.push(etiqueta);
+      continue;
+    }
+    if (!(claseGuard || /TenantOwnershipGuard/.test(dec))) sinGuard.push(etiqueta);
   }
 }
 
-const baseline = fs.existsSync(baselinePath)
-  ? new Set(fs.readFileSync(baselinePath, 'utf8').split(/\r?\n/).filter((l) => l && !l.startsWith('#')))
-  : new Set();
-if (process.argv.includes('--write-baseline')) {
-  fs.writeFileSync(baselinePath, '# Rutas con :param sin @TenantResource; la pertenencia la valida el servicio.\n# Solo debe encoger. Regenerar: node scripts/lint-tenant-routes.mjs --write-baseline\n' + encontradas.sort().join('\n') + '\n');
-  console.log(`baseline escrito: ${encontradas.length} rutas`);
-  process.exit(0);
-}
-const nuevas = encontradas.filter((r) => !baseline.has(r));
-if (nuevas.length) {
-  console.error('Rutas nuevas con parámetro de objeto sin @TenantResource:\n' + nuevas.join('\n'));
+if (sinDeclarar.length || sinGuard.length) {
+  if (sinDeclarar.length) {
+    console.error('Rutas con parámetro de objeto sin @TenantResource ni @TenantExempt:\n' + sinDeclarar.join('\n'));
+  }
+  if (sinGuard.length) {
+    console.error('Rutas con @TenantResource sin TenantOwnershipGuard (el decorador queda inerte):\n' + sinGuard.join('\n'));
+  }
   process.exit(1);
 }
-console.log(`Tenant: ${encontradas.length} rutas sin @TenantResource, todas en el baseline`);
+console.log('Tenant: todas las rutas con parámetro de objeto declaran @TenantResource (con guard) o @TenantExempt');

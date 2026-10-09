@@ -1,5 +1,6 @@
 import { nowDb } from 'src/common/clock';
 import { clienteHijosDesdeSp, tieneIdsTenant } from 'src/common/tenant/ownership-resolvers';
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import {
   BadRequestException,
   HttpException,
@@ -101,6 +102,13 @@ export class ViajesService {
           `El operador ya tiene un viaje activo. No se puede abrir otro viaje hasta que se finalice el viaje actual (ID: ${viajesActivosSinFin[0].id}).`,
         );
       }
+
+      // N-07: la variante del viaje también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.viajesRepository.manager.connection,
+        { cliente, rol, userId: idUser },
+        { variante: createViajeDto.idVariante },
+      );
 
       // Validar que el turno existe y está activo (estatus = 1)
       if (createViajeDto.idTurno) {

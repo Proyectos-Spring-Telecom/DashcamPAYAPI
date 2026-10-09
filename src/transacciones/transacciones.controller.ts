@@ -292,10 +292,8 @@ export class TransaccionesController {
   @Get('DEBITO/:id')
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @TenantResource('transaccionDebito')
-  findOneTransaccioneDebito(
-    @Param('id', ParseIntPipe) id: number,
-    @Request() req,
-  ) {
+  // H-66: acepta Id numérico o PublicId (ULID); por eso no usa ParseIntPipe.
+  findOneTransaccioneDebito(@Param('id') id: string, @Request() req) {
     return this.transaccionesService.findOneTransaccionDebito(
       id,
       +req.user.cliente,

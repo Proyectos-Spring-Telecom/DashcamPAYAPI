@@ -89,3 +89,14 @@ caso('R2', '10 recargas en paralelo terminan y la bitácora llega después del C
   esperar(n === 10, `${n}/10 registros de bitácora`);
   return `10 en ${ms} ms; saldo 50; 10 registros de bitácora`;
 });
+
+caso('N-02', 'una recarga en efectivo con monto negativo se rechaza (400) y no mueve el saldo', async () => {
+  const adm = await crearUsuario({ rol: 2 });
+  const token = await login(adm);
+  const serie = await crearMonedero({ saldo: 100 });
+  const r = await http('POST', '/transacciones/recarga', { body: recarga(serie, -50, uid()), token });
+  esperar(r.status === 400, `status ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+  const [{ Saldo }] = await q('SELECT Saldo FROM Monederos WHERE NumeroSerie = ?', [serie]);
+  esperar(Number(Saldo) === 100, `saldo ${Saldo}`);
+  return '400; saldo 100';
+});

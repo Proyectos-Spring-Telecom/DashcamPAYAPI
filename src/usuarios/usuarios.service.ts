@@ -95,8 +95,11 @@ export class UsuariosService {
         'El operador debe existir y estar activo.',
       );
     }
-    if (Number(rolActor) !== 1 && clienteActor) {
-      const hijos = await this.clienteHijos(clienteActor);
+    // V2-02: el objetivo se identifica por el body, así que el tenant se
+    // valida SIEMPRE para actores no-SA (incluido clienteActor ausente, que
+    // deja la lista de permitidos vacía y bloquea la asignación).
+    if (Number(rolActor) !== 1) {
+      const hijos = clienteActor ? await this.clienteHijos(clienteActor) : null;
       const permitidos = hijos?.ids ?? [];
       if (!permitidos.includes(Number(usuario.idCliente))) {
         throw new NotFoundException('Usuario no encontrado.');

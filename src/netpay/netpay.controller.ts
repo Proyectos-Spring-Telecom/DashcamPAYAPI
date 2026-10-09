@@ -32,12 +32,14 @@ import { CancelRefundDto } from './dto/cancel-refund.dto';
 import { ProcessPaymentWithTokenDto } from './dto/process-payment-with-token.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { Roles } from 'src/guard/roles.decorator';
+import { TenantExempt } from 'src/common/tenant/tenant-resource.decorator';
 import { NormalizeCreateCustomerBodyInterceptor } from './interceptors/normalize-create-customer-body.interceptor';
 
 @ApiTags('Netpay - Integración Backend')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
 @Roles(1, 2, 9, 11)
+@TenantExempt('Pertenencia validada en NetpayService contra req.user')
 @Controller('netpay')
 export class NetpayController {
   constructor(private readonly netpayService: NetpayService) {}

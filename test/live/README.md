@@ -17,8 +17,41 @@ npm run test:live -- R3 H-08  # solo esos grupos
 - El resultado queda en `test/live/last-run.json`.
 - Los débitos usan un viaje abierto de prueba (`viajeAbierto()`) que se borra al final:
   el débito ya no cobra en viajes cerrados.
-- Algunos casos tocan datos reales y los restauran al final (ruta 1 en N-07,
-  `PermiteRegistroPublico` del cliente 5 en H-64).
+- Algunos casos tocan datos reales y los restauran al final (ruta 1 y la última
+  verificación del cliente 6 en N-07, `PermiteRegistroPublico` del cliente 5 en H-64).
+- Un caso que no tiene datos para correr se marca `○ omitido` con el motivo; no cuenta
+  como fallo (`omitir(motivo)` en `harness.mjs`).
+
+## Casos de la vuelta 3 (WP-0.2 / criterios de WP-1.6)
+
+| Grupo | Archivo | Qué verifica |
+|---|---|---|
+| H-08 | `casos/debito.mjs` | 15 débitos en paralelo con saldo para uno: exactamente 1 aceptado, saldo = inicial − cobrado, nunca negativo |
+| H-08 | `casos/debito.mjs` | 5 recargas en efectivo + 5 débitos simultáneos: saldo = inicial + recargado − cobrado (sin lost-update) |
+| D-15 | `casos/tarifa-dinamica.mjs` | Tarifa dinámica: lectura repetida al subir (< 1 min, mismo viaje) no cobra ni abre otro viaje. Bajada vs. nuevo abordaje depende del tiempo y del tipo de tarifa (regla de negocio) |
+| V2-06 | `casos/tarifa-dinamica.mjs` | Tarifa dinámica: dos taps simultáneos sobre una ABIERTA cobran lo mismo que un solo tap de referencia y no dejan ABIERTA |
+| N-01 | `casos/jwt.mjs` | Token `email_confirm` y token `pwd_reset` (secreto de propósito) como Bearer → 401 en `/login/me`, `/transacciones/list`, `/usuarios/list`; también un `email_confirm` firmado con `JWT_SECRET` e iss/aud válidos |
+| H-03 | `casos/auth-otp.mjs` | `cambiar/accesso` sin Bearer: misma respuesta (401 "Token inválido o expirado") con usuario existente e inexistente |
+| H-03 | `casos/auth-otp.mjs` | `verify`: usuario inexistente y existente con código erróneo → mismo status y mensaje |
+| Tenant | `casos/tenant-fk.mjs` | Admin del cliente 6 pide por `:id` vehículo, instalación y monedero de un cliente fuera de su jerarquía (`spGetClientes`) → 404 (con control: su propio vehículo → 200) |
+| N-07 | `casos/tenant-fk.mjs` | `PATCH /verificaciones/:id` con `idInstalacion` de otro cliente → 404 y la fila no cambia |
+| N-02 | `casos/recarga-idempotencia.mjs` | Recarga en efectivo con monto negativo → 400 y saldo intacto |
+| CORS | `casos/cors.mjs` | HTTP (preflight y GET) y handshake de Socket.IO (`/socket.io/?EIO=4&transport=polling`) con Origin no permitido → sin `Access-Control-Allow-Origin`; control con el primer origen de `CORS_ORIGINS` |
+
+Ya cubiertos antes (no se duplicaron): misma clave en débitos paralelos (H-08, 5 en
+paralelo), clave de otro monedero → 409 (V2-15), recargas paralelas con la misma clave
+(R3, 5 en paralelo), `rutas.idZonaFin` de otro cliente (N-07).
+
+### Tarifa dinámica (D-15)
+
+`viajeAbiertoDinamico()` copia turno, operador y variante del último viaje cuya variante
+tiene tarifa activa abierta (2) o por estaciones (3), `RecorridoDetallado` y un validador
+activo del mismo cliente; sube en el punto 1 del recorrido y baja en el 4. Con
+`LIVE_CLIENTE_DINAMICO` se fija el cliente. Si la BD no tiene ninguno, los casos D-15 y
+V2-06 se omiten. Para crearlo: dar de alta desde la WebApp una variante con recorrido
+trazado y una tarifa abierta activa (como "QA E2E Abierta" del cliente 7), un validador
+activo e instalado, y abrir al menos un viaje sobre esa variante (p. ej. corriendo
+`e2e-tarifas.mjs` una vez).
 
 ## Usuario para revisar la WebApp a mano
 

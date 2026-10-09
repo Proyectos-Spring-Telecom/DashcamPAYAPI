@@ -1,6 +1,8 @@
 import { nowDb } from 'src/common/clock';
 import {
   clienteHijosDesdeSp,
+  esPublicId,
+  generarPublicId,
   tieneIdsTenant,
 } from 'src/common/tenant/ownership-resolvers';
 import {
@@ -38,7 +40,7 @@ import { UpdatePasajeroEstadoSolicitudDto } from './dto/update-pasajeros-estado-
 import { UpdatePasajeroCustomerIdDto } from './dto/update-pasajero-customer-id.dto';
 import { S3Service } from 'src/s3/s3.service';
 import { NetpayService } from 'src/netpay/netpay.service';
-import { randomInt } from 'crypto';
+import { randomBytes } from 'crypto';
 
 @Injectable()
 export class PasajerosService {
@@ -68,10 +70,12 @@ export class PasajerosService {
     const maxIntentos = 100;
 
     do {
-      // Generar número de serie aleatorio con formato MON-XXXX donde XXXX son números aleatorios
-      // Usar timestamp y número aleatorio para mayor unicidad
-      const timestamp = Date.now().toString().slice(-6); // Últimos 6 dígitos del timestamp
-      const numeroAleatorio = randomInt(1000, 10000);
+      // H-65: formato MON-<timestamp>-<aleatorio>. El sufijo aleatorio ahora usa
+      // 8 bytes de crypto.randomBytes (64 bits, 16 hex) en vez de un entero de
+      // ~13 bits, para evitar colisiones/adivinación. Columna Monederos.NumeroSerie
+      // VARCHAR(100): "MON-" + 13 dígitos timestamp + "-" + 16 hex = ~34 chars, dentro del límite.
+      const timestamp = Date.now().toString(); // timestamp completo (ms)
+      const numeroAleatorio = randomBytes(8).toString('hex'); // 64 bits
       numeroSerie = `MON-${timestamp}-${numeroAleatorio}`;
 
       // Verificar si ya existe
@@ -146,6 +150,7 @@ export class PasajerosService {
         const fechaDesfasada = nowDb();
 
         const nuevoMonedero = this.monederosRepository.create({
+          publicId: generarPublicId(), // H-66: id opaco en el alta
           numeroSerie: numeroSerieMonedero,
           saldo: 0,
           fechaActivacion: fechaDesfasada,
@@ -253,6 +258,7 @@ export class PasajerosService {
 
       //Creamos el body para crear el pasajero
       const newPasajero = await this.pasajeroRepository.create({
+        publicId: generarPublicId(), // H-66: id opaco en el alta
         nombre: createPasajeroDto.nombre,
         apellidoPaterno: createPasajeroDto.apellidoPaterno,
         apellidoMaterno: createPasajeroDto.apellidoMaterno,
@@ -274,8 +280,9 @@ export class PasajerosService {
             ? `${createPasajeroDto.apellidoPaterno} ${createPasajeroDto.apellidoMaterno}`
             : createPasajeroDto.apellidoPaterno;
 
-          // Generar número aleatorio de 10 dígitos para identifier
-          const randomIdentifier = randomInt(1000000000, 10000000000).toString();
+          // H-65: identifier para NetPay con 8 bytes de crypto.randomBytes
+          // (64 bits, 16 hex) en vez de un entero de 10 dígitos (~33 bits).
+          const randomIdentifier = randomBytes(8).toString('hex');
 
           const customerResponse = await this.netpayService.createCustomer({
             firstName: createPasajeroDto.nombre,
@@ -472,6 +479,7 @@ export class PasajerosService {
       }
       const newPasajero = await this.pasajeroRepository.create({
         ...createPasajeroAfiliacionDto,
+        publicId: generarPublicId(), // H-66: id opaco en el alta
         idUsuario: idUser, // ✅ Agregar el idUsuario
       });
       const pasajeroSave = await this.pasajeroRepository.save(newPasajero);
@@ -546,6 +554,7 @@ export class PasajerosService {
             `
 SELECT DISTINCT
     p.Id AS id,
+    p.PublicId AS publicId,
     p.Nombre AS nombre,
     p.ApellidoPaterno AS apellidoPaterno,
     p.ApellidoMaterno AS apellidoMaterno,
@@ -609,6 +618,7 @@ LEFT JOIN CatTiposPasajeros ct
             `
 SELECT DISTINCT
     p.Id AS id,
+    p.PublicId AS publicId,
     p.Nombre AS nombre,
     p.ApellidoPaterno AS apellidoPaterno,
     p.ApellidoMaterno AS apellidoMaterno,
@@ -715,6 +725,7 @@ LEFT JOIN CatTipoDescuento ctd
             `
 SELECT 
     p.Id AS id,
+    p.PublicId AS publicId,
     p.Nombre AS nombre,
     p.ApellidoPaterno AS apellidoPaterno,
     p.ApellidoMaterno AS apellidoMaterno,
@@ -757,6 +768,7 @@ ORDER BY p.Id DESC;
             `
 SELECT 
     p.Id AS id,
+    p.PublicId AS publicId,
     p.Nombre AS nombre,
     p.ApellidoPaterno AS apellidoPaterno,
     p.ApellidoMaterno AS apellidoMaterno,
@@ -817,8 +829,33 @@ ORDER BY p.Id DESC;
   // ========================================
   // 🔹 OBTENEMOS PASAJEROS POR ID
   // ========================================
-  async findOnePasajero(id: number, cliente = 0, rol = 1) {
+  /**
+   * H-66: resuelve el identificador recibido (numérico o PublicId/ULID) al Id
+   * numérico. Valida el formato también para SA (que no pasa por el guard).
+   */
+  private async resolveIdPasajero(id: number | string): Promise<number> {
+    if (esPublicId(id)) {
+      const row = await this.pasajeroRepository.findOne({
+        where: { publicId: String(id) },
+      });
+      if (!row) {
+        throw new NotFoundException(
+          `No se encontró un pasajero con ID: ${id}.`,
+        );
+      }
+      return Number(row.id);
+    }
+    const n = Number(id);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new NotFoundException(`No se encontró un pasajero con ID: ${id}.`);
+    }
+    return n;
+  }
+
+  async findOnePasajero(id: number | string, cliente = 0, rol = 1) {
     try {
+      // H-66: acepta id numérico o PublicId (ULID); se resuelve a Id numérico.
+      const idNum = await this.resolveIdPasajero(id);
       // Ambos caminos devuelven la entidad (camelCase): antes el de tenant
       // hacía SELECT p.* y el formulario de edición recibía PascalCase vacío.
       let idsTenant: number[] | null = null;
@@ -833,7 +870,7 @@ ORDER BY p.Id DESC;
       }
 
       const pasajeroExistente = await this.pasajeroRepository.findOne({
-        where: { id: id },
+        where: { id: idNum },
       });
       if (!pasajeroExistente) {
         throw new NotFoundException(
@@ -843,7 +880,7 @@ ORDER BY p.Id DESC;
 
       const monederos = await this.monederosRepository.find({
         where: {
-          idPasajero: id,
+          idPasajero: idNum,
           ...(idsTenant ? { idCliente: In(idsTenant) } : {}),
         },
         order: { id: 'ASC' },
@@ -1132,9 +1169,7 @@ GROUP BY p.Id, u.Id, u.UserName, p.Nombre, p.ApellidoPaterno, p.ApellidoMaterno;
     if (Number(rol) === 1) return;
     const { ids, placeholders } = await this.clienteHijos(cliente);
     if (!tieneIdsTenant(ids)) {
-      throw new NotFoundException(
-        `No se encontró un pasajero con ID: ${id}.`,
-      );
+      throw new NotFoundException(`No se encontró un pasajero con ID: ${id}.`);
     }
     const rows = await this.pasajeroRepository.query(
       `
@@ -1147,9 +1182,7 @@ LIMIT 1
       [id, ...ids],
     );
     if (!rows?.length) {
-      throw new NotFoundException(
-        `No se encontró un pasajero con ID: ${id}.`,
-      );
+      throw new NotFoundException(`No se encontró un pasajero con ID: ${id}.`);
     }
   }
 

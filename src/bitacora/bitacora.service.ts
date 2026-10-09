@@ -532,7 +532,11 @@ ORDER BY b.FechaCreacion DESC;
   }
 
   private isSensitiveKey(key: string): boolean {
-    return /password|passhash|cvv|cvc|cardnumber|pan|pin|codigo|token|secret|privatekey|apikey|authorization|cookie|correo|email|telefono|nombre|apellido/i.test(
+    // H-45/H-81: nunca persistir PII/credenciales en claro en el Query de la
+    // bitácora. El saneo es por allowlist (pickQueryIds descarta todo lo que no
+    // esté permitido), pero además estas claves se bloquean explícitamente como
+    // defensa en profundidad (insensible a mayúsculas, recursivo).
+    return /password|passhash|cvv|cvc|cardnumber|tarjeta|pan|pin|codigo|curp|fechanacimiento|nacimiento|billing|devicefinger|fingerprint|token|secret|privatekey|apikey|authorization|cookie|correo|email|telefono|nombre|apellido/i.test(
       key,
     );
   }

@@ -1,3 +1,4 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import {
   BadRequestException,
   HttpException,
@@ -48,6 +49,16 @@ export class UsuarioszonasService {
     rol = 1,
   ) {
     try {
+      // N-07: 404 uniforme para usuario y zonas fuera del tenant
+      // (antes los mensajes revelaban si el id existía en otro tenant).
+      const ds = this.zonasRepository.manager.connection;
+      const actor = { cliente: clienteActor, rol, userId: idUser };
+      await assertPadresEnTenant(ds, actor, {
+        usuario: createUsuariosZonasDto.idUsuario,
+      });
+      for (const idPadre of createUsuariosZonasDto.idsZonas ?? []) {
+        await assertPadresEnTenant(ds, actor, { zona: idPadre });
+      }
       const usuario = await this.usuariosRepository.findOne({
         where: {
           id: createUsuariosZonasDto.idUsuario,

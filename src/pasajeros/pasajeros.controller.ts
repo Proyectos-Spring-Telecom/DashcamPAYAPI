@@ -145,7 +145,8 @@ export class PasajerosController {
   }
 
   @Get(':id')
-  findOnePasajero(@Param('id', ParseIntPipe) id: number, @Request() req) {
+  // H-66: acepta Id numérico o PublicId (ULID); por eso no usa ParseIntPipe.
+  findOnePasajero(@Param('id') id: string, @Request() req) {
     return this.pasajerosService.findOnePasajero(
       id,
       +req.user.cliente,

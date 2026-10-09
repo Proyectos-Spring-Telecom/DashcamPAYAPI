@@ -104,3 +104,28 @@ caso('H-03', 'el token de reset de A no cambia la contraseña de B', async () =>
   esperar(r.status === 403, `status ${r.status}`);
   return '403';
 });
+
+// Anti-enumeración en la recuperación: la respuesta no distingue si el usuario existe.
+const mensaje = (r) => (typeof r.body === 'string' ? r.body : r.body?.message ?? JSON.stringify(r.body));
+
+caso('H-03', 'cambiar/accesso sin Bearer: misma respuesta con usuario existente e inexistente', async () => {
+  const u = await crearUsuario();
+  const body = (userName) => ({ userName, password: 'Nueva-Clave-2026!' });
+  const real = await http('POST', '/login/cambiar/accesso', { body: body(u.userName) });
+  const falso = await http('POST', '/login/cambiar/accesso', { body: body(`nadie.${Date.now()}@dashcam.test`) });
+  esperar(real.status === falso.status, `status existente ${real.status} vs inexistente ${falso.status}`);
+  esperar(mensaje(real) === mensaje(falso), `mensajes distintos: "${mensaje(real)}" vs "${mensaje(falso)}"`);
+  esperar(real.status === 401 && /Token inválido o expirado/.test(mensaje(real)), `${real.status} "${mensaje(real)}"`);
+  return `${real.status} "${mensaje(real)}" en ambos`;
+});
+
+caso('H-03', 'verify: usuario inexistente y existente con código erróneo responden igual', async () => {
+  const u = await crearUsuario({ confirmado: 0 });
+  await sembrarOtp(u, CONFIRMACION, '246810');
+  const real = await http('PATCH', '/login/verify', { body: { userName: u.userName, codigo: '135791' } });
+  const falso = await http('PATCH', '/login/verify', { body: { userName: `nadie.${Date.now()}@dashcam.test`, codigo: '135791' } });
+  esperar(real.status === falso.status, `status existente ${real.status} vs inexistente ${falso.status}`);
+  esperar(mensaje(real) === mensaje(falso), `mensajes distintos: "${mensaje(real)}" vs "${mensaje(falso)}"`);
+  esperar(real.status >= 400 && real.status < 500, `status ${real.status}`);
+  return `${real.status} "${mensaje(real)}" en ambos`;
+});

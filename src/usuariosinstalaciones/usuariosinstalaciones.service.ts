@@ -1,3 +1,4 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import {
   BadRequestException,
   HttpException,
@@ -48,6 +49,17 @@ export class UsuariosinstalacionesService {
     rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      // N-07: 404 uniforme para usuario e instalaciones fuera del tenant
+      // (antes los mensajes revelaban si el id existía en otro tenant).
+      const ds = this.instalacionesRepository.manager.connection;
+      const actor = { cliente: clienteActor, rol, userId: idUser };
+      await assertPadresEnTenant(ds, actor, {
+        usuario: createUsuariosInstalacionesDto.idUsuario,
+      });
+      for (const idPadre of createUsuariosInstalacionesDto.idsInstalaciones ??
+        []) {
+        await assertPadresEnTenant(ds, actor, { instalacion: idPadre });
+      }
       const usuario = await this.usuariosRepository.findOne({
         where: {
           id: createUsuariosInstalacionesDto.idUsuario,

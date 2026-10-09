@@ -78,6 +78,12 @@ export class MantenimientoCombustibleService {
         idCliente,
         rol,
       );
+      // N-07: el operador asignado también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.mantenimientoCombustibleRepository.manager.connection,
+        { cliente: idCliente, rol },
+        { operador: createMantenimientoCombustibleDto.idOperador },
+      );
 
       const create = await this.mantenimientoCombustibleRepository.create(
         createMantenimientoCombustibleDto,

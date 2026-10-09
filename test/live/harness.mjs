@@ -132,6 +132,48 @@ export async function viajeAbierto(cliente) {
   return { idViaje: Number(r.insertId), tarifa: Number(base.tarifa), validador: base.validador };
 }
 
+/**
+ * Viaje abierto de prueba con tarifa dinámica (D-15: cobra al bajar): copia turno,
+ * operador y variante del último viaje cuya variante tiene tarifa activa abierta (2)
+ * o por estaciones (3) y recorrido trazado. Devuelve null si la BD no tiene ninguno
+ * (ver README: se crea con la variante "QA E2E Abierta" del cliente 7).
+ * LIVE_CLIENTE_DINAMICO fija el cliente; si no, se toma el primero que haya.
+ */
+export async function viajeAbiertoDinamico(cliente = process.env.LIVE_CLIENTE_DINAMICO ? Number(process.env.LIVE_CLIENTE_DINAMICO) : null) {
+  const [base] = await q(
+    `SELECT v.IdCliente, v.IdTurno, v.IdOperador, v.IdVariante, t.TipoTarifa tipo, va.RecorridoDetallado recorrido,
+            (SELECT d.NumeroSerie FROM Validadores d WHERE d.IdCliente = v.IdCliente AND d.Estatus = 1 LIMIT 1) validador
+       FROM Viajes v
+       JOIN Tarifas t ON t.IdVariante = v.IdVariante AND t.Estatus = 1 AND t.TipoTarifa IN (2, 3)
+       JOIN Variantes va ON va.Id = v.IdVariante
+      WHERE (? IS NULL OR v.IdCliente = ?) AND va.RecorridoDetallado IS NOT NULL
+      ORDER BY v.Id DESC LIMIT 1`,
+    [cliente, cliente],
+  );
+  if (!base?.validador) return null;
+  const crudo = typeof base.recorrido === 'string' ? JSON.parse(base.recorrido) : base.recorrido;
+  // El DTO acepta hasta 7 decimales (lo que entrega un GPS).
+  const ruta = (Array.isArray(crudo) ? crudo : [])
+    .map((p) => ({ lat: Number(Number(p.lat).toFixed(7)), lng: Number(Number(p.lng).toFixed(7)) }))
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (ruta.length < 2) return null;
+  const idCliente = Number(base.IdCliente);
+  const r = await q(
+    `INSERT INTO Viajes (Inicio, EstadoActual, Estatus, IdCliente, IdTurno, IdOperador, IdVariante)
+     VALUES (UTC_TIMESTAMP(), 1, 1, ?, ?, ?, ?)`,
+    [idCliente, base.IdTurno, base.IdOperador, base.IdVariante],
+  );
+  viajesQA.push(Number(r.insertId));
+  return {
+    idViaje: Number(r.insertId),
+    cliente: idCliente,
+    tipoTarifa: Number(base.tipo),
+    validador: base.validador,
+    sube: ruta[0],
+    baja: ruta[Math.min(3, ruta.length - 1)],
+  };
+}
+
 export async function limpiar() {
   if (monederos.length) {
     const series = monederos.map(() => '?').join(',');
@@ -175,6 +217,9 @@ export async function limpiar() {
 const casos = [];
 export function caso(grupo, nombre, fn) { casos.push({ grupo, nombre, fn }); }
 export function esperar(cond, msg) { if (!cond) throw new Error(msg); }
+/** Caso que no puede correr con los datos de esta BD: se reporta aparte y no cuenta como fallo. */
+export class Omitido extends Error {}
+export function omitir(motivo) { throw new Omitido(motivo); }
 
 export async function correr() {
   const filtro = process.argv.slice(2);
@@ -188,14 +233,20 @@ export async function correr() {
       resultados.push({ grupo: c.grupo, nombre: c.nombre, ok: true, ms: Date.now() - t0, detalle: detalle ?? '' });
       console.log(`  ✔ [${c.grupo}] ${c.nombre}`);
     } catch (e) {
+      if (e instanceof Omitido) {
+        resultados.push({ grupo: c.grupo, nombre: c.nombre, ok: true, omitido: true, ms: Date.now() - t0, detalle: `omitido: ${e.message}` });
+        console.log(`  ○ [${c.grupo}] ${c.nombre}\n      omitido: ${e.message}`);
+        continue;
+      }
       resultados.push({ grupo: c.grupo, nombre: c.nombre, ok: false, ms: Date.now() - t0, detalle: e.message });
       console.log(`  ✘ [${c.grupo}] ${c.nombre}\n      ${e.message}`);
     }
   }
   await limpiar();
   await db.end();
+  const omitidos = resultados.filter((r) => r.omitido).length;
   const ok = resultados.filter((r) => r.ok).length;
-  console.log(`\n${ok}/${resultados.length} casos en verde`);
+  console.log(`\n${ok - omitidos}/${resultados.length - omitidos} casos en verde${omitidos ? `, ${omitidos} omitidos` : ''}`);
   writeFileSync(new URL('./last-run.json', import.meta.url), JSON.stringify({ fecha: new Date().toISOString(), api: API, resultados }, null, 2));
   process.exitCode = ok === resultados.length ? 0 : 1;
 }

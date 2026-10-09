@@ -1,5 +1,0 @@
-# Rutas con :param sin @TenantResource; la pertenencia la valida el servicio.
-# Solo debe encoger. Regenerar: node scripts/lint-tenant-routes.mjs --write-baseline
-conteopasajeros.controller.ts GET contador/:numeroSerie/hoy
-conteopasajeros.controller.ts GET contador/:numeroSerie/rango/:fechaInicio/:fechaFin
-viajestransacciones.controller.ts GET transacciones/:id

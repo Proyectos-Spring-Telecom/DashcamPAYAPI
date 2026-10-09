@@ -33,8 +33,10 @@ async function bootstrap() {
   // Configurar el adaptador de Socket.IO
   app.useWebSocketAdapter(new SocketIOAdapter(app));
 
-  // El TLS lo termina el reverse proxy; confiar en sus headers X-Forwarded-*
-  app.set('trust proxy', 1);
+  // El TLS lo termina el reverse proxy; confiar en sus headers X-Forwarded-*.
+  // H-50: número de saltos configurable por entorno para no confiar en más
+  // proxies de los reales (spoofing de X-Forwarded-For). Default 1.
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1));
 
   const swaggerOn = process.env.SWAGGER_ENABLED === 'true';
   const corsOrigins = (process.env.CORS_ORIGINS ?? 'https://dashcampay.com')

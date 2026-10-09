@@ -24,11 +24,13 @@ import {
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
 import { Roles } from 'src/guard/roles.decorator';
+import { TenantExempt } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Catálogo tipo verificaciones')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
 @Roles(1, 2, 3, 11)
+@TenantExempt('Catálogo global sin IdCliente')
 @Controller('cat-tipo-verificaciones')
 export class CatTipoVerificacionesController {
   constructor(

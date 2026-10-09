@@ -1,3 +1,4 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 import {
   clienteHijosDesdeSp,
   tieneIdsTenant,
@@ -71,6 +72,12 @@ export class TarifasService {
     createTarifaDto: CreateTarifaDto,
   ): Promise<ApiCrudResponse> {
     try {
+      // N-07: 404 uniforme (no revelar si la variante existe en otro tenant).
+      await assertPadresEnTenant(
+        this.tarifasRepository.manager.connection,
+        { cliente, rol, userId: idUser },
+        { variante: createTarifaDto.idVariante },
+      );
       const variante = await this.variantesRepository.findOne({
         where: { id: createTarifaDto.idVariante },
         relations: ['idRuta2', 'idRuta2.idZona2'],

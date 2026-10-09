@@ -86,6 +86,12 @@ export class MantenimientoVehicularService {
         idCliente,
         rol,
       );
+      // N-07: el taller asignado también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.mantenimientoVehicularRepository.manager.connection,
+        { cliente: idCliente, rol },
+        { taller: createMantenimientoVehicularDto.idTaller },
+      );
 
       // Validar claves foráneas si se proporcionan
       if (
