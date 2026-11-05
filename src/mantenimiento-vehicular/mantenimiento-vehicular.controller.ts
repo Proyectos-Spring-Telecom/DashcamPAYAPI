@@ -27,12 +27,14 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Mantenimiento vehicular')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('mantenimiento-vehicular')
 @TenantResource('mantenimientoVehicular')
 export class MantenimientoVehicularController {
@@ -87,10 +89,13 @@ export class MantenimientoVehicularController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
+    const idCliente = Number(req.user.cliente) || 0;
     return await this.mantenimientoVehicularService.create(
       createMantenimientoVehicularDto,
       idUser,
       notaServicioFile,
+      idCliente,
+      +req.user.rol,
     );
   }
 
@@ -215,6 +220,8 @@ export class MantenimientoVehicularController {
       id,
       updateMantenimientoVehicularDto,
       idUser,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -247,7 +254,12 @@ export class MantenimientoVehicularController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.mantenimientoVehicularService.desactivar(id, idUser);
+    return await this.mantenimientoVehicularService.desactivar(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Patch(':id/activar')
@@ -283,7 +295,12 @@ export class MantenimientoVehicularController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.mantenimientoVehicularService.activar(id, idUser);
+    return await this.mantenimientoVehicularService.activar(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Patch(':id/estatus/:estatus')
@@ -329,6 +346,8 @@ export class MantenimientoVehicularController {
       idUser,
       id,
       estatus,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 }

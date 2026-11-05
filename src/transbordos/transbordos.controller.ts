@@ -14,6 +14,7 @@ import { TransbordosService } from './transbordos.service';
 import { CreateTransbordoDto } from './dto/create-transbordo.dto';
 import { UpdateTransbordoDto } from './dto/update-transbordo.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
@@ -28,6 +29,7 @@ import {
 @ApiTags('Transbordos')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('transbordos')
 @TenantResource('transbordo')
 export class TransbordosController {
@@ -74,7 +76,12 @@ export class TransbordosController {
   })
   create(@Body() createTransbordoDto: CreateTransbordoDto, @Request() req) {
     const idUser = req.user.userId;
-    return this.transbordosService.create(idUser, createTransbordoDto);
+    return this.transbordosService.create(
+      idUser,
+      createTransbordoDto,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get('tipos-descuento')
@@ -194,7 +201,9 @@ export class TransbordosController {
   })
   findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
     const idUser = req.user.userId;
-    return this.transbordosService.findOne(id, idUser);
+    const cliente = req.user.cliente;
+    const rol = req.user.rol;
+    return this.transbordosService.findOne(id, idUser, +cliente, +rol);
   }
 
   @Patch(':id')

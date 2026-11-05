@@ -19,6 +19,9 @@ export class HistoricoTransaccionesDebito {
   @PrimaryGeneratedColumn({ type: 'bigint', name: 'Id' })
   id: number;
 
+  @Column('bigint', { name: 'IdTransaccionOrigen', nullable: true })
+  idTransaccionOrigen: number | null;
+
   @Column('bigint', { name: 'IdTipoTransaccion' })
   idTipoTransaccion: number;
 

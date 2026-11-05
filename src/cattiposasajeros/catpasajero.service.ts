@@ -1,9 +1,16 @@
 import {
+  clienteHijosDesdeSp,
+  clientesPermitidos,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
+import { forbidTenantMove } from 'src/common/tenant/forbid-tenant-move';
 import { CreateCatpasajeroDto } from './dto/create-catpasajero.dto';
 import { UpdateCatpasajeroDto } from './dto/update-catpasajero.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -32,8 +39,23 @@ export class CatpasajeroService {
   // ========================================
   // 🔹 CREAR UN NUEVO TIPO DE PASAJERO
   // ========================================
-  async create(idUser: number, createCatpasajeroDto: CreateCatpasajeroDto) {
+  async create(
+    idUser: number,
+    createCatpasajeroDto: CreateCatpasajeroDto,
+    clienteActor = 0,
+    rol = 1,
+  ) {
     try {
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(createCatpasajeroDto.idCliente))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       //Creamos el nuevo tipo de pasajero
       const newCatPasajero =
         await this.catTiposPasajerosRepository.create(createCatpasajeroDto);
@@ -82,29 +104,13 @@ export class CatpasajeroService {
       throw new InternalServerErrorException({
         message:
           'Se ha producido un error durante la creación de un nuevo tipo de pasajero.',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   // ========================================
@@ -180,6 +186,7 @@ ORDER BY cp.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Consulta de datos listado resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -235,8 +242,21 @@ ORDER BY cp.Id DESC;
   // ========================================
   // 🔹 OBTENER UN SOLO TIPO DE PASAJERO
   // ========================================
-  async findOne(id: number) {
+  async findOne(id: number, cliente = 0, rol = 1) {
     try {
+      let whereSql = 'WHERE cp.Id = ? AND c.Estatus = 1';
+      let params: number[] = [id];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new BadRequestException(
+            `No se encontró el pasajero con ID ${id} dentro del catálogo.`,
+          );
+        }
+        whereSql += ` AND cp.IdCliente IN (${placeholders})`;
+        params = [id, ...ids];
+      }
+
       const catpasajeros = await this.catTiposPasajerosRepository.query(
         `
 SELECT 
@@ -255,14 +275,13 @@ INNER JOIN Clientes c
     ON cp.IdCliente = c.Id
 INNER JOIN CatTipoDescuento ctd
 	ON cp.IdCatTipoDescuento = ctd.Id
-WHERE cp.Id = ?
-AND c.Estatus = 1
+${whereSql}
 ORDER BY cp.Id DESC;        
             `,
-        [id],
+        params,
       );
 
-      if (!catpasajeros) {
+      if (!catpasajeros?.length) {
         throw new BadRequestException(
           `No se encontró el pasajero con ID ${id} dentro del catálogo.`,
         );
@@ -304,6 +323,12 @@ ORDER BY cp.Id DESC;
           `No se encontró el pasajero con ID ${id} dentro del catálogo.`,
         );
       }
+      forbidTenantMove(
+        catpasajero.idCliente,
+        updateCatpasajeroDto as any,
+        'idCliente',
+        'No se encontró el pasajero con ID ' + id + ' dentro del catálogo.',
+      );
 
       //Actualizamos los datos en la base de datos
       await this.catTiposPasajerosRepository.update(id, updateCatpasajeroDto);
@@ -347,7 +372,6 @@ ORDER BY cp.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar actualizar el tipo de pasajero.',
-        error: error.message,
       });
     }
   }
@@ -418,7 +442,6 @@ ORDER BY cp.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'No fue posible cambiar el estatus del tipo de pasajero.',
-        error: error.message,
       });
     }
   }
@@ -480,7 +503,6 @@ ORDER BY cp.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar eliminar el tipo de pasajero.',
-        error: error.message,
       });
     }
   }

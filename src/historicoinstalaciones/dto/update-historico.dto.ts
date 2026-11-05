@@ -16,8 +16,4 @@ export class UpdateHistoricoDto {
   @IsOptional()
   @IsNumber()
   idVehiculo?: number;
-
-  @IsOptional()
-  @IsNumber()
-  idCliente?: number;
 }

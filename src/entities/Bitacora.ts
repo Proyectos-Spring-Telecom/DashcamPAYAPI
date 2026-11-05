@@ -46,6 +46,10 @@ export class Bitacora {
   @Column('char', { name: 'Hash', length: 64, nullable: true })
   hash: string | null;
 
+  /** Hash de la fila previa. Null en registros anteriores al encadenado. */
+  @Column('char', { name: 'HashAnterior', length: 64, nullable: true })
+  hashAnterior: string | null;
+
   @Column('bigint', { name: 'IdUsuario' })
   idUsuario: number;
 

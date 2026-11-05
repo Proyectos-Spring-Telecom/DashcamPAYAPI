@@ -1,48 +1,107 @@
+import { clienteHijosDesdeSp, tieneIdsTenant } from 'src/common/tenant/ownership-resolvers';
 import {
   ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
+  OnModuleDestroy,
 } from '@nestjs/common';
-import { createHmac } from 'crypto';
 import { CreateBitacoraDto } from './dto/create-bitacora.dto';
-import { InjectRepository } from '@nestjs/typeorm';
+import {
+  bitacoraCanonical,
+  bitacoraCanonicalEncadenado,
+  coerceBitacoraQuery,
+  hashesIguales,
+  hmacBitacora,
+} from './bitacora-hmac';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Bitacora } from 'src/entities/Bitacora';
-import { Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  EntitySubscriberInterface,
+  Repository,
+} from 'typeorm';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { Clientes } from 'src/entities/Clientes';
 
+type BitacoraArgs = Parameters<BitacoraLoggerService['logToBitacora']>;
+const PENDIENTES = 'bitacoraPendiente';
+
 @Injectable()
-export class BitacoraLoggerService {
+export class BitacoraLoggerService implements OnModuleDestroy {
+  private readonly logger = new Logger(BitacoraLoggerService.name);
+  /** Escrituras en serie dentro del proceso; el GET_LOCK del encadenamiento queda fuera de la ruta del cobro. */
+  private cola: Promise<void> = Promise.resolve();
+
   constructor(
     @InjectRepository(Bitacora)
     private readonly bitacoraRepository: Repository<Bitacora>,
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
-  ) {}
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
+  ) {
+    this.dataSource.subscribers.push(this.subscriberTransacciones());
+  }
+
+  /**
+   * Registro de bitácora que no bloquea ni revierte al llamador (R2).
+   * Dentro de una transacción queda pendiente y se encola solo si la
+   * transacción externa confirma; si revierte, se descarta. Un fallo de la
+   * bitácora se loguea y nunca deshace el cobro.
+   */
+  registrar(args: BitacoraArgs, manager?: EntityManager): void {
+    const qr = manager?.queryRunner;
+    if (qr?.isTransactionActive) {
+      const pendientes: BitacoraArgs[] = (qr.data[PENDIENTES] ??= []);
+      pendientes.push(args);
+      return;
+    }
+    this.encolar(args);
+  }
+
+  private encolar(args: BitacoraArgs): void {
+    this.cola = this.cola
+      .then(() => this.logToBitacora(...args))
+      .catch((error) =>
+        this.logger.error(
+          `No se pudo registrar la bitácora: ${(error as Error)?.message}`,
+        ),
+      );
+  }
+
+  private subscriberTransacciones(): EntitySubscriberInterface {
+    return {
+      // Con savepoints el evento también llega al liberar uno: solo cuenta el COMMIT externo.
+      afterTransactionCommit: (event) => {
+        const qr = event.queryRunner;
+        if (qr.isTransactionActive) return;
+        const pendientes = qr.data?.[PENDIENTES] as BitacoraArgs[] | undefined;
+        if (!pendientes?.length) return;
+        delete qr.data[PENDIENTES];
+        pendientes.forEach((args) => this.encolar(args));
+      },
+      afterTransactionRollback: (event) => {
+        const qr = event.queryRunner;
+        if (!qr.isTransactionActive && qr.data) delete qr.data[PENDIENTES];
+      },
+    };
+  }
+
+  /** Espera a que la cola termine antes de apagar el proceso. */
+  async onModuleDestroy(): Promise<void> {
+    await this.cola;
+  }
   createBitacora(_createBitacoraDto: CreateBitacoraDto) {
     return 'This action adds a new bitacora';
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   async findAllListBitacora(cliente: number, rol: number) {
@@ -88,6 +147,7 @@ ORDER BY b.FechaCreacion DESC;
           );
           break;
 
+        case 3:
         default:
           // Consulta de datos listado resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -129,12 +189,7 @@ ORDER BY b.FechaCreacion DESC;
           break;
       }
 
-      const data = bitacora.map((item) => ({
-        ...item,
-        id: Number(item.id),
-        idUsuario: Number(item.idUsuario),
-        idModulo: Number(item.idModulo),
-      }));
+      const data = bitacora.map((item) => this.presentBitacora(item));
 
       const result: ApiResponseCommon = {
         data: data,
@@ -208,6 +263,7 @@ INNER JOIN Modulos m ON b.IdModulo = m.Id
           );
           break;
 
+        case 3:
         default:
           // Consulta de datos paginados resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -265,12 +321,7 @@ WHERE u.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente
 
       const total = Number(totalResult[0]?.total ?? 0);
 
-      const data = bitacora.map((item) => ({
-        ...item,
-        id: Number(item.id),
-        idUsuario: Number(item.idUsuario),
-        idModulo: Number(item.idModulo),
-      }));
+      const data = bitacora.map((item) => this.presentBitacora(item));
       const result: ApiResponseCommon = {
         data: data,
         paginated: {
@@ -290,8 +341,19 @@ WHERE u.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente
     }
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, cliente = 0, rol = 1) {
     try {
+      let whereSql = 'WHERE b.Id = ?';
+      let params: Array<number> = [id];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Bitácora no encontrada');
+        }
+        whereSql += ` AND u.IdCliente IN (${placeholders})`;
+        params = [id, ...ids];
+      }
+
       const bitacora = await this.bitacoraRepository.query(
         `
 SELECT
@@ -322,23 +384,18 @@ FROM Bitacora b
 INNER JOIN Usuarios u ON b.IdUsuario = u.Id
 INNER JOIN Modulos m ON b.IdModulo = m.Id
 
-WHERE b.Id = ?
+${whereSql}
 
 ORDER BY b.FechaCreacion DESC;
             `,
-        [id],
+        params,
       );
 
       if (bitacora.length === 0) {
         throw new NotFoundException(`Bitácora con ID: ${id} no encontrada.`);
       }
 
-      const data = bitacora.map((item) => ({
-        ...item,
-        id: Number(item.id),
-        idUsuario: Number(item.idUsuario),
-        idModulo: Number(item.idModulo),
-      }));
+      const data = bitacora.map((item) => this.presentBitacora(item));
 
       return { data: data };
     } catch (error) {
@@ -361,34 +418,18 @@ ORDER BY b.FechaCreacion DESC;
     estatus?: string,
     error?: string,
   ) {
-    const fechaCreacion = new Date();
+    // M-013: segundos enteros. FechaCreacion es DATETIME(0) y MySQL REDONDEA
+    // los milisegundos (>= 500 sube un segundo), mientras el hash los truncaba:
+    // cerca de la mitad de los registros verificaban como "alterados".
+    const fechaCreacion = new Date(Math.floor(Date.now() / 1000) * 1000);
     const querySanitizado = this.sanitizeQuery(query);
 
     const descripcionSafe = this.truncate(descripcion, 250);
     const moduloSafe = this.truncate(modulo, 100);
     const accionSafe = this.truncate(accion, 45);
-    const errorSafe = error ? this.truncate(error, 1000) : undefined;
+    const errorSafe = this.safeBitacoraError(error);
 
-    const canonical = [
-      moduloSafe ?? '',
-      descripcionSafe ?? '',
-      accionSafe ?? '',
-      JSON.stringify(querySanitizado ?? {}),
-      estatus ?? '',
-      errorSafe ?? '',
-      String(idUsuario),
-      String(idModulo),
-      fechaCreacion.toISOString(),
-    ].join('|');
-
-    const hash = createHmac(
-      'sha256',
-      process.env.BITACORA_HMAC_SECRET as string,
-    )
-      .update(canonical)
-      .digest('hex');
-
-    const registro = this.bitacoraRepository.create({
+    const campos = {
       modulo: moduloSafe,
       descripcion: descripcionSafe,
       accion: accionSafe,
@@ -398,9 +439,91 @@ ORDER BY b.FechaCreacion DESC;
       idUsuario,
       idModulo,
       fechaCreacion,
-      hash,
-    });
-    await this.bitacoraRepository.save(registro);
+    };
+    const secret = process.env.BITACORA_HMAC_SECRET as string;
+
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      const lock: Array<{ ok?: number | string | null }> = await runner.query(
+        `SELECT GET_LOCK('dashcam_bitacora_chain', 10) AS ok`,
+      );
+      if (Number(lock?.[0]?.ok) !== 1) {
+        throw new InternalServerErrorException(
+          'No se pudo registrar la bitácora.',
+        );
+      }
+      const previa: Array<{ Hash?: string | null }> = await runner.query(
+        'SELECT Hash FROM Bitacora ORDER BY Id DESC LIMIT 1',
+      );
+      const hashAnterior = previa[0]?.Hash ?? null;
+      const hash = hmacBitacora(
+        bitacoraCanonicalEncadenado(campos, hashAnterior),
+        secret,
+      );
+      const registro = runner.manager.getRepository(Bitacora).create({
+        ...campos,
+        hash,
+        hashAnterior,
+      });
+      await runner.manager.getRepository(Bitacora).save(registro);
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      if (error instanceof HttpException) throw error;
+      throw new InternalServerErrorException(
+        'No se pudo registrar la bitácora.',
+      );
+    } finally {
+      try {
+        await runner.query(`SELECT RELEASE_LOCK('dashcam_bitacora_chain')`);
+      } catch {
+        // Si la conexión ya se cerró, el candado se suelta con ella.
+      }
+      await runner.release();
+    }
+  }
+
+  private presentBitacora(item: Record<string, unknown>) {
+    return {
+      ...item,
+      id: Number(item.id),
+      idUsuario: Number(item.idUsuario),
+      idModulo: Number(item.idModulo),
+      error: this.safeBitacoraError(
+        item.error == null ? undefined : String(item.error),
+      ) ?? null,
+      query: this.redactStoredQuery(item.query),
+    };
+  }
+
+  private redactStoredQuery(query: unknown): unknown {
+    if (query == null || query === '') return query ?? null;
+    let parsed: unknown = query;
+    if (typeof query === 'string') {
+      try {
+        parsed = JSON.parse(query);
+      } catch {
+        return {};
+      }
+    }
+    if (!parsed || typeof parsed !== 'object') return {};
+    return this.sanitizeQuery(parsed);
+  }
+
+  /** No persistir ni mostrar texto del driver, de SQL ni de la red. */
+  private safeBitacoraError(error?: string): string | undefined {
+    if (!error) return undefined;
+    const text = String(error);
+    if (
+      /queryfailed|sql syntax|unknown column|duplicate entry|ER_[A-Z0-9_]+|econnreset|econnrefused|sqlstate|deadlock|cannot add or update a child row/i.test(
+        text,
+      )
+    ) {
+      return 'Error interno';
+    }
+    return this.truncate(text, 200);
   }
 
   private truncate(value: string | null | undefined, max: number): string {
@@ -408,37 +531,60 @@ ORDER BY b.FechaCreacion DESC;
     return text.length > max ? text.slice(0, max) : text;
   }
 
-  private sanitizeQuery(query: any): any {
-    if (!query || typeof query !== 'object') return query;
-    const sensitiveKeys = [
-      'password',
-      'passwordHash',
-      'codigohash',
-      'codigoHash',
-      'cvv',
-      'cvv2',
-      'cardNumber',
-      'token',
-      'refreshToken',
-      'privateKey',
-      'secret',
-      'pin',
-    ];
-    const clone = JSON.parse(JSON.stringify(query));
-    const walk = (obj: any) => {
-      if (!obj || typeof obj !== 'object') return;
-      for (const k of Object.keys(obj)) {
-        if (
-          sensitiveKeys.some((s) => k.toLowerCase().includes(s.toLowerCase()))
-        ) {
-          obj[k] = '***';
-        } else if (typeof obj[k] === 'object') {
-          walk(obj[k]);
+  private isSensitiveKey(key: string): boolean {
+    // H-45/H-81: nunca persistir PII/credenciales en claro en el Query de la
+    // bitácora. El saneo es por allowlist (pickQueryIds descarta todo lo que no
+    // esté permitido), pero además estas claves se bloquean explícitamente como
+    // defensa en profundidad (insensible a mayúsculas, recursivo).
+    return /password|passhash|cvv|cvc|cardnumber|tarjeta|pan|pin|codigo|curp|fechanacimiento|nacimiento|billing|devicefinger|fingerprint|token|secret|privatekey|apikey|authorization|cookie|correo|email|telefono|nombre|apellido/i.test(
+      key,
+    );
+  }
+
+  private isAllowedQueryKey(key: string): boolean {
+    return /^(id|ids|estatus|monto|accion|rol|cantidad|cantidadPasajes|claveIdempotencia)$/i.test(
+      key,
+    )
+      || /^id[A-Z]/.test(key)
+      || /Id$/.test(key)
+      || /^numeroSerie/i.test(key)
+      || /^clave/i.test(key);
+  }
+
+  private pickQueryIds(value: unknown, depth = 0): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || depth > 4) return {};
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj);
+    if (
+      keys.length === 1 &&
+      /dto$/i.test(keys[0]) &&
+      obj[keys[0]] &&
+      typeof obj[keys[0]] === 'object'
+    ) {
+      return this.pickQueryIds(obj[keys[0]], depth + 1);
+    }
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(obj)) {
+      if (this.isSensitiveKey(key)) continue;
+      if (this.isAllowedQueryKey(key)) {
+        if (child == null || ['string', 'number', 'boolean'].includes(typeof child)) {
+          out[key] = child;
+        } else if (Array.isArray(child) && child.every((x) => typeof x === 'number' || typeof x === 'string')) {
+          out[key] = child.slice(0, 50);
+        } else if (typeof child === 'object') {
+          const nested = this.pickQueryIds(child, depth + 1);
+          if (Object.keys(nested).length) out[key] = nested;
         }
+      } else if (child && typeof child === 'object' && !Array.isArray(child)) {
+        Object.assign(out, this.pickQueryIds(child, depth + 1));
       }
-    };
-    walk(clone);
-    return clone;
+    }
+    return out;
+  }
+
+  private sanitizeQuery(query: any): any {
+    if (!query || typeof query !== 'object') return {};
+    return this.pickQueryIds(query);
   }
 
   async verifyIntegrity(id: number): Promise<{ id: number; valido: boolean }> {
@@ -446,23 +592,42 @@ ORDER BY b.FechaCreacion DESC;
     if (!r) {
       throw new NotFoundException(`Bitácora con ID ${id} no encontrada.`);
     }
-    const canonical = [
-      r.modulo ?? '',
-      r.descripcion ?? '',
-      r.accion ?? '',
-      JSON.stringify(r.query ?? {}),
-      r.estatus ?? '',
-      r.error ?? '',
-      String(r.idUsuario),
-      String(r.idModulo),
-      (r.fechaCreacion as Date).toISOString(),
-    ].join('|');
-    const hashEsperado = createHmac(
-      'sha256',
-      process.env.BITACORA_HMAC_SECRET as string,
-    )
-      .update(canonical)
-      .digest('hex');
-    return { id, valido: r.hash === hashEsperado };
+    const campos = {
+      modulo: r.modulo,
+      descripcion: r.descripcion,
+      accion: r.accion,
+      query: coerceBitacoraQuery(r.query),
+      estatus: r.estatus,
+      error: r.error,
+      idUsuario: r.idUsuario,
+      idModulo: r.idModulo,
+      fechaCreacion: r.fechaCreacion,
+    };
+    const secret = process.env.BITACORA_HMAC_SECRET as string;
+    const coincide = (c: typeof campos): boolean =>
+      hashesIguales(
+        r.hash,
+        hmacBitacora(bitacoraCanonicalEncadenado(c, r.hashAnterior), secret),
+      ) ||
+      (!r.hashAnterior &&
+        hashesIguales(r.hash, hmacBitacora(bitacoraCanonical(c), secret)));
+    let valido = coincide(campos);
+    if (!valido && r.fechaCreacion) {
+      // Registros previos al truncado (M-013): MySQL redondeó hacia arriba los
+      // milisegundos que el hash había truncado; se compara con 1 s menos.
+      valido = coincide({
+        ...campos,
+        fechaCreacion: new Date(new Date(r.fechaCreacion).getTime() - 1000),
+      });
+    }
+    if (valido && r.hashAnterior) {
+      const previa: Array<{ Hash?: string | null }> =
+        await this.bitacoraRepository.query(
+          'SELECT Hash FROM Bitacora WHERE Id < ? ORDER BY Id DESC LIMIT 1',
+          [r.id],
+        );
+      valido = hashesIguales(previa[0]?.Hash ?? null, r.hashAnterior);
+    }
+    return { id, valido };
   }
 }

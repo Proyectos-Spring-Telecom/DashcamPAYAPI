@@ -14,10 +14,12 @@ import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Bitácora')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2)
 @Controller('bitacora')
 @TenantResource('bitacoraEntry')
 export class BitacoraController {
@@ -29,6 +31,19 @@ export class BitacoraController {
     const cliente = req.user.cliente;
     const rol = req.user.rol;
     return await this.bitacoraService.findAllListBitacora(+cliente, +rol);
+  }
+
+  // Debe ir antes de ':page/:limit': Express toma la primera que coincide y el
+  // ClampPageLimitInterceptor convertía "verify" en un límite válido, así que
+  // esta ruta nunca se alcanzaba.
+  @Get(':id/verify')
+  async verifyIntegrity(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    if (Number(req.user.rol) !== 1) {
+      throw new ForbiddenException(
+        'Solo administradores pueden verificar integridad de bitácora.',
+      );
+    }
+    return await this.bitacoraService.verifyIntegrity(id);
   }
 
   @Get(':page/:limit')
@@ -43,21 +58,12 @@ export class BitacoraController {
     return this.bitacoraService.findAll(+cliente, +rol, page, limit);
   }
 
-  @Get(':id/verify')
-  async verifyIntegrity(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    if (Number(req.user.rol) !== 1) {
-      throw new ForbiddenException(
-        'Solo administradores pueden verificar integridad de bitácora.',
-      );
-    }
-    return await this.bitacoraService.verifyIntegrity(id);
-  }
-
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    const _idUser = req.user.userId;
-    const _cliente = req.user.cliente;
-    const _rol = req.user.rol;
-    return await this.bitacoraService.findOne(id);
+    return await this.bitacoraService.findOne(
+      id,
+      Number(req.user.cliente),
+      Number(req.user.rol),
+    );
   }
 }

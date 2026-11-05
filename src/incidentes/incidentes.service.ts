@@ -11,7 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Incidentes } from 'src/entities/Incidentes';
 import { Instalaciones } from 'src/entities/Instalaciones';
 import { Operadores } from 'src/entities/Operadores';
-import { Repository, In } from 'typeorm';
+import { DataSource, Repository, In } from 'typeorm';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { S3Service } from 'src/s3/s3.service';
 import {
@@ -19,6 +19,8 @@ import {
   ApiResponseCommon,
   EstatusEnumBitcora,
 } from 'src/common/ApiResponse';
+import { clientesPermitidos } from 'src/common/tenant/ownership-resolvers';
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
 
 @Injectable()
 export class IncidentesService {
@@ -31,14 +33,26 @@ export class IncidentesService {
     private readonly operadoresRepository: Repository<Operadores>,
     private readonly bitacoraLogger: BitacoraLoggerService,
     private readonly s3Service: S3Service,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(
     createIncidentesDto: CreateIncidentesDto,
     idUser: number,
     imagenFile?: Express.Multer.File,
+    idCliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      // N-07: las FK padre deben ser del tenant (404 sin revelar existencia).
+      await assertPadresEnTenant(
+        this.dataSource,
+        { cliente: idCliente, rol },
+        {
+          instalacion: createIncidentesDto.idInstalacion,
+          operador: createIncidentesDto.idOperador,
+        },
+      );
       // Validar claves foráneas
       const instalacionExists = await this.instalacionesRepository.findOne({
         where: { id: createIncidentesDto.idInstalacion },
@@ -47,6 +61,16 @@ export class IncidentesService {
         throw new BadRequestException(
           `La instalación con ID ${createIncidentesDto.idInstalacion} no existe.`,
         );
+      }
+
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.dataSource,
+          idCliente,
+        );
+        if (!permitidos.includes(Number(instalacionExists.idCliente))) {
+          throw new NotFoundException('Incidente no encontrado');
+        }
       }
 
       const operadorExists = await this.operadoresRepository.findOne({
@@ -65,7 +89,8 @@ export class IncidentesService {
           imagenFile,
           'Incidentes',
           idUser,
-          36, // ID del módulo de incidentes (ajustar según corresponda)
+          36,
+          Number(idCliente) || 0,
         );
         imagenUrl = uploadResult.url;
       }
@@ -134,16 +159,28 @@ export class IncidentesService {
     try {
       const whereCondition: any = {};
 
-      // Filtrar por idCliente si el rol no es 1 o 2
-      if (rol !== 1 && rol !== 2) {
-        // Obtener las instalaciones del cliente
+      // Rol 1 ve todo. Rol 2+ solo su árbol JWT (cliente + hijos).
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.dataSource,
+          idCliente,
+        );
+        if (permitidos.length === 0) {
+          return {
+            data: [],
+            paginated: {
+              total: 0,
+              page,
+              lastPage: 0,
+            },
+          };
+        }
         const instalaciones = await this.instalacionesRepository.find({
-          where: { idCliente: idCliente },
+          where: { idCliente: In(permitidos) },
           select: ['id'],
         });
         const idsInstalaciones = instalaciones.map((inst) => inst.id);
 
-        // Si no hay instalaciones, retornar vacío
         if (idsInstalaciones.length === 0) {
           return {
             data: [],
@@ -214,9 +251,7 @@ export class IncidentesService {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new BadRequestException(
-        error.message || 'Error al obtener los incidentes',
-      );
+      throw new BadRequestException('Error al obtener los incidentes');
     }
   }
 
@@ -237,15 +272,19 @@ export class IncidentesService {
         ],
       });
 
-      // Verificar que el incidente pertenece al cliente si el rol no es 1 o 2
-      if (rol !== 1 && rol !== 2) {
-        if (!incidente || incidente.instalacion?.idCliente !== idCliente) {
-          throw new NotFoundException('Incidente no encontrado');
-        }
-      }
-
       if (!incidente) {
         throw new NotFoundException('Incidente no encontrado');
+      }
+
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.dataSource,
+          idCliente,
+        );
+        const idClienteInc = Number(incidente.instalacion?.idCliente);
+        if (!permitidos.includes(idClienteInc)) {
+          throw new NotFoundException('Incidente no encontrado');
+        }
       }
 
       const nombreOperador = incidente.operador?.idUsuario2
@@ -287,19 +326,50 @@ export class IncidentesService {
     }
   }
 
+  private async assertIncidenteTenant(
+    id: number,
+    idCliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const incidente = await this.incidentesRepository.findOne({
+      where: { id },
+      relations: ['instalacion'],
+    });
+    if (!incidente) {
+      throw new NotFoundException('Incidente no encontrado');
+    }
+    const permitidos = await clientesPermitidos(this.dataSource, idCliente);
+    if (!permitidos.includes(Number(incidente.instalacion?.idCliente))) {
+      throw new NotFoundException('Incidente no encontrado');
+    }
+  }
+
   async update(
     id: number,
     updateIncidentesDto: UpdateIncidentesDto,
     idUser: number,
     imagenFile?: Express.Multer.File,
+    idCliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertIncidenteTenant(id, idCliente, rol);
       const incidente = await this.incidentesRepository.findOne({
         where: { id: id },
       });
       if (!incidente) {
         throw new NotFoundException('Incidente no encontrado');
       }
+      // N-07: la FK padre nueva también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.dataSource,
+        { cliente: idCliente, rol },
+        {
+          instalacion: updateIncidentesDto.idInstalacion,
+          operador: updateIncidentesDto.idOperador,
+        },
+      );
 
       // Subir imagen a S3 si se proporciona un archivo nuevo
       let imagenUrl: string | null = null;
@@ -308,7 +378,8 @@ export class IncidentesService {
           imagenFile,
           'Incidentes',
           idUser,
-          36, // ID del módulo de incidentes
+          36,
+          Number(idCliente) || 0,
         );
         imagenUrl = uploadResult.url;
       }
@@ -325,6 +396,20 @@ export class IncidentesService {
           throw new BadRequestException(
             `La instalación con ID ${updateIncidentesDto.idInstalacion} no existe.`,
           );
+        }
+        if (
+          Number(updateIncidentesDto.idInstalacion) !==
+          Number(incidente.idInstalacion)
+        ) {
+          const actual = await this.instalacionesRepository.findOne({
+            where: { id: incidente.idInstalacion },
+          });
+          if (
+            !actual ||
+            Number(actual.idCliente) !== Number(instalacionExists.idCliente)
+          ) {
+            throw new NotFoundException('Incidente no encontrado');
+          }
         }
       }
 
@@ -454,8 +539,14 @@ export class IncidentesService {
     }
   }
 
-  async desactivar(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async desactivar(
+    id: number,
+    idUser: number,
+    idCliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
+      await this.assertIncidenteTenant(id, idCliente, rol);
       const incidente = await this.incidentesRepository.findOne({
         where: { id: id },
       });
@@ -507,13 +598,18 @@ export class IncidentesService {
       }
       throw new InternalServerErrorException({
         message: 'Error al desactivar el incidente.',
-        error: error.message,
       });
     }
   }
 
-  async activar(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async activar(
+    id: number,
+    idUser: number,
+    idCliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
+      await this.assertIncidenteTenant(id, idCliente, rol);
       const incidente = await this.incidentesRepository.findOne({
         where: { id: id },
       });
@@ -569,7 +665,6 @@ export class IncidentesService {
       }
       throw new InternalServerErrorException({
         message: 'Error al activar el incidente.',
-        error: error.message,
       });
     }
   }
@@ -578,8 +673,11 @@ export class IncidentesService {
     idUser: number,
     idIncidente: number,
     estatus: number,
+    idCliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertIncidenteTenant(idIncidente, idCliente, rol);
       const incidente = await this.incidentesRepository.findOne({
         where: { id: idIncidente },
       });
@@ -631,7 +729,6 @@ export class IncidentesService {
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar el estatus del incidente.',
-        error: error.message,
       });
     }
   }

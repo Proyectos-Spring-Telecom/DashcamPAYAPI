@@ -18,6 +18,7 @@ import { LicenciasService } from './licencias.service';
 import { CreateLicenciaDto } from './dto/create-licencia.dto';
 import { UpdateLicenciaDto } from './dto/update-licencia.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
@@ -31,6 +32,7 @@ import {
 @ApiTags('Licencias')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('licencias')
 @TenantResource('licencia')
 export class LicenciasController {
@@ -71,12 +73,14 @@ export class LicenciasController {
     @Request() req,
   ) {
     const idUser = req.user.userId;
-    const _cliente = req.user.cliente;
-    const _rol = req.user.rol;
+    const cliente = req.user.cliente;
+    const rol = req.user.rol;
     return this.licenciasService.create(
       idUser,
       createLicenciaDto,
       licenciaFile,
+      Number(cliente) || 0,
+      Number(rol) || 1,
     );
   }
 
@@ -115,16 +119,23 @@ export class LicenciasController {
     @Request() req,
   ) {
     const idUser = req.user.userId;
-    const _cliente = req.user.cliente;
-    const _rol = req.user.rol;
-    return this.licenciasService.update(+id, +idUser, updateLicenciaDto);
+    return this.licenciasService.update(
+      +id,
+      +idUser,
+      updateLicenciaDto,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req) {
     const idUser = req.user.userId;
-    const _cliente = req.user.cliente;
-    const _rol = req.user.rol;
-    return this.licenciasService.remove(+id, +idUser);
+    return this.licenciasService.remove(
+      +id,
+      +idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

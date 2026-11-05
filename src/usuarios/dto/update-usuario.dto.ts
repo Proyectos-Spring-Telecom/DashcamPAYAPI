@@ -1,5 +1,6 @@
 import {
   IsArray,
+  ArrayMaxSize,
   IsDateString,
   IsIn,
   IsInt,
@@ -77,20 +78,20 @@ export class UpdateUsuarioDto {
     description: 'Estatus del usuario (1=Activo, 0=Inactivo)',
     example: 1,
   })
-  estatus?: number = 1;
+  // Sin default: antes cada PUT reactivaba al usuario (H-02).
+  estatus?: number;
 
   @IsOptional()
   @IsInt()
+  @IsIn([1, 2, 3, 8, 9, 10, 11, 15], {
+    message: 'Rol no válido',
+  })
   @ApiProperty({ description: 'Rol asignado', example: 2 })
   idRol?: number;
 
   @IsOptional()
-  @IsInt()
-  @ApiProperty({ description: 'Cliente asignado', example: 5 })
-  idCliente?: number;
-
-  @IsOptional()
   @IsArray()
+  @ArrayMaxSize(200, { message: 'No se permiten más de 200 permisos' })
   @IsNumber({}, { each: true })
   permisosIds?: number[];
 }

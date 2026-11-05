@@ -12,6 +12,7 @@ import {
 import { ViajesService } from './viajes.service';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import {
@@ -27,6 +28,7 @@ import { ApiResponseCommon } from 'src/common/ApiResponse';
 @ApiTags('Viajes')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('viajes')
 @TenantResource('viaje')
 export class ViajesController {
@@ -36,13 +38,13 @@ export class ViajesController {
   create(@Body() createViajeDto: CreateViajeDto, @Request() req) {
     const idUser = req.user.userId;
     const cliente = req.user.cliente;
-    const _rol = req.user.rol;
     const idOperador = req.user.idOperador;
     return this.viajesService.create(
       +idUser,
       +cliente,
       +idOperador,
       createViajeDto,
+      +req.user.rol,
     );
   }
 
@@ -67,10 +69,9 @@ export class ViajesController {
 
   @Get('list')
   findAllList(@Request() req) {
-    const _idUser = req.user.userId;
     const cliente = req.user.cliente;
-    const _rol = req.user.rol;
-    return this.viajesService.findAllList(+cliente, +cliente);
+    const rol = req.user.rol;
+    return this.viajesService.findAllList(+cliente, +rol);
   }
 
   @Get('viajes-ultima-semana/:numeroSerieValidador')
@@ -100,9 +101,12 @@ export class ViajesController {
   })
   async getViajesUltimaSemanaPorValidador(
     @Param('numeroSerieValidador') numeroSerieValidador: string,
+    @Request() req,
   ): Promise<ApiResponseCommon> {
     return await this.viajesService.getViajesUltimaSemanaPorValidador(
       numeroSerieValidador,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 

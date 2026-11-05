@@ -29,12 +29,14 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Verificaciones')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('verificaciones')
 @TenantResource('verificacion')
 export class VerificacionesController {
@@ -87,10 +89,13 @@ export class VerificacionesController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
+    const idCliente = Number(req.user.cliente) || 0;
     return await this.verificacionesService.create(
       createVerificacionesDto,
       idUser,
       notaVerificacionFile,
+      idCliente,
+      +req.user.rol,
     );
   }
 
@@ -250,11 +255,14 @@ export class VerificacionesController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
+    const idCliente = Number(req.user.cliente) || 0;
     return await this.verificacionesService.update(
       id,
       updateVerificacionesDto,
       idUser,
       notaVerificacionFile,
+      idCliente,
+      +req.user.rol,
     );
   }
 
@@ -286,7 +294,12 @@ export class VerificacionesController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.verificacionesService.desactivar(id, idUser);
+    return await this.verificacionesService.desactivar(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Patch(':id/activar')
@@ -322,6 +335,11 @@ export class VerificacionesController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.verificacionesService.activar(id, idUser);
+    return await this.verificacionesService.activar(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

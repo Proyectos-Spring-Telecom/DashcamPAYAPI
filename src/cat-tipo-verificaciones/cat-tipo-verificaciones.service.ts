@@ -144,7 +144,7 @@ export class CatTipoVerificacionesService {
         throw error;
       }
       throw new BadRequestException(
-        error.message || 'Error al obtener los tipos de verificación',
+        'Error al obtener los tipos de verificación',
       );
     }
   }
@@ -310,7 +310,6 @@ export class CatTipoVerificacionesService {
       }
       throw new InternalServerErrorException({
         message: 'Error al eliminar el tipo de verificación.',
-        error: error.message,
       });
     }
   }

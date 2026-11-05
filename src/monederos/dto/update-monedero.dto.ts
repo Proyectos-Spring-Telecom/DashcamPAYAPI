@@ -43,14 +43,6 @@ export class UpdateMonederoDto {
   idPasajero?: number;
 
   @ApiProperty({
-    example: 1,
-    description: 'ID del cliente propietario del monedero',
-  })
-  @IsInt()
-  @IsOptional()
-  idCliente?: number;
-
-  @ApiProperty({
     example: 'CARD123456789',
     description: 'ID de la tarjeta asociada al monedero',
     required: false,

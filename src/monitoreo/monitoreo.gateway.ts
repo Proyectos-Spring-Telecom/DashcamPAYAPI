@@ -1,3 +1,4 @@
+import { clienteHijosDesdeSp } from 'src/common/tenant/ownership-resolvers';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -14,6 +15,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConnectedUsers } from 'src/entities/ConnectedUsers';
 import { Clientes } from 'src/entities/Clientes';
+import { Usuarios } from 'src/entities/Usuarios';
+import { isOriginAllowed } from 'src/common/cors-origins';
+import { JwtTyp, jwtAudience, jwtIssuer } from 'src/auth/jwt-types';
+import { isTokenVersionAccepted } from 'src/auth/token-version';
 
 interface AuthenticatedSocket extends Socket {
   userId?: number;
@@ -33,7 +38,9 @@ interface SessionData {
 @WebSocketGateway({
   namespace: '/monitoreo',
   cors: {
-    origin: '*',
+    // Misma allowlist que HTTP; '*' con credentials dejaba conectar desde cualquier sitio.
+    origin: (origin: string | undefined, cb: (e: Error | null, ok?: boolean) => void) =>
+      cb(null, isOriginAllowed(origin)),
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -57,18 +64,17 @@ export class MonitoreoGateway
     private readonly connectedUsersRepository: Repository<ConnectedUsers>,
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
+    @InjectRepository(Usuarios)
+    private readonly usuariosRepository: Repository<Usuarios>,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
-      // Autenticaci?n JWT desde query params o auth headers
-      const token =
-        client.handshake.auth?.token ||
-        client.handshake.query?.token?.toString();
+      const token = client.handshake.auth?.token;
 
-      if (!token) {
+      if (!token || typeof token !== 'string') {
         this.logger.warn(
-          `Conexi?n rechazada: sin token - SocketId: ${client.id}`,
+          `Conexión rechazada: sin token - SocketId: ${client.id}`,
         );
         client.disconnect();
         return;
@@ -77,12 +83,43 @@ export class MonitoreoGateway
       // Verificar y decodificar JWT
       const payload = this.jwtService.verify(token, {
         secret: this.configService.get<string>('JWT_SECRET'),
+        algorithms: ['HS256'],
+        issuer: jwtIssuer(),
+        audience: jwtAudience(),
       });
 
+      if (payload?.typ !== JwtTyp.ACCESS) {
+        this.logger.warn(
+          `Conexión rechazada: token de propósito ${payload.typ} - SocketId: ${client.id}`,
+        );
+        client.disconnect();
+        return;
+      }
+
+      // Rol y cliente desde la BD (BIGINT → number), igual que JwtStrategy.
+      const user = await this.usuariosRepository.findOne({
+        where: { id: payload.id },
+        select: ['id', 'tokenVersion', 'estatus', 'idRol', 'idCliente'],
+      });
+      if (!user || Number(user.estatus) !== 1) {
+        this.logger.warn(
+          `Conexión rechazada: usuario inválido - SocketId: ${client.id}`,
+        );
+        client.disconnect();
+        return;
+      }
+      if (!isTokenVersionAccepted(payload.tv, Number(user.tokenVersion ?? 0))) {
+        this.logger.warn(
+          `Conexión rechazada: sesión invalidada - SocketId: ${client.id}`,
+        );
+        client.disconnect();
+        return;
+      }
+
       // Asignar datos del usuario al socket
-      client.userId = payload.id;
-      client.cliente = payload.cliente;
-      client.rol = payload.rol;
+      client.userId = Number(user.id);
+      client.cliente = Number(user.idCliente);
+      client.rol = Number(user.idRol);
 
       // Buscar si el usuario ya tiene una sesi?n (activa o inactiva reciente)
       // Prioridad: primero buscar activa, luego inactiva m?s reciente
@@ -390,21 +427,6 @@ export class MonitoreoGateway
    * Funci?n para obtener los clientes hijos (igual que en MonitoreoService)
    */
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer ?ndice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { ids: [cliente], placeholders: '?' }; // Al menos el cliente mismo
-    }
-
-    // Construir el query din?mico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 }

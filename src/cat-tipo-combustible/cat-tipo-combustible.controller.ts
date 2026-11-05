@@ -23,16 +23,21 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
+import { TenantExempt } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Catálogo tipo combustible')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2, 3, 11)
+@TenantExempt('Catálogo global sin IdCliente')
 @Controller('cat-tipo-combustible')
 export class CatTipoCombustibleController {
   constructor(
     private readonly catTipoCombustibleService: CatTipoCombustibleService,
   ) {}
 
+  @Roles(1, 2)
   @Post()
   @ApiOperation({
     summary: 'Crear un nuevo tipo de combustible',
@@ -145,6 +150,7 @@ export class CatTipoCombustibleController {
     return this.catTipoCombustibleService.findOne(id);
   }
 
+  @Roles(1, 2)
   @Patch(':id')
   @ApiOperation({
     summary: 'Actualizar un tipo de combustible',
@@ -189,6 +195,7 @@ export class CatTipoCombustibleController {
     );
   }
 
+  @Roles(1, 2)
   @Delete(':id')
   @ApiOperation({
     summary: 'Eliminar un tipo de combustible',

@@ -1,4 +1,9 @@
 import {
+  clienteHijosDesdeSp,
+  clientesPermitidos,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -32,8 +37,23 @@ export class VehiculosService {
     private readonly clienteRepository: Repository<Clientes>,
     private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
-  async create(createVehiculoDto: CreateVehiculoDto, idUser: number) {
+  async create(
+    createVehiculoDto: CreateVehiculoDto,
+    idUser: number,
+    clienteActor = 0,
+    rol = 1,
+  ) {
     try {
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(createVehiculoDto.idCliente))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       const vehiculoExist = await this.vehiculoRepository.findOne({
         where: { placa: createVehiculoDto.placa },
       });
@@ -85,34 +105,25 @@ export class VehiculosService {
       }
       throw new InternalServerErrorException({
         message: `Se produjo un error al crear el vehículo.`,
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   //Obtener los contadores por cliente /*/*Nulos
-  async findAllListClientes(id: number, _cliente: number) {
+  async findAllListClientes(id: number, clienteActor: number, rol = 1) {
     try {
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(clienteActor);
+        if (!tieneIdsTenant(ids) || !ids.includes(Number(id))) {
+          return { data: [] };
+        }
+      }
+
       const vehiculos = await this.vehiculoRepository.find({
         where: {
           idCliente: id,
@@ -137,7 +148,6 @@ export class VehiculosService {
       }
       throw new InternalServerErrorException({
         message: `Se produjo un error al obtener el listado de vehículos.`,
-        error: error.message,
       });
     }
   }
@@ -231,7 +241,6 @@ ORDER BY v.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener vehículos por cliente',
-        error: error.message,
       });
     }
   }
@@ -302,6 +311,7 @@ LIMIT ? OFFSET ?;
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
           // Consulta de datos paginados resto Usuario
@@ -382,7 +392,6 @@ LIMIT ? OFFSET ?;
       }
       throw new InternalServerErrorException({
         message: `Se produjo un error al obtener la paginación de vehículos.`,
-        error: error.message,
       });
     }
   }
@@ -438,6 +447,7 @@ ORDER BY v.Id DESC;
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
           // Consulta de datos listado resto Usuario
@@ -509,7 +519,6 @@ ORDER BY v.Id DESC;
       throw new InternalServerErrorException({
         message:
           'Ocurrió un error al intentar obtener un listado de vehiculos.',
-        error: error.message,
       });
     }
   }
@@ -564,6 +573,7 @@ ORDER BY v.Id DESC;
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
           vehiculos = await this.vehiculoRepository.query(
@@ -632,8 +642,20 @@ ORDER BY v.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener el vehículo.',
-        error: error.message,
       });
+    }
+  }
+
+  private async assertVehiculoTenant(
+    vehiculo: { idCliente?: number | null },
+    id: number,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids) || !ids.includes(Number(vehiculo.idCliente))) {
+      throw new NotFoundException('Vehículo no encontrado.');
     }
   }
 
@@ -641,12 +663,15 @@ ORDER BY v.Id DESC;
     id: number,
     idUser: number,
     updateVehiculoEstausDto: UpdateVehiculoEstatusDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
       const vehiculo = await this.vehiculoRepository.findOne({
         where: { id: id },
       });
       if (!vehiculo) throw new NotFoundException('Vehículo no encontrado.');
+      await this.assertVehiculoTenant(vehiculo, id, cliente, rol);
       const estatus = updateVehiculoEstausDto.estatus;
       if (estatus === 0) {
         const vehiculoInstalacion = await this.instalacionesRepository.findOne({
@@ -704,7 +729,6 @@ ORDER BY v.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar el estatus del vehículo.',
-        error: error.message,
       });
     }
   }
@@ -713,12 +737,23 @@ ORDER BY v.Id DESC;
     id: number,
     idUser: number,
     updateVehiculoDto: UpdateVehiculoDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
       const vehiculo = await this.vehiculoRepository.findOne({
         where: { id: id },
       });
       if (!vehiculo) throw new NotFoundException('Vehiculo no encontrado');
+      await this.assertVehiculoTenant(vehiculo, id, cliente, rol);
+      if (
+        (updateVehiculoDto as any).idCliente !== undefined &&
+        Number((updateVehiculoDto as any).idCliente) !==
+          Number((vehiculo as any).idCliente)
+      ) {
+        throw new NotFoundException('Vehiculo no encontrado');
+      }
+      delete (updateVehiculoDto as any).idCliente;
       const _vehiculoData = await this.vehiculoRepository.update(
         id,
         updateVehiculoDto,
@@ -750,7 +785,6 @@ ORDER BY v.Id DESC;
       return result;
     } catch (error) {
       //-----Registro en la bitacora----- ERROR
-      console.log(error);
       const querylogger = { updateVehiculoDto };
       await this.bitacoraLogger.logToBitacora(
         'Vehiculos',
@@ -768,17 +802,17 @@ ORDER BY v.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar el vehículo.',
-        error: error.message,
       });
     }
   }
 
-  async remove(id: number, idUser: number) {
+  async remove(id: number, idUser: number, cliente = 0, rol = 1) {
     try {
       const vehiculo = await this.vehiculoRepository.findOne({
         where: { id: id },
       });
       if (!vehiculo) throw new NotFoundException('Vehículo no encontrado.');
+      await this.assertVehiculoTenant(vehiculo, id, cliente, rol);
       const vehiculoInstalacion = await this.instalacionesRepository.findOne({
         where: { idVehiculo: vehiculo.id, estatus: 1 },
       });
@@ -832,7 +866,6 @@ ORDER BY v.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al eliminar el vehículo.',
-        error: error.message,
       });
     }
   }

@@ -1,13 +1,27 @@
+import { formatFechaDb, nowDb } from 'src/common/clock';
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
+import {
+  clientesPermitidos,
+  clienteHijosDesdeSp,
+  esPublicId,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import { SecurityFlags } from 'src/common/security-flags';
+import { assertDateWindow, assertIsoDate } from 'src/common/sql-date';
 import { CreateTransaccioneRecargaDto } from './dto/create-transaccione-recarga.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { DataSource, Repository, IsNull } from 'typeorm';
 import { TransaccionesRecarga } from 'src/entities/TransaccionesRecarga';
 import { TransaccionesDebito } from 'src/entities/TransaccionesDebito';
 import {
@@ -56,9 +70,34 @@ import { QRCodes } from 'src/entities/QRCodes';
 import { GetTransaccioneDto } from './dto/get-transacciones.dto';
 import { GetHistoricoRecargasDto } from './dto/get-historico-recargas.dto';
 import haversine from 'haversine-distance';
+import { KeyedMutex } from 'src/common/keyed-mutex';
+
+class IdempotenciaDuplicadaError extends Error {
+  constructor(public readonly clave: string) {
+    super('IDEMPOTENTE');
+    this.name = 'IdempotenciaDuplicadaError';
+  }
+}
+
+class SaldoInsuficienteTxError extends Error {
+  constructor() {
+    super('SALDO_INSUFICIENTE_TX');
+    this.name = 'SaldoInsuficienteTxError';
+  }
+}
+
+/** Reserva de claveIdempotencia de una recarga (tabla ReservasRecarga). */
+interface ReservaRecarga {
+  clave: string;
+  estado: 'EN_PROCESO' | 'PENDIENTE_CONCILIAR';
+  tokenId?: string;
+}
 
 @Injectable()
-export class TransaccionesService {
+export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(TransaccionesService.name);
+  private abiertaSweepTimer?: ReturnType<typeof setInterval>;
+
   constructor(
     @InjectRepository(TransaccionesRecarga)
     private readonly transaccionesrecargaRepository: Repository<TransaccionesRecarga>,
@@ -106,7 +145,253 @@ export class TransaccionesService {
     private readonly monederosService: MonederosService,
     private readonly pasajeroService: PasajerosService,
     private readonly netpayService: NetpayService,
+    private readonly dataSource: DataSource,
   ) {}
+
+  onModuleInit(): void {
+    const ttlHours = Number(process.env.ABIERTA_TTL_HOURS ?? 4);
+    if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
+      this.logger.log('Barrido de ABIERTAS desactivado (ABIERTA_TTL_HOURS<=0)');
+      return;
+    }
+    const minutes = Number(process.env.ABIERTA_SWEEP_MINUTES ?? 15);
+    const ms = Math.max(1, Number.isFinite(minutes) ? minutes : 15) * 60 * 1000;
+    this.abiertaSweepTimer = setInterval(() => {
+      this.cerrarAbiertasVencidas().catch((error) => {
+        this.logger.error('Error en barrido de ABIERTAS vencidas');
+      });
+    }, ms);
+    this.logger.log(
+      `Barrido de ABIERTAS cada ${Math.max(1, Number.isFinite(minutes) ? minutes : 15)} min (TTL ${ttlHours}h)`,
+    );
+  }
+
+  onModuleDestroy(): void {
+    if (this.abiertaSweepTimer) {
+      clearInterval(this.abiertaSweepTimer);
+      this.abiertaSweepTimer = undefined;
+    }
+  }
+
+  async cerrarAbiertasVencidas(): Promise<number> {
+    const ttlHours = Number(process.env.ABIERTA_TTL_HOURS ?? 4);
+    if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
+      return 0;
+    }
+
+    const limite = new Date(nowDb().getTime() - ttlHours * 60 * 60 * 1000);
+    const vencidas = await this.transaccionesdebitoRepository
+      .createQueryBuilder('t')
+      .where('t.controlTransaccion = :abierta', {
+        abierta: EnumControlTransacciones.ABIERTA,
+      })
+      .andWhere('t.fechaHoraInicio IS NOT NULL')
+      .andWhere('t.fechaHoraInicio <= :limite', {
+        limite: formatFechaDb(limite),
+      })
+      .orderBy('t.id', 'ASC')
+      .take(50)
+      .getMany();
+
+    let cerradas = 0;
+    const sweepUserId = await this.resolveSweepUserId();
+
+    for (const tx of vencidas) {
+      try {
+        await this.dataSource.transaction(async (manager) => {
+          const monedero = await manager.getRepository(Monederos).findOne({
+            where: { numeroSerie: tx.numeroSerieMonedero },
+          });
+          const cobro = Number(tx.cobroMaximo ?? tx.monto ?? 0);
+          let cargo = Math.min(
+            Math.max(cobro, 0),
+            Math.max(Number(monedero?.saldo ?? 0), 0),
+          );
+
+          const monederoActivo = monedero && Number(monedero.estatus) === 1;
+
+          if (cargo > 0 && monederoActivo) {
+            let descontado = await this.monederosService.descontarSaldoAtomico(
+              monedero.numeroSerie,
+              cargo,
+              sweepUserId,
+              manager,
+            );
+            if (!descontado) {
+              const fresco = await manager.getRepository(Monederos).findOne({
+                where: { numeroSerie: tx.numeroSerieMonedero },
+              });
+              cargo = Math.min(
+                Math.max(cobro, 0),
+                Math.max(Number(fresco?.saldo ?? 0), 0),
+              );
+              if (cargo > 0) {
+                descontado = await this.monederosService.descontarSaldoAtomico(
+                  monedero.numeroSerie,
+                  cargo,
+                  sweepUserId,
+                  manager,
+                );
+                if (!descontado) {
+                  throw new Error('ABIERTA_SWEEP_SALDO');
+                }
+              }
+            }
+          } else {
+            cargo = 0;
+          }
+
+          const cierre = await manager
+            .getRepository(TransaccionesDebito)
+            .update(
+              {
+                id: tx.id,
+                controlTransaccion: EnumControlTransacciones.ABIERTA,
+              },
+              {
+                monto: parseFloat(cargo.toFixed(2)),
+                controlTransaccion: EnumControlTransacciones.PAGADO,
+                fechaHoraFinal: nowDb(),
+              },
+            );
+          if (!cierre.affected) {
+            throw new Error('ABIERTA_YA_CERRADA');
+          }
+
+          const actualizada = await manager
+            .getRepository(TransaccionesDebito)
+            .findOne({ where: { id: tx.id } });
+          if (actualizada) {
+            const { id: liveId, ...body } = actualizada;
+            await manager.getRepository(HistoricoTransaccionesDebito).save({
+              ...body,
+              idTransaccionOrigen: Number(liveId),
+            });
+          }
+        });
+        cerradas += 1;
+      } catch (error) {
+        if (error instanceof Error && error.message === 'ABIERTA_YA_CERRADA') {
+          continue;
+        }
+        if (error instanceof Error && error.message === 'ABIERTA_SWEEP_SALDO') {
+          this.logger.warn(
+            `ABIERTA ${tx.id}: saldo cambió; se reintenta en el siguiente barrido`,
+          );
+          continue;
+        }
+        this.logger.error(`Error cerrando ABIERTA ${tx.id}`);
+      }
+    }
+
+    if (cerradas > 0) {
+      this.logger.log(`Barrido ABIERTAS: ${cerradas} cerradas por vencimiento`);
+    }
+    return cerradas;
+  }
+
+  private async resolveSweepUserId(): Promise<number> {
+    const rows = await this.dataSource.query(
+      'SELECT Id AS id FROM Usuarios ORDER BY Id ASC LIMIT 1',
+    );
+    const id = Number(rows?.[0]?.id);
+    return Number.isFinite(id) && id > 0 ? id : 1;
+  }
+
+  private async assertMonederoEnTenant(
+    idClienteMonedero: number,
+    clienteActor: number,
+  ): Promise<void> {
+    const permitidos = await clientesPermitidos(this.dataSource, clienteActor);
+    if (!permitidos.includes(Number(idClienteMonedero))) {
+      throw new NotFoundException('El monedero no fue encontrado.');
+    }
+  }
+
+  private async assertDireccionDelTenant(
+    idDireccion: number,
+    monedero: {
+      idPasajero?: number | null;
+      customerId?: string | null;
+      correoUsuario?: string | null;
+      idCliente: number;
+    },
+    clienteActor: number,
+  ): Promise<{
+    direccion: DireccionesTarjeta;
+    datosTarjeta: DatosTarjeta;
+  }> {
+    const direccion = await this.direccionesTarjetaRepository.findOne({
+      where: { id: idDireccion },
+      relations: ['idDatosTarjeta2'],
+    });
+    if (!direccion || !direccion.idDatosTarjeta) {
+      throw new NotFoundException(
+        `No se encontró la dirección con ID: ${idDireccion}`,
+      );
+    }
+    const datosTarjeta = await this.datosTarjetaRepository.findOne({
+      where: { id: direccion.idDatosTarjeta },
+    });
+    if (!datosTarjeta) {
+      throw new NotFoundException(
+        `No se encontraron los datos de tarjeta asociados a la dirección ${idDireccion}`,
+      );
+    }
+
+    const customerId = datosTarjeta.customerIdNetPay || null;
+    const email = (datosTarjeta.email || '').toLowerCase();
+    const mismoCustomer =
+      !!customerId &&
+      !!monedero.customerId &&
+      customerId === monedero.customerId;
+    const mismoCorreo =
+      !!email &&
+      !!monedero.correoUsuario &&
+      email === monedero.correoUsuario.toLowerCase();
+
+    if (mismoCustomer || mismoCorreo) {
+      return { direccion, datosTarjeta };
+    }
+
+    let pasajeroDueño: Pasajeros | null = null;
+    if (customerId) {
+      pasajeroDueño = await this.pasajeroRepository.findOne({
+        where: { customerIdNetPay: customerId },
+      });
+    }
+    if (!pasajeroDueño && email) {
+      pasajeroDueño = await this.pasajeroRepository.findOne({
+        where: { correo: email },
+      });
+    }
+    if (!pasajeroDueño) {
+      throw new NotFoundException(
+        `No se encontró la dirección con ID: ${idDireccion}`,
+      );
+    }
+    if (
+      monedero.idPasajero != null &&
+      Number(pasajeroDueño.id) !== Number(monedero.idPasajero)
+    ) {
+      throw new NotFoundException(
+        `No se encontró la dirección con ID: ${idDireccion}`,
+      );
+    }
+    const monederoDueño = await this.monederoRepository.findOne({
+      where: { idPasajero: pasajeroDueño.id },
+    });
+    if (!monederoDueño) {
+      throw new NotFoundException(
+        `No se encontró la dirección con ID: ${idDireccion}`,
+      );
+    }
+    await this.assertMonederoEnTenant(
+      Number(monederoDueño.idCliente),
+      clienteActor,
+    );
+    return { direccion, datosTarjeta };
+  }
 
   /**
    * Transforma el valor de EsQR (0/1) a texto descriptivo
@@ -142,9 +427,6 @@ export class TransaccionesService {
     } | null,
   ): number {
     if (!variante?.recorridoDetallado) {
-      console.log(
-        '[TRANSACCIONES] No se puede calcular distancia: variante sin recorridoDetallado',
-      );
       return 0;
     }
 
@@ -153,9 +435,6 @@ export class TransaccionesService {
         variante.recorridoDetallado,
       );
       if (!recorrido || recorrido.length === 0) {
-        console.log(
-          '[TRANSACCIONES] No se puede calcular distancia: recorrido vacío o inválido',
-        );
         return 0;
       }
 
@@ -237,42 +516,9 @@ export class TransaccionesService {
       );
 
       // Imprimir en consola el cálculo detallado
-      console.log(
-        '[TRANSACCIONES] ===== CÁLCULO DE DISTANCIA INICIAL KM =====',
-      );
-      console.log(`[TRANSACCIONES] Variante ID: ${variante.id}`);
-      console.log(
-        `[TRANSACCIONES] Total de puntos en recorrido: ${recorrido.length}`,
-      );
-      console.log(
-        `[TRANSACCIONES] Tamaño total del recorridoDetallado: ${tamañoTotalRecorridoKm} km (${tamañoTotalRecorrido.toFixed(2)} metros)`,
-      );
-      console.log(
-        `[TRANSACCIONES] Punto de transacción: Lat ${latitud}, Lng ${longitud}`,
-      );
-      console.log(
-        `[TRANSACCIONES] Punto 1 del recorrido: Lat ${recorrido[0].lat}, Lng ${recorrido[0].lng}`,
-      );
-      console.log(
-        `[TRANSACCIONES] Último punto del recorrido: Lat ${recorrido[recorrido.length - 1].lat}, Lng ${recorrido[recorrido.length - 1].lng}`,
-      );
 
       if (puntoMasCercanoIndex !== -1 && puntoMasCercano) {
-        console.log(`[TRANSACCIONES] --- PUNTO MÁS CERCANO DEL RECORRIDO ---`);
-        console.log(
-          `[TRANSACCIONES] Índice del punto más cercano: ${puntoMasCercanoIndex + 1} (de ${recorrido.length})`,
-        );
-        console.log(
-          `[TRANSACCIONES] Coordenadas del punto más cercano: Lat ${puntoMasCercano.lat}, Lng ${puntoMasCercano.lng}`,
-        );
-        console.log(
-          `[TRANSACCIONES] Distancia desde punto de transacción al punto más cercano: ${(distanciaAlPuntoMasCercano / 1000).toFixed(2)} km (${distanciaAlPuntoMasCercano.toFixed(2)} metros)`,
-        );
-
         if (puntoMasCercanoIndex === 0) {
-          console.log(
-            `[TRANSACCIONES] El punto más cercano ES el punto 1, usando distancia directa`,
-          );
         } else {
           // Calcular distancia desde el punto más cercano hasta el punto 1
           const distanciaDesdePuntoMasCercanoHastaPunto1 =
@@ -280,14 +526,8 @@ export class TransaccionesService {
               recorrido,
               puntoMasCercanoIndex,
             );
-          console.log(
-            `[TRANSACCIONES] Distancia desde punto más cercano hasta punto 1 (sumando punto por punto): ${(distanciaDesdePuntoMasCercanoHastaPunto1 / 1000).toFixed(2)} km`,
-          );
 
           // Imprimir detalle punto por punto desde punto más cercano hasta punto 1
-          console.log(
-            '[TRANSACCIONES] --- Detalle punto por punto (desde punto más cercano hasta punto 1) ---',
-          );
           let distanciaAcumuladaHaciaPunto1 = 0;
           for (let i = puntoMasCercanoIndex; i > 0; i--) {
             const puntoActual = recorrido[i];
@@ -301,27 +541,13 @@ export class TransaccionesService {
             ) {
               const distanciaSegmento = haversine(puntoActual, puntoAnterior);
               distanciaAcumuladaHaciaPunto1 += distanciaSegmento;
-              console.log(
-                `[TRANSACCIONES] Punto ${i + 1} -> Punto ${i}: ${(distanciaSegmento / 1000).toFixed(2)} km | Acumulado hacia punto 1: ${(distanciaAcumuladaHaciaPunto1 / 1000).toFixed(2)} km`,
-              );
             }
           }
         }
       } else {
-        console.log(
-          `[TRANSACCIONES] No se encontró un punto cercano válido, usando distancia directa al punto 1`,
-        );
       }
 
-      console.log(`[TRANSACCIONES] --- RESULTADO FINAL ---`);
-      console.log(
-        `[TRANSACCIONES] Distancia desde punto de transacción hasta punto 1: ${distanciaEnKm} km`,
-      );
-
       // Imprimir detalle punto por punto del recorrido completo para mostrar el tamaño total
-      console.log(
-        '[TRANSACCIONES] --- Detalle punto por punto del recorrido completo (tamaño total) ---',
-      );
       let distanciaAcumuladaRecorridoCompleto = 0;
       for (let i = 0; i < recorrido.length - 1; i++) {
         const puntoActual = recorrido[i];
@@ -335,14 +561,8 @@ export class TransaccionesService {
         ) {
           const distanciaSegmento = haversine(puntoActual, puntoSiguiente);
           distanciaAcumuladaRecorridoCompleto += distanciaSegmento;
-          console.log(
-            `[TRANSACCIONES] Punto ${i + 1} -> Punto ${i + 2}: ${(distanciaSegmento / 1000).toFixed(2)} km | Acumulado total: ${(distanciaAcumuladaRecorridoCompleto / 1000).toFixed(2)} km`,
-          );
         }
       }
-      console.log(
-        `[TRANSACCIONES] Tamaño total del recorridoDetallado (verificado): ${(distanciaAcumuladaRecorridoCompleto / 1000).toFixed(2)} km`,
-      );
 
       // Calcular y mostrar información de tarifa y extra potencial
       if (tarifaInfo) {
@@ -352,10 +572,6 @@ export class TransaccionesService {
         const incrementoCadaMetros = tarifaInfo.incrementoCadaMetros || 0;
         const tipoTarifa = tarifaInfo.tipoTarifa;
 
-        console.log(
-          '[TRANSACCIONES] --- INFORMACIÓN DE TARIFA Y COSTO POTENCIAL ---',
-        );
-        console.log(`[TRANSACCIONES] Tarifa base: $${tarifaBase.toFixed(2)}`);
         // INCREMENTAL = 2 según el usuario
         const esTarifaIncremental = tipoTarifa === 2; // Valor 2 corresponde a INCREMENTAL
         const nombreTipoTarifa =
@@ -364,12 +580,6 @@ export class TransaccionesService {
             : tipoTarifa === 2
               ? 'INCREMENTAL'
               : 'DESCONOCIDO';
-        console.log(
-          `[TRANSACCIONES] Tipo de tarifa: ${tipoTarifa} (${nombreTipoTarifa})`,
-        );
-        console.log(
-          `[TRANSACCIONES] Distancia base incluida: ${distanciaBaseKm} km`,
-        );
 
         // Solo calcular el extra potencial si la tarifa es INCREMENTAL (valor 2) y tiene configuración de costo adicional
         if (
@@ -389,66 +599,19 @@ export class TransaccionesService {
               distanciaExcedente / incrementoCadaMetros,
             );
             extraPotencial = numeroIncrementos * costoAdicional;
-
-            console.log(
-              `[TRANSACCIONES] Distancia total del recorrido: ${(distanciaTotalMetros / 1000).toFixed(2)} km (${distanciaTotalMetros.toFixed(2)} metros)`,
-            );
-            console.log(
-              `[TRANSACCIONES] Distancia excedente sobre la base: ${(distanciaExcedente / 1000).toFixed(2)} km (${distanciaExcedente.toFixed(2)} metros)`,
-            );
-            console.log(
-              `[TRANSACCIONES] Incremento cada: ${incrementoCadaMetros} metros`,
-            );
-            console.log(
-              `[TRANSACCIONES] Costo adicional por incremento: $${costoAdicional.toFixed(2)}`,
-            );
-            console.log(
-              `[TRANSACCIONES] Número de incrementos necesarios: ${numeroIncrementos}`,
-            );
-            console.log(
-              `[TRANSACCIONES] Extra potencial si hace el recorrido completo: $${extraPotencial.toFixed(2)}`,
-            );
-            console.log(
-              `[TRANSACCIONES] Costo total potencial (tarifa base + extra): $${(tarifaBase + extraPotencial).toFixed(2)}`,
-            );
           } else {
-            console.log(
-              `[TRANSACCIONES] La distancia del recorrido (${(distanciaTotalMetros / 1000).toFixed(2)} km) está dentro de la distancia base (${distanciaBaseKm} km)`,
-            );
-            console.log(
-              `[TRANSACCIONES] No se aplicaría costo adicional. Costo total: $${tarifaBase.toFixed(2)}`,
-            );
           }
         } else {
           if (!esTarifaIncremental) {
-            console.log(
-              `[TRANSACCIONES] Tipo de tarifa no es INCREMENTAL (tipo: ${tipoTarifa}), no se calcula extra por distancia`,
-            );
           } else {
-            console.log(
-              `[TRANSACCIONES] No hay configuración de costo adicional (costoAdicional: ${costoAdicional}, incrementoCadaMetros: ${incrementoCadaMetros})`,
-            );
           }
-          console.log(
-            `[TRANSACCIONES] Costo total: $${tarifaBase.toFixed(2)} (solo tarifa base)`,
-          );
         }
       } else {
-        console.log(
-          '[TRANSACCIONES] No se proporcionó información de tarifa para calcular el extra potencial',
-        );
       }
-
-      console.log(
-        '[TRANSACCIONES] ===========================================',
-      );
 
       return isNaN(distanciaEnKm) || distanciaEnKm < 0 ? 0 : distanciaEnKm;
     } catch (error) {
-      console.error(
-        '[TRANSACCIONES] Error al calcular distancia inicial:',
-        error,
-      );
+      this.logger.error('Error al calcular distancia inicial');
       return 0;
     }
   }
@@ -553,43 +716,9 @@ export class TransaccionesService {
           distanciaRestanteMetros =
             distanciaAlPuntoMasCercano +
             distanciaDesdePuntoMasCercanoHastaUltimo;
-
-          console.log(
-            `[TRANSACCIONES] ===== CÁLCULO DE COBRO MÁXIMO (desde punto inicial hasta último punto) =====`,
-          );
-          console.log(
-            `[TRANSACCIONES] Punto inicial: (${latitudInicial}, ${longitudInicial})`,
-          );
-          console.log(
-            `[TRANSACCIONES] Último punto del recorrido: (${ultimoPunto.lat}, ${ultimoPunto.lng})`,
-          );
-          console.log(
-            `[TRANSACCIONES] Punto más cercano al inicial (índice ${puntoMasCercanoIndex + 1}): (${puntoMasCercano.lat}, ${puntoMasCercano.lng})`,
-          );
-          console.log(
-            `[TRANSACCIONES] Distancia desde punto inicial hasta punto más cercano: ${(distanciaAlPuntoMasCercano / 1000).toFixed(4)} km`,
-          );
-          console.log(
-            `[TRANSACCIONES] Distancia desde punto más cercano hasta último punto: ${(distanciaDesdePuntoMasCercanoHastaUltimo / 1000).toFixed(4)} km`,
-          );
-          console.log(
-            `[TRANSACCIONES] DISTANCIA RESTANTE TOTAL: ${(distanciaRestanteMetros / 1000).toFixed(4)} km (${distanciaRestanteMetros.toFixed(2)} metros)`,
-          );
         } else {
           // Si no se encuentra punto cercano, calcular distancia directa al último punto
           distanciaRestanteMetros = haversine(puntoInicial, ultimoPunto);
-          console.log(
-            `[TRANSACCIONES] ===== CÁLCULO DE COBRO MÁXIMO (distancia directa) =====`,
-          );
-          console.log(
-            `[TRANSACCIONES] Punto inicial: (${latitudInicial}, ${longitudInicial})`,
-          );
-          console.log(
-            `[TRANSACCIONES] Último punto del recorrido: (${ultimoPunto.lat}, ${ultimoPunto.lng})`,
-          );
-          console.log(
-            `[TRANSACCIONES] DISTANCIA RESTANTE TOTAL (directa): ${(distanciaRestanteMetros / 1000).toFixed(4)} km (${distanciaRestanteMetros.toFixed(2)} metros)`,
-          );
         }
       } else {
         // Si no se proporcionan coordenadas iniciales, usar la distancia total del recorrido (comportamiento anterior)
@@ -597,27 +726,12 @@ export class TransaccionesService {
           recorrido,
           recorrido.length - 1,
         );
-        console.log(
-          `[TRANSACCIONES] ===== CÁLCULO DE COBRO MÁXIMO (sin punto inicial, usando recorrido completo) =====`,
-        );
-        console.log(
-          `[TRANSACCIONES] DISTANCIA TOTAL DEL RECORRIDO: ${(distanciaRestanteMetros / 1000).toFixed(4)} km (${distanciaRestanteMetros.toFixed(2)} metros)`,
-        );
       }
 
       const distanciaBaseMetros = distanciaBaseKm * 1000;
 
       // Si la distancia restante está dentro de la distancia base, el cobro máximo es solo la tarifa base
       if (distanciaRestanteMetros <= distanciaBaseMetros) {
-        console.log(
-          `[TRANSACCIONES] La distancia restante (${(distanciaRestanteMetros / 1000).toFixed(4)} km) está dentro de la distancia base (${distanciaBaseKm} km)`,
-        );
-        console.log(
-          `[TRANSACCIONES] Cobro máximo: $${tarifaBase.toFixed(2)} (solo tarifa base)`,
-        );
-        console.log(
-          '[TRANSACCIONES] ===================================================',
-        );
         return tarifaBase;
       }
 
@@ -629,32 +743,9 @@ export class TransaccionesService {
       const extraMaximo = numeroIncrementos * costoAdicional;
       const cobroMaximo = tarifaBase + extraMaximo;
 
-      console.log(
-        `[TRANSACCIONES] Distancia base: ${distanciaBaseKm} km (${distanciaBaseMetros} metros)`,
-      );
-      console.log(
-        `[TRANSACCIONES] Distancia excedente: ${(distanciaExcedente / 1000).toFixed(4)} km (${distanciaExcedente.toFixed(2)} metros)`,
-      );
-      console.log(
-        `[TRANSACCIONES] Incremento cada: ${incrementoCadaMetros} metros`,
-      );
-      console.log(
-        `[TRANSACCIONES] Costo adicional por incremento: $${costoAdicional.toFixed(2)}`,
-      );
-      console.log(
-        `[TRANSACCIONES] Número de incrementos: ${numeroIncrementos}`,
-      );
-      console.log(`[TRANSACCIONES] Extra máximo: $${extraMaximo.toFixed(2)}`);
-      console.log(
-        `[TRANSACCIONES] Cobro máximo calculado: $${cobroMaximo.toFixed(2)} (tarifa base: $${tarifaBase.toFixed(2)} + extra: $${extraMaximo.toFixed(2)})`,
-      );
-      console.log(
-        '[TRANSACCIONES] ===================================================',
-      );
-
       return parseFloat(cobroMaximo.toFixed(2));
     } catch (error) {
-      console.error('[TRANSACCIONES] Error al calcular cobro máximo:', error);
+      this.logger.error('Error al calcular cobro máximo');
       return tarifaBase; // En caso de error, retornar al menos la tarifa base
     }
   }
@@ -819,10 +910,247 @@ export class TransaccionesService {
     return distanciaAcumulada;
   }
 
-  //Funcion para transaccion Recarga
+  // ========================================
+  // Recarga con la claveIdempotencia reservada antes de cobrar (R3 / V2-15)
+  // ========================================
   async createTransaccionRecarga(
     createTransaccioneRecargaDto: CreateTransaccioneRecargaDto,
     idUser: number,
+    rol = 0,
+    cliente = 0,
+  ): Promise<ApiCrudResponse> {
+    const clave =
+      createTransaccioneRecargaDto.claveIdempotencia?.trim() || null;
+    if (!clave) {
+      return this.procesarRecarga(
+        createTransaccioneRecargaDto,
+        idUser,
+        rol,
+        cliente,
+        null,
+      );
+    }
+
+    const previa = await this.recargaPorClave(
+      clave,
+      createTransaccioneRecargaDto,
+    );
+    if (previa) return previa;
+
+    // INSERT IGNORE sobre la PK: solo una petición con esta clave llega a NetPay.
+    const insert: { affectedRows?: number } =
+      await this.transaccionesrecargaRepository.query(
+        `INSERT IGNORE INTO ReservasRecarga
+           (ClaveIdempotencia, NumeroSerieMonedero, Monto, IdUsuario, Estado)
+         VALUES (?, ?, ?, ?, 'EN_PROCESO')`,
+        [
+          clave,
+          createTransaccioneRecargaDto.numeroSerieMonedero,
+          Number(createTransaccioneRecargaDto.monto),
+          idUser,
+        ],
+      );
+    if (Number(insert?.affectedRows ?? 0) !== 1) {
+      const ganadora = await this.recargaPorClave(
+        clave,
+        createTransaccioneRecargaDto,
+      );
+      if (ganadora) return ganadora;
+      throw new ConflictException(
+        'Ya hay una recarga en proceso con esa claveIdempotencia.',
+      );
+    }
+
+    const reserva: ReservaRecarga = { clave, estado: 'EN_PROCESO' };
+    try {
+      const result = await this.procesarRecarga(
+        createTransaccioneRecargaDto,
+        idUser,
+        rol,
+        cliente,
+        reserva,
+      );
+      await this.transaccionesrecargaRepository.query(
+        `UPDATE ReservasRecarga SET Estado = 'COMPLETADA', IdTransaccionRecarga = ?
+          WHERE ClaveIdempotencia = ?`,
+        [Number(result.data?.id) || null, clave],
+      );
+      return result;
+    } catch (error) {
+      if (reserva.estado === 'PENDIENTE_CONCILIAR') {
+        // NetPay cobró, no hubo recarga ni reembolso: la clave queda tomada
+        // para que un reintento no cobre otra vez, y la fila queda por conciliar.
+        await this.transaccionesrecargaRepository.query(
+          `UPDATE ReservasRecarga SET Estado = 'PENDIENTE_CONCILIAR', TransactionTokenIdNetPay = ?
+            WHERE ClaveIdempotencia = ?`,
+          [reserva.tokenId ?? null, clave],
+        );
+      } else {
+        // No se cobró, o se cobró y se reembolsó: el cliente puede reintentar.
+        await this.transaccionesrecargaRepository.query(
+          'DELETE FROM ReservasRecarga WHERE ClaveIdempotencia = ? AND Estado = ?',
+          [clave, 'EN_PROCESO'],
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Respuesta idempotente si la clave ya produjo una recarga. Una clave usada
+   * para otro monedero u otro monto es un error del cliente, no un reintento:
+   * antes se devolvía la recarga ajena como si fuera la propia (V2-15).
+   */
+  private async recargaPorClave(
+    clave: string,
+    dto: CreateTransaccioneRecargaDto,
+  ): Promise<ApiCrudResponse | null> {
+    const previa = await this.transaccionesrecargaRepository.findOne({
+      where: { claveIdempotencia: clave },
+      order: { id: 'ASC' },
+    });
+    if (!previa) return null;
+    if (
+      previa.numeroSerieMonedero !== dto.numeroSerieMonedero ||
+      Number(previa.monto) !== Number(dto.monto)
+    ) {
+      throw new ConflictException(
+        'La claveIdempotencia ya se usó para otra recarga.',
+      );
+    }
+    return {
+      status: 'success',
+      message: 'Transacción ya procesada (idempotencia)',
+      data: {
+        id: Number(previa.id),
+        nombre: previa.numeroSerieMonedero || '',
+      },
+    };
+  }
+
+  /**
+   * H-20: concilia las reservas de recarga que quedaron a medias.
+   *
+   * Barre:
+   *  - EN_PROCESO vencidas (más de `RESERVA_STALE_MINUTES`, default 15): el
+   *    proceso murió entre el reserve y el complete/rollback.
+   *  - PENDIENTE_CONCILIAR: NetPay cobró, la recarga no se guardó y el reembolso
+   *    de compensación también falló.
+   *
+   * Para cada reserva:
+   *  1) Si la recarga SÍ se registró (por clave o por token) → COMPLETADA.
+   *  2) Si no hay recarga pero NetPay cobró (hay token) → refund de SISTEMA
+   *     (sin actor) con `reembolsarCompensacion` → REEMBOLSADA.
+   *  3) EN_PROCESO vencida sin token ni recarga → se deja PENDIENTE_CONCILIAR
+   *     para revisión manual (no se puede confirmar/compensar contra NetPay).
+   *
+   * Idempotente y seguro ante repetición: los UPDATE están condicionados al
+   * estado previo y, tras resolver, la fila deja de ser elegible. No crea
+   * job/cron: un job externo inyecta este servicio y llama este método.
+   */
+  async conciliarReservasPendientes(): Promise<{
+    revisadas: number;
+    resueltas: number;
+  }> {
+    const staleRaw = Number(process.env.RESERVA_STALE_MINUTES ?? 15);
+    const minutos =
+      Number.isFinite(staleRaw) && staleRaw > 0 ? Math.floor(staleRaw) : 15;
+
+    const reservas: Array<{
+      clave: string;
+      serie: string;
+      token: string | null;
+      estado: string;
+    }> = await this.transaccionesrecargaRepository.query(
+      `SELECT ClaveIdempotencia AS clave,
+              NumeroSerieMonedero AS serie,
+              TransactionTokenIdNetPay AS token,
+              Estado AS estado
+         FROM ReservasRecarga
+        WHERE Estado = 'PENDIENTE_CONCILIAR'
+           OR (Estado = 'EN_PROCESO'
+               AND FechaCreacion < (NOW() - INTERVAL ? MINUTE))`,
+      [minutos],
+    );
+
+    let resueltas = 0;
+    for (const r of reservas) {
+      try {
+        // 1) ¿La recarga sí quedó registrada? (reserva colgada tras el COMMIT)
+        const recargaRows: Array<{ id: number }> = r.token
+          ? await this.transaccionesrecargaRepository.query(
+              `SELECT Id AS id FROM TransaccionesRecarga
+                WHERE ClaveIdempotencia = ? OR TransactionTokenIdNetPay = ?
+                ORDER BY Id ASC LIMIT 1`,
+              [r.clave, r.token],
+            )
+          : await this.transaccionesrecargaRepository.query(
+              `SELECT Id AS id FROM TransaccionesRecarga
+                WHERE ClaveIdempotencia = ?
+                ORDER BY Id ASC LIMIT 1`,
+              [r.clave],
+            );
+        const recargaId = recargaRows?.[0]?.id
+          ? Number(recargaRows[0].id)
+          : null;
+
+        if (recargaId) {
+          await this.transaccionesrecargaRepository.query(
+            `UPDATE ReservasRecarga
+                SET Estado = 'COMPLETADA', IdTransaccionRecarga = ?
+              WHERE ClaveIdempotencia = ?
+                AND Estado IN ('EN_PROCESO','PENDIENTE_CONCILIAR')`,
+            [recargaId, r.clave],
+          );
+          resueltas++;
+          continue;
+        }
+
+        // 2) No hay recarga pero NetPay cobró: refund de sistema (sin actor).
+        if (r.token) {
+          await this.netpayService.reembolsarCompensacion(r.token);
+          await this.transaccionesrecargaRepository.query(
+            `UPDATE ReservasRecarga
+                SET Estado = 'REEMBOLSADA'
+              WHERE ClaveIdempotencia = ?
+                AND Estado IN ('EN_PROCESO','PENDIENTE_CONCILIAR')`,
+            [r.clave],
+          );
+          resueltas++;
+          continue;
+        }
+
+        // 3) EN_PROCESO vencida sin token ni recarga: nada que confirmar ni
+        //    compensar en NetPay. Se marca PENDIENTE_CONCILIAR (revisión manual)
+        //    y deja de contarse como "en proceso".
+        await this.transaccionesrecargaRepository.query(
+          `UPDATE ReservasRecarga
+              SET Estado = 'PENDIENTE_CONCILIAR'
+            WHERE ClaveIdempotencia = ? AND Estado = 'EN_PROCESO'`,
+          [r.clave],
+        );
+      } catch (error) {
+        this.logger.error(
+          `[CONCILIACION] no se pudo conciliar la reserva ${r.clave}: ${
+            (error as Error)?.message
+          }`,
+        );
+        // Queda en su estado actual (PENDIENTE) para el siguiente barrido.
+      }
+    }
+
+    this.logger.log(
+      `[CONCILIACION] reservas revisadas=${reservas.length} resueltas=${resueltas}`,
+    );
+    return { revisadas: reservas.length, resueltas };
+  }
+
+  private async procesarRecarga(
+    createTransaccioneRecargaDto: CreateTransaccioneRecargaDto,
+    idUser: number,
+    rol: number,
+    cliente: number,
+    reserva: ReservaRecarga | null,
   ): Promise<ApiCrudResponse> {
     try {
       // Validar que idMetodoPago sea obligatorio
@@ -832,6 +1160,68 @@ export class TransaccionesService {
         );
       }
 
+      if (
+        createTransaccioneRecargaDto.monto == null ||
+        Number(createTransaccioneRecargaDto.monto) <= 0
+      ) {
+        throw new BadRequestException('El monto debe ser mayor a 0');
+      }
+      const tope = Number(process.env.RECARGA_MONTO_MAX ?? 10000);
+      if (Number(createTransaccioneRecargaDto.monto) > tope) {
+        throw new BadRequestException(
+          `El monto excede el tope permitido (${tope})`,
+        );
+      }
+
+      const esEfectivoOTransferencia =
+        createTransaccioneRecargaDto.idMetodoPago === EnumMetodoPago.EFECTIVO ||
+        createTransaccioneRecargaDto.idMetodoPago ===
+          EnumMetodoPago.TRANSFERENCIA;
+      // Regla de negocio: la tarjeta solo la usa el pasajero desde su propia
+      // sesión; caja, administración y operadores recargan en efectivo.
+      if (!esEfectivoOTransferencia && Number(rol) !== 9) {
+        throw new ForbiddenException(
+          'Las recargas con tarjeta solo las hace el pasajero desde su sesión.',
+        );
+      }
+      if (esEfectivoOTransferencia && Number(rol) === 9) {
+        throw new ForbiddenException(
+          'El rol de pasajero no puede recargar en efectivo.',
+        );
+      }
+      if (
+        esEfectivoOTransferencia &&
+        SecurityFlags.cashRechargeRoles() &&
+        ![1, 2, 3, 11].includes(Number(rol))
+      ) {
+        throw new ForbiddenException(
+          'Solo caja, administración o validador pueden recargar en efectivo.',
+        );
+      }
+
+      const claveIdempotencia =
+        createTransaccioneRecargaDto.claveIdempotencia?.trim() || null;
+      if (SecurityFlags.idempotencyKey() && !claveIdempotencia) {
+        throw new BadRequestException(
+          'El campo claveIdempotencia es obligatorio',
+        );
+      }
+      if (claveIdempotencia && !reserva) {
+        const previa = await this.recargaPorClave(
+          claveIdempotencia,
+          createTransaccioneRecargaDto,
+        );
+        if (previa) return previa;
+      }
+
+      const monedero = await this.monederosService.findOneMonederoBySerie(
+        createTransaccioneRecargaDto.numeroSerieMonedero,
+      );
+      await this.assertMonederoEnTenant(
+        Number(monedero.data.idCliente),
+        cliente,
+      );
+
       // ✅ Si el método de pago es Tarjeta (3 o 4), primero procesar el pago con Netpay
       let pagoNetpayResponse: any = null;
       if (
@@ -840,8 +1230,6 @@ export class TransaccionesService {
         createTransaccioneRecargaDto.idMetodoPago ===
           EnumMetodoPago.TARJETA_DEBITO
       ) {
-        console.log('[TRANSACCIONES] Procesando pago con tarjeta en Netpay...');
-
         // Validar que se hayan proporcionado todos los datos necesarios
         if (!createTransaccioneRecargaDto.tokenCardNetPay) {
           throw new BadRequestException(
@@ -869,27 +1257,11 @@ export class TransaccionesService {
           );
         }
 
-        // Obtener la dirección y datos de tarjeta desde la BD para construir el billing
-        const direccion = await this.direccionesTarjetaRepository.findOne({
-          where: { id: createTransaccioneRecargaDto.idDireccion },
-          relations: ['idDatosTarjeta2'],
-        });
-
-        if (!direccion || !direccion.idDatosTarjeta) {
-          throw new BadRequestException(
-            `No se encontró la dirección con ID: ${createTransaccioneRecargaDto.idDireccion} o no tiene datos de tarjeta asociados`,
-          );
-        }
-
-        const datosTarjeta = await this.datosTarjetaRepository.findOne({
-          where: { id: direccion.idDatosTarjeta },
-        });
-
-        if (!datosTarjeta) {
-          throw new BadRequestException(
-            `No se encontraron los datos de tarjeta asociados a la dirección ${createTransaccioneRecargaDto.idDireccion}`,
-          );
-        }
+        const { datosTarjeta, direccion } = await this.assertDireccionDelTenant(
+          createTransaccioneRecargaDto.idDireccion,
+          monedero.data,
+          cliente,
+        );
 
         // Construir el objeto billing con los datos de la BD
         const billing = {
@@ -913,7 +1285,7 @@ export class TransaccionesService {
           amount: createTransaccioneRecargaDto.monto,
           description: `Recarga monedero ${createTransaccioneRecargaDto.numeroSerieMonedero}`,
           currency: 'MXN',
-          referenceId: createTransaccioneRecargaDto.deviceFingerPrint,
+          referenceId: createTransaccioneRecargaDto.referenceIdNetPay,
           token: createTransaccioneRecargaDto.tokenCardNetPay,
           sessionId: createTransaccioneRecargaDto.deviceFingerPrint,
           deviceFingerPrint: createTransaccioneRecargaDto.deviceFingerPrint,
@@ -930,21 +1302,14 @@ export class TransaccionesService {
             httpBrowserTimeDifference: '360',
           },
         };
-        console.log('PAYMENT PAYLOAD (objeto):', paymentPayload);
-        console.log(
-          'PAYMENT PAYLOAD (JSON):',
-          JSON.stringify(paymentPayload, null, 2),
-        );
+        // No loguear el payload de pago (token de tarjeta / PCI).
         try {
           // Procesar el pago con Netpay
           pagoNetpayResponse =
             await this.netpayService.processPaymentWithSavedCard(
               paymentPayload,
+              { userId: idUser, cliente, rol },
             );
-          console.log(
-            '[TRANSACCIONES] Pago procesado exitosamente en Netpay:',
-            pagoNetpayResponse,
-          );
 
           // Verificar si el pago fue exitoso
           // Solo se realiza la recarga si el status es 'success'
@@ -963,84 +1328,138 @@ export class TransaccionesService {
             );
           }
         } catch (error) {
-          console.error(
-            '[TRANSACCIONES] Error al procesar pago con Netpay:',
-            error,
-          );
+          this.logger.error('Error al procesar pago con Netpay');
 
           // Registrar en bitácora el error de pago
           await this.bitacoraLogger.logToBitacora(
             'Transacciones',
             `Error al procesar pago con Netpay para recarga de ${createTransaccioneRecargaDto.numeroSerieMonedero}`,
             'CREATE',
-            { createTransaccioneRecargaDto, error: error.message },
+            {
+              numeroSerieMonedero:
+                createTransaccioneRecargaDto.numeroSerieMonedero,
+              idMetodoPago: createTransaccioneRecargaDto.idMetodoPago,
+            },
             idUser,
             EnumModulos.TRANSACCIONES,
             EstatusEnumBitcora.ERROR,
-            error.message,
           );
 
           throw new BadRequestException(
-            `No se pudo procesar el pago con tarjeta: ${error.message}. La recarga no se realizó.`,
+            'No se pudo procesar el pago con tarjeta. La recarga no se realizó.',
           );
         }
       }
 
-      //Buscamos el monedero
-      const monedero = await this.monederosService.findOneMonederoBySerie(
-        createTransaccioneRecargaDto.numeroSerieMonedero,
-      );
+      const montoFinal = Number(createTransaccioneRecargaDto.monto);
 
-      //Declaramos transaccion y creamos la variable montoFinal
-      let montoFinal: number = 0;
-
-      //Checamos el tipo transaccion
-      montoFinal =
-        Number(monedero.data.saldo) +
-        Number(createTransaccioneRecargaDto.monto);
-
-      //actualizamos el saldo del monedero
-      await this.monederosService.updateMonederoSaldo(
-        createTransaccioneRecargaDto.numeroSerieMonedero,
-        idUser,
-        montoFinal,
-      );
-
-      //Creamos la transaccion en la BD
-      // Mapear latitudInicial/longitudInicial del DTO a latitudFinal/longitudFinal de la entidad
-      const newTransaccion = await this.transaccionesrecargaRepository.create({
-        monto: createTransaccioneRecargaDto.monto,
-        latitudFinal: createTransaccioneRecargaDto.latitudInicial,
-        longitudFinal: createTransaccioneRecargaDto.longitudInicial,
-        numeroSerieMonedero: createTransaccioneRecargaDto.numeroSerieMonedero,
-        numeroSerieValidador: createTransaccioneRecargaDto.numeroSerieValidador,
-        idUsuario: idUser, // Guardar el ID del usuario que realiza la recarga
-        idMetodoPago: createTransaccioneRecargaDto.idMetodoPago, // Guardar el método de pago
-      });
-      newTransaccion.idTipoTransaccion = EnumTipoTransaccion.RECARGA;
-      newTransaccion.controlTransaccion = EnumControlTransacciones.PAGADO;
-
-      // Si el método de pago es Tarjeta (3 o 4), guardar los datos de Netpay
-      if (
-        createTransaccioneRecargaDto.idMetodoPago ===
-          EnumMetodoPago.TARJETA_CREDITO ||
-        createTransaccioneRecargaDto.idMetodoPago ===
-          EnumMetodoPago.TARJETA_DEBITO
-      ) {
-        newTransaccion.tokenCardNetPay =
-          createTransaccioneRecargaDto.tokenCardNetPay || null;
-        // ✅ Guardar el transactionTokenId de la respuesta de Netpay (viene en la respuesta, no en el request)
-        newTransaccion.transactionTokenIdNetPay =
-          pagoNetpayResponse?.transactionTokenId || null;
-        newTransaccion.referenceIdNetPay =
-          createTransaccioneRecargaDto.referenceIdNetPay || null;
+      let transaccionSave;
+      try {
+        transaccionSave = await this.dataSource.transaction(async (manager) => {
+          // H-08/H-09/V2-06: lock de BD sobre la fila del monedero ANTES de
+          // mutar el saldo. Serializa la recarga entre instancias; el KeyedMutex
+          // solo cubre concurrencia intra-proceso.
+          await this.monederosService.bloquearMonederoParaActualizar(
+            createTransaccioneRecargaDto.numeroSerieMonedero,
+            manager,
+          );
+          const incrementado =
+            await this.monederosService.incrementarSaldoAtomico(
+              createTransaccioneRecargaDto.numeroSerieMonedero,
+              montoFinal,
+              idUser,
+              manager,
+            );
+          if (!incrementado) {
+            throw new NotFoundException('El monedero no fue encontrado.');
+          }
+          const newTransaccion = manager.create(TransaccionesRecarga, {
+            monto: createTransaccioneRecargaDto.monto,
+            latitudFinal: createTransaccioneRecargaDto.latitudInicial,
+            longitudFinal: createTransaccioneRecargaDto.longitudInicial,
+            numeroSerieMonedero:
+              createTransaccioneRecargaDto.numeroSerieMonedero,
+            numeroSerieValidador:
+              createTransaccioneRecargaDto.numeroSerieValidador,
+            idUsuario: idUser,
+            idMetodoPago: createTransaccioneRecargaDto.idMetodoPago,
+            idTipoTransaccion: EnumTipoTransaccion.RECARGA,
+            controlTransaccion: EnumControlTransacciones.PAGADO,
+            claveIdempotencia,
+            tokenCardNetPay:
+              createTransaccioneRecargaDto.idMetodoPago ===
+                EnumMetodoPago.TARJETA_CREDITO ||
+              createTransaccioneRecargaDto.idMetodoPago ===
+                EnumMetodoPago.TARJETA_DEBITO
+                ? createTransaccioneRecargaDto.tokenCardNetPay || null
+                : null,
+            transactionTokenIdNetPay:
+              createTransaccioneRecargaDto.idMetodoPago ===
+                EnumMetodoPago.TARJETA_CREDITO ||
+              createTransaccioneRecargaDto.idMetodoPago ===
+                EnumMetodoPago.TARJETA_DEBITO
+                ? pagoNetpayResponse?.transactionTokenId || null
+                : null,
+            referenceIdNetPay:
+              createTransaccioneRecargaDto.idMetodoPago ===
+                EnumMetodoPago.TARJETA_CREDITO ||
+              createTransaccioneRecargaDto.idMetodoPago ===
+                EnumMetodoPago.TARJETA_DEBITO
+                ? createTransaccioneRecargaDto.referenceIdNetPay || null
+                : null,
+          });
+          return manager.save(newTransaccion);
+        });
+      } catch (commitError) {
+        const tokenId = pagoNetpayResponse?.transactionTokenId;
+        if (tokenId) {
+          try {
+            // Llamada de sistema: cancelOrRefund exige actor y lanzaba Forbidden (R3).
+            await this.netpayService.reembolsarCompensacion(tokenId);
+          } catch (refundError) {
+            this.logger.error(
+              `Cobro NetPay ${tokenId} sin recarga ni reembolso: queda PENDIENTE_CONCILIAR (${(refundError as Error)?.message})`,
+            );
+            if (reserva) {
+              reserva.estado = 'PENDIENTE_CONCILIAR';
+              reserva.tokenId = tokenId;
+            } else {
+              await this.transaccionesrecargaRepository.query(
+                `INSERT INTO ReservasRecarga
+                   (ClaveIdempotencia, NumeroSerieMonedero, Monto, IdUsuario, Estado, TransactionTokenIdNetPay)
+                 VALUES (?, ?, ?, ?, 'PENDIENTE_CONCILIAR', ?)`,
+                [
+                  `sin-clave:${tokenId}`.slice(0, 100),
+                  createTransaccioneRecargaDto.numeroSerieMonedero,
+                  Number(createTransaccioneRecargaDto.monto),
+                  idUser,
+                  tokenId,
+                ],
+              );
+            }
+            this.bitacoraLogger.registrar([
+              'Transacciones',
+              'Compensación NetPay fallida tras error al persistir recarga: PENDIENTE_CONCILIAR',
+              'CREATE',
+              {
+                numeroSerieMonedero:
+                  createTransaccioneRecargaDto.numeroSerieMonedero,
+                transactionTokenIdNetPay: tokenId,
+              },
+              idUser,
+              EnumModulos.TRANSACCIONES,
+              EstatusEnumBitcora.ERROR,
+            ]);
+          }
+        }
+        throw commitError;
       }
 
-      const transaccionSave =
-        await this.transaccionesrecargaRepository.save(newTransaccion);
-
-      // --- Registro en la bit?cora --- SUCCESS
-      const querylogger = { createTransaccioneRecargaDto };
+      const querylogger = {
+        id: Number(transaccionSave.id),
+        numeroSerieMonedero: createTransaccioneRecargaDto.numeroSerieMonedero,
+        idMetodoPago: createTransaccioneRecargaDto.idMetodoPago,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Transacciones',
         `Se realizo una transaccion de tipo RECARGA`,
@@ -1064,8 +1483,11 @@ export class TransaccionesService {
       };
       return result;
     } catch (error) {
-      // --- Registro en la bit?cora --- ERROR
-      const querylogger = { createTransaccioneRecargaDto };
+      // --- Registro en la bitácora --- ERROR
+      const querylogger = {
+        numeroSerieMonedero: createTransaccioneRecargaDto.numeroSerieMonedero,
+        idMetodoPago: createTransaccioneRecargaDto.idMetodoPago,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Transacciones',
         `Error al realizar una transaccion de tipo RECARGA`,
@@ -1086,7 +1508,52 @@ export class TransaccionesService {
     }
   }
 
+  /**
+   * Respuesta idempotente de un débito. Si la clave pertenece a otro monedero
+   * es 409: antes se devolvía la transacción ajena como propia (V2-15).
+   */
+  private async debitoPorClave(
+    clave: string,
+    numeroSerieMonedero: string,
+  ): Promise<ApiCrudResponse | null> {
+    const previa = await this.transaccionesdebitoRepository.findOne({
+      where: { claveIdempotencia: clave },
+      order: { id: 'ASC' },
+    });
+    if (!previa) return null;
+    if (previa.numeroSerieMonedero !== numeroSerieMonedero) {
+      throw new ConflictException(
+        'La claveIdempotencia ya se usó para otro monedero.',
+      );
+    }
+    return {
+      status: 'success',
+      message: 'Transacción ya procesada (idempotencia)',
+      data: {
+        id: Number(previa.id),
+        nombre: previa.numeroSerieMonedero || '',
+      },
+    };
+  }
+
+  private readonly lockMonedero = new KeyedMutex();
+
+  /** Un débito a la vez por monedero (H-08): dos lecturas de la misma tarjeta no se cruzan. */
   async createTransaccionDebitoPrueba(
+    createTransaccioneDebitoDto: CreateTransaccioneDebitoDto,
+    idUser: number,
+    cliente: number,
+  ): Promise<ApiCrudResponse> {
+    const llave =
+      createTransaccioneDebitoDto.esQR === true
+        ? `serie:${createTransaccioneDebitoDto.numeroSerieMonedero ?? ''}`
+        : `card:${createTransaccioneDebitoDto.idCard ?? ''}`;
+    return this.lockMonedero.run(llave, () =>
+      this.procesarDebito(createTransaccioneDebitoDto, idUser, cliente),
+    );
+  }
+
+  private async procesarDebito(
     createTransaccioneDebitoDto: CreateTransaccioneDebitoDto,
     idUser: number,
     cliente: number,
@@ -1102,28 +1569,26 @@ export class TransaccionesService {
       // lugar de volver a cobrar. Cubre el reintento del dispositivo (secuencial).
       const claveIdempotencia =
         createTransaccioneDebitoDto.claveIdempotencia?.trim() || null;
-      if (claveIdempotencia) {
-        const transaccionPrevia =
-          await this.transaccionesdebitoRepository.findOne({
-            where: { claveIdempotencia },
-            order: { id: 'ASC' },
-          });
-
-        if (transaccionPrevia) {
-          console.log(
-            `[POST_DEBITO] Reintento idempotente (clave: ${claveIdempotencia}). Se devuelve la transacción existente ID: ${transaccionPrevia.id} sin volver a cobrar.`,
+      // H-10/V2-03/V2-16: ventana de transición. Por defecto (flag ausente/no
+      // 'true') se ACEPTA el débito sin claveIdempotencia, pero se deja un
+      // WARNING para alertar. Solo con ENFORCE_IDEMPOTENCY_KEY === 'true' se
+      // rechaza con 400. Cuando la clave SÍ viene, el comportamiento (DUP de
+      // otro monedero → 409, reusar la previa del mismo monedero) queda intacto.
+      if (!claveIdempotencia) {
+        if (process.env.ENFORCE_IDEMPOTENCY_KEY === 'true') {
+          throw new BadRequestException(
+            'El campo claveIdempotencia es obligatorio',
           );
-          return {
-            status: 'success',
-            message: 'Transacción ya procesada (idempotencia)',
-            data: {
-              id: Number(transaccionPrevia.id),
-              nombre: transaccionPrevia.numeroSerieMonedero || '',
-            },
-          };
         }
+        this.logger.warn(
+          `[TRANSICION] débito sin claveIdempotencia (monedero=${
+            createTransaccioneDebitoDto.numeroSerieMonedero ??
+            createTransaccioneDebitoDto.idCard ??
+            'desconocido'
+          }); se procede por ventana de transición. ` +
+            'Active ENFORCE_IDEMPOTENCY_KEY=true para exigirla.',
+        );
       }
-
       // 2?? Buscamos el monedero
       let monedero;
       if (createTransaccioneDebitoDto.esQR === true) {
@@ -1146,6 +1611,43 @@ export class TransaccionesService {
       if (!monedero) {
         estado = EstadoTransaccion.ERROR;
         throw new BadRequestException('Monedero no encontrado');
+      }
+      await this.assertMonederoEnTenant(Number(monedero.idCliente), cliente);
+      // Pasajero desactivado: no se cobra (el monedero sigue en Estatus 1
+      // porque ahí 0 significa "sin asignar").
+      if (monedero.idPasajero) {
+        const pasajero = await this.pasajeroRepository.findOne({
+          where: { id: monedero.idPasajero },
+          select: { id: true, estatus: true },
+        });
+        if (pasajero && Number(pasajero.estatus) !== 1) {
+          estado = EstadoTransaccion.ERROR;
+          throw new BadRequestException('Pasajero desactivado');
+        }
+      }
+      if (createTransaccioneDebitoDto.numeroSerieValidador) {
+        const validador = await this.validadorRepository.findOne({
+          where: {
+            numeroSerie: createTransaccioneDebitoDto.numeroSerieValidador,
+          },
+        });
+        if (
+          !validador ||
+          Number(validador.idCliente) !== Number(monedero.idCliente)
+        ) {
+          estado = EstadoTransaccion.ERROR;
+          throw new BadRequestException('Monedero no encontrado');
+        }
+        await this.assertMonederoEnTenant(Number(validador.idCliente), cliente);
+      }
+
+      // Idempotencia ya con el monedero resuelto, para comparar contra él (V2-15).
+      if (claveIdempotencia) {
+        const previa = await this.debitoPorClave(
+          claveIdempotencia,
+          monedero.numeroSerie,
+        );
+        if (previa) return previa;
       }
 
       // ===== NUEVA LÓGICA: Detectar y cerrar transacciones abiertas con esMultiple = true =====
@@ -1171,20 +1673,12 @@ export class TransaccionesService {
         transaccionesAbiertasMultiple &&
         transaccionesAbiertasMultiple.length > 0
       ) {
-        console.log(
-          `[POST_DEBITO] Se encontraron ${transaccionesAbiertasMultiple.length} transacción(es) abierta(s) con esMultiple = true`,
-        );
-
         // Usar las coordenadas iniciales de la nueva transacción como coordenadas finales
         const latitudFinal = createTransaccioneDebitoDto.latitud;
         const longitudFinal = createTransaccioneDebitoDto.longitud;
 
         // Procesar cada transacción abierta
         for (const transaccionAbierta of transaccionesAbiertasMultiple) {
-          console.log(
-            `[POST_DEBITO] Procesando transacción abierta ID: ${transaccionAbierta.id}`,
-          );
-
           // Obtener variante y tarifa de la transacción existente usando idViaje
           let varianteUpdate: Variantes | null = null;
           let tarifaInfoUpdate: any = null;
@@ -1202,7 +1696,7 @@ export class TransaccionesService {
 
               if (varianteUpdate) {
                 const tarifa = await this.tarifasRepository.findOne({
-                  where: { idVariante: viaje.idVariante },
+                  where: { idVariante: viaje.idVariante, estatus: 1 },
                 });
 
                 if (tarifa) {
@@ -1397,64 +1891,71 @@ export class TransaccionesService {
               }
             }
 
-            // Descuento ATÓMICO del saldo al cerrar la transacción abierta.
-            // Descuenta y valida el saldo en una sola sentencia con lock de fila,
-            // evitando el doble-cobro por concurrencia (last-write-wins).
-            const descontado =
-              await this.monederosService.descontarSaldoAtomico(
-                monedero.numeroSerie,
-                montoConDescuento,
-                idUser,
-              );
+            // Cierre + descuento en la misma TX: si otra petición ya cerró
+            // (affected=0) se revierte el descuento al hacer rollback.
+            // Date, no texto: un string se reinterpreta con la zona del equipo.
+            const fechaHoraFinal = nowDb();
 
-            if (!descontado) {
-              throw new BadRequestException(
-                `Saldo insuficiente para cerrar transacción abierta ID: ${transaccionAbierta.id}`,
-              );
-            }
+            try {
+              await this.dataSource.transaction(async (manager) => {
+                const descontado =
+                  await this.monederosService.descontarSaldoAtomico(
+                    monedero.numeroSerie,
+                    montoConDescuento,
+                    idUser,
+                    manager,
+                  );
+                if (!descontado) {
+                  throw new BadRequestException(
+                    `Saldo insuficiente para cerrar transacción abierta ID: ${transaccionAbierta.id}`,
+                  );
+                }
 
-            // Actualizar monedero local para reflejar el nuevo saldo
-            monedero.saldo = Number(monedero.saldo) - montoConDescuento;
+                const cierre = await manager
+                  .getRepository(TransaccionesDebito)
+                  .update(
+                    {
+                      id: transaccionAbierta.id,
+                      controlTransaccion: EnumControlTransacciones.ABIERTA,
+                    },
+                    {
+                      idTipoTransaccion: EnumTipoTransaccion.DEBITO,
+                      monto: montoConDescuento,
+                      controlTransaccion: EnumControlTransacciones.PAGADO,
+                      latitudFinal: latitudFinal,
+                      longitudFinal: longitudFinal,
+                      fechaHoraFinal: fechaHoraFinal,
+                      distanciaRecorrida: parseFloat(distanciaKm.toFixed(2)),
+                    },
+                  );
+                if (!cierre.affected) {
+                  throw new Error('ABIERTA_YA_CERRADA');
+                }
 
-            // Obtener fecha actual con desfase de -6 horas
-            const ahora = new Date();
-            const desfaseMs = -6 * 60 * 60 * 1000;
-            const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-            const fechaHoraFinal = fechaDesfasada
-              .toISOString()
-              .slice(0, 19)
-              .replace('T', ' ');
-
-            // Actualizar la transacción: cerrarla (controlTransaccion = 0)
-            await this.transaccionesdebitoRepository.update(
-              transaccionAbierta.id,
-              {
-                idTipoTransaccion: EnumTipoTransaccion.DEBITO,
-                monto: montoConDescuento,
-                controlTransaccion: EnumControlTransacciones.PAGADO,
-                latitudFinal: latitudFinal,
-                longitudFinal: longitudFinal,
-                fechaHoraFinal: fechaHoraFinal,
-                distanciaRecorrida: parseFloat(distanciaKm.toFixed(2)),
-              },
-            );
-
-            // Obtener la transacción actualizada para guardarla en histórico
-            const transaccionActualizada =
-              await this.transaccionesdebitoRepository.findOne({
-                where: { id: transaccionAbierta.id },
+                const transaccionActualizada = await manager
+                  .getRepository(TransaccionesDebito)
+                  .findOne({ where: { id: transaccionAbierta.id } });
+                if (transaccionActualizada) {
+                  const { id: liveId, ...transaccionBody } =
+                    transaccionActualizada;
+                  await manager
+                    .getRepository(HistoricoTransaccionesDebito)
+                    .save({
+                      ...transaccionBody,
+                      idTransaccionOrigen: Number(liveId),
+                    });
+                }
               });
-
-            if (transaccionActualizada) {
-              const { id: _, ...transaccionBody } = transaccionActualizada;
-              await this.historicoTransaccionesDebitoRepository.save(
-                transaccionBody,
-              );
+              monedero.saldo = Number(monedero.saldo) - montoConDescuento;
+            } catch (cierreError) {
+              if (
+                cierreError instanceof Error &&
+                cierreError.message === 'ABIERTA_YA_CERRADA'
+              ) {
+                continue;
+              }
+              throw cierreError;
             }
-
-            console.log(
-              `[POST_DEBITO] Transacción abierta ID: ${transaccionAbierta.id} cerrada correctamente. Monto: $${montoConDescuento.toFixed(2)}`,
-            );
           }
         }
 
@@ -1475,9 +1976,6 @@ export class TransaccionesService {
               estatus: 0, // INACTIVO
             });
             qrActualizado = true;
-            console.log(
-              `[POST_DEBITO] QR ID: ${qrActivo.id} actualizado a estatus 0 (INACTIVO)`,
-            );
           }
         }
       }
@@ -1512,6 +2010,15 @@ export class TransaccionesService {
             `El viaje con ID ${createTransaccioneDebitoDto.idViaje} no existe`,
           );
         }
+        if (Number(viaje.idCliente) !== Number(monedero.idCliente)) {
+          throw new NotFoundException(
+            `El viaje con ID ${createTransaccioneDebitoDto.idViaje} no existe`,
+          );
+        }
+        // No se cobra en un viaje cerrado (al cerrarse queda con Fin y Estatus 0).
+        if (viaje.fin || Number(viaje.estatus) !== 1) {
+          throw new BadRequestException('El viaje está cerrado');
+        }
 
         // Guardar la variante para calcular la distancia
         // Asegurarnos de obtener la variante completa con todos sus campos
@@ -1523,11 +2030,19 @@ export class TransaccionesService {
           variante = viaje.idVariante2;
         }
 
-        // Obtener el turno con la instalaci?n
-        const turno = await this.turnosRepository.findOne({
-          where: { id: viaje.idTurno },
-          relations: ['idInstalacion2'],
-        });
+        // H-37: turno y tarifa dependen solo del viaje y son independientes
+        // entre sí → se leen en paralelo. instalacion depende de turno, así que
+        // se mantiene secuencial. Los null-checks conservan el mismo orden para
+        // no cambiar qué error se lanza primero ni el resultado del cobro.
+        const [turno, tarifa] = await Promise.all([
+          this.turnosRepository.findOne({
+            where: { id: viaje.idTurno },
+            relations: ['idInstalacion2'],
+          }),
+          this.tarifasRepository.findOne({
+            where: { idVariante: viaje.idVariante, estatus: 1 },
+          }),
+        ]);
 
         if (!turno) {
           throw new NotFoundException(
@@ -1546,11 +2061,6 @@ export class TransaccionesService {
             `La instalaci?n con ID ${turno.idInstalacion} no existe`,
           );
         }
-
-        // Obtener la tarifa de la variante
-        const tarifa = await this.tarifasRepository.findOne({
-          where: { idVariante: viaje.idVariante },
-        });
 
         // Construir el objeto con la misma estructura que el query anterior
         infoValidadorViaje = [
@@ -1592,17 +2102,19 @@ export class TransaccionesService {
             ta.TipoTarifa,
             ta.CostoPorEstacion,
             ta.CantidadEstacionesBase
-          FROM DashCamDev.Instalaciones i
-          JOIN DashCamDev.Validadores v ON i.IdValidador = v.Id
-          JOIN DashCamDev.Turnos t ON t.IdInstalacion = i.Id
-          JOIN DashCamDev.Viajes vi ON vi.IdTurno = t.Id
-          JOIN DashCamDev.Variantes va ON va.Id = vi.IdVariante
-          JOIN DashCamDev.Tarifas ta ON ta.IdVariante = va.Id
+          FROM Instalaciones i
+          JOIN Validadores v ON i.IdValidador = v.Id
+          JOIN Turnos t ON t.IdInstalacion = i.Id
+          JOIN Viajes vi ON vi.IdTurno = t.Id
+          JOIN Variantes va ON va.Id = vi.IdVariante
+          JOIN Tarifas ta ON ta.IdVariante = va.Id AND ta.Estatus = 1
           WHERE v.NumeroSerie = ?
             AND DATE(vi.Inicio) = CURDATE()
             AND vi.Inicio <= NOW()
             AND t.Estatus = 1
             AND vi.EstadoActual = 1
+            AND vi.Estatus = 1
+            AND vi.Fin IS NULL
           LIMIT 1
           `,
           [createTransaccioneDebitoDto.numeroSerieValidador],
@@ -1627,7 +2139,7 @@ export class TransaccionesService {
         !infoValidadorViaje[0].TipoTarifa
       ) {
         throw new BadRequestException(
-          'No se pudo obtener la informaci?n de tarifa del viaje',
+          'La variante del viaje no tiene una tarifa activa',
         );
       }
 
@@ -1636,427 +2148,87 @@ export class TransaccionesService {
       const tarifaBase = Number(tarifaInfo.TarifaBase) || 0;
       const idViaje = tarifaInfo.idViaje ? Number(tarifaInfo.idViaje) : null;
 
-      console.log('[TRANSACCIONES] ===== INFORMACIÓN DE TARIFA =====');
-      console.log(
-        `[TRANSACCIONES] Tipo de tarifa: ${tipoTarifa} (${tipoTarifa === 1 ? 'FIJA' : tipoTarifa === 2 ? 'ABIERTA' : 'OTRO'})`,
-      );
-      console.log(`[TRANSACCIONES] Tarifa base: $${tarifaBase.toFixed(2)}`);
-      console.log('[TRANSACCIONES] ==========================================');
-
       const esTarifaPorEstaciones = tipoTarifa === EnumTipoTarifa.ESTACIONES;
 
-      // ===== NUEVA LÓGICA: Manejo de tarifas ABIERTAS con monedero físico (esQR = false) =====
-      // Si la tarifa es ABIERTA y el pago es con monedero físico (esQR = false)
-      if (
-        tipoTarifa === EnumTipoTarifa.ABIERTA &&
-        !createTransaccioneDebitoDto.esQR
-      ) {
-        console.log(
-          '[POST_DEBITO] Tarifa ABIERTA con monedero físico (esQR = false) detectada',
+      // D-15: con tarifa abierta o por estaciones el pasajero valida al subir y
+      // al bajar, con tarjeta o con QR. Si tiene viajes abiertos (no múltiples),
+      // esta validación los cierra en este punto. Si alguno es del mismo viaje
+      // (mismo camión) es la bajada: se cobra y no se abre otro. Si es de otro
+      // viaje, olvidó validar al bajar: se cierra y se abre el nuevo.
+      const abiertasIndividuales =
+        await this.transaccionesdebitoRepository.find({
+          where: {
+            numeroSerieMonedero: monedero.numeroSerie,
+            controlTransaccion: EnumControlTransacciones.ABIERTA,
+            esMultiple: 0,
+            latitudFinal: IsNull(),
+            longitudFinal: IsNull(),
+          },
+          order: { id: 'ASC' },
+        });
+      if (abiertasIndividuales.length > 0) {
+        const fechaHoraActual = nowDb();
+        const ultima = abiertasIndividuales[abiertasIndividuales.length - 1];
+        const inicioUltima = new Date(
+          ultima.fechaHoraInicio ?? ultima.fhRegistro,
         );
+        const minutos =
+          (fechaHoraActual.getTime() - inicioUltima.getTime()) / 60000;
+        const mismoViaje = (t: TransaccionesDebito) =>
+          idViaje !== null && Number(t.idViaje) === idViaje;
 
-        // Buscar la última transacción abierta con esQR = 0 (false) para este monedero
-        const ultimaTransaccionAbiertaFisica =
-          await this.transaccionesdebitoRepository.findOne({
-            where: {
-              numeroSerieMonedero: monedero.numeroSerie,
-              controlTransaccion: EnumControlTransacciones.ABIERTA,
-              esQR: 0, // esQR = false (monedero físico)
-              latitudFinal: IsNull(),
-              longitudFinal: IsNull(),
+        // Validación repetida al subir (menos de 1 minuto, mismo viaje): no se cobra ni se abre otro.
+        if (mismoViaje(ultima) && minutos < 1) {
+          return {
+            status: 'success',
+            message: 'Viaje ya iniciado',
+            data: {
+              id: Number(ultima.id),
+              cantidadPasajes: 1,
+              nombre: monedero?.numeroSerie || '',
             },
-            order: {
-              id: 'DESC', // Más reciente primero
-            },
-          });
+          };
+        }
 
-        if (ultimaTransaccionAbiertaFisica) {
-          // Calcular el tiempo transcurrido desde fechaHoraInicio
-          const ahora = new Date();
-          const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-          const fechaHoraActual = new Date(ahora.getTime() + desfaseMs);
-
-          const fechaHoraInicioTransaccion =
-            ultimaTransaccionAbiertaFisica.fechaHoraInicio
-              ? new Date(ultimaTransaccionAbiertaFisica.fechaHoraInicio)
-              : new Date(ultimaTransaccionAbiertaFisica.fhRegistro);
-
-          const tiempoTranscurridoMs =
-            fechaHoraActual.getTime() - fechaHoraInicioTransaccion.getTime();
-          const tiempoTranscurridoMinutos = tiempoTranscurridoMs / (1000 * 60); // Convertir a minutos
-
-          console.log(
-            `[POST_DEBITO] Última transacción abierta física encontrada ID: ${ultimaTransaccionAbiertaFisica.id}`,
+        let cobradoBajada = 0;
+        let idBajada: number | null = null;
+        for (const abierta of abiertasIndividuales) {
+          const cobrado = await this.cerrarTransaccionAbierta(
+            abierta,
+            monedero,
+            createTransaccioneDebitoDto.latitud,
+            createTransaccioneDebitoDto.longitud,
+            fechaHoraActual,
+            idUser,
           );
-          console.log(
-            `[POST_DEBITO] Fecha/Hora inicio: ${fechaHoraInicioTransaccion.toISOString()}`,
-          );
-          console.log(
-            `[POST_DEBITO] Fecha/Hora actual: ${fechaHoraActual.toISOString()}`,
-          );
-          console.log(
-            `[POST_DEBITO] Tiempo transcurrido: ${tiempoTranscurridoMinutos.toFixed(2)} minutos`,
-          );
-
-          // Si ya pasó más de 1 minuto, cerrar todas las transacciones abiertas con esQR = false
-          if (tiempoTranscurridoMinutos >= 1) {
-            console.log(
-              `[POST_DEBITO] Tiempo >= 1 minuto. Cerrando todas las transacciones abiertas con esQR = false`,
-            );
-
-            // Buscar TODAS las transacciones abiertas con esQR = 0 (false) para este monedero
-            const todasTransaccionesAbiertasFisicas =
-              await this.transaccionesdebitoRepository.find({
-                where: {
-                  numeroSerieMonedero: monedero.numeroSerie,
-                  controlTransaccion: EnumControlTransacciones.ABIERTA,
-                  esQR: 0, // esQR = false (monedero físico)
-                  latitudFinal: IsNull(),
-                  longitudFinal: IsNull(),
-                },
-                order: {
-                  id: 'ASC', // Ordenar por ID ascendente para procesar consecutivamente
-                },
-              });
-
-            if (
-              todasTransaccionesAbiertasFisicas &&
-              todasTransaccionesAbiertasFisicas.length > 0
-            ) {
-              console.log(
-                `[POST_DEBITO] Se encontraron ${todasTransaccionesAbiertasFisicas.length} transacción(es) abierta(s) con esQR = false para cerrar`,
-              );
-
-              // Usar las coordenadas iniciales de la nueva transacción como coordenadas finales
-              const latitudFinal = createTransaccioneDebitoDto.latitud;
-              const longitudFinal = createTransaccioneDebitoDto.longitud;
-
-              // Procesar cada transacción abierta
-              for (const transaccionAbiertaFisica of todasTransaccionesAbiertasFisicas) {
-                console.log(
-                  `[POST_DEBITO] Procesando transacción abierta física ID: ${transaccionAbiertaFisica.id}`,
-                );
-
-                // Obtener variante y tarifa de la transacción existente usando idViaje
-                let varianteUpdate: Variantes | null = null;
-                let tarifaInfoUpdate: any = null;
-
-                if (transaccionAbiertaFisica.idViaje) {
-                  const viaje = await this.viajesRepository.findOne({
-                    where: { id: transaccionAbiertaFisica.idViaje },
-                    relations: ['idVariante2'],
-                  });
-
-                  if (viaje && viaje.idVariante) {
-                    varianteUpdate = await this.variantesRepository.findOne({
-                      where: { id: viaje.idVariante },
-                    });
-
-                    if (varianteUpdate) {
-                      const tarifa = await this.tarifasRepository.findOne({
-                        where: { idVariante: viaje.idVariante },
-                      });
-
-                      if (tarifa) {
-                        tarifaInfoUpdate = {
-                          TarifaBase: tarifa.tarifaBase,
-                          CostoAdicional: tarifa.costoAdicional,
-                          DistanciaBaseKm: tarifa.distanciaBaseKm,
-                          IncrementoCadaMetros: tarifa.incrementoCadaMetros,
-                          TipoTarifa: tarifa.tipoTarifa,
-                          CostoPorEstacion: tarifa.costoPorEstacion,
-                          CantidadEstacionesBase: tarifa.cantidadEstacionesBase,
-                        };
-                      }
-                    }
-                  }
-                }
-
-                // Calcular distancia desde punto inicial hasta punto final usando haversine
-                if (
-                  transaccionAbiertaFisica.latitudInicial &&
-                  transaccionAbiertaFisica.longitudInicial
-                ) {
-                  const puntoInicial = {
-                    latitude: transaccionAbiertaFisica.latitudInicial,
-                    longitude: transaccionAbiertaFisica.longitudInicial,
-                  };
-                  const puntoFinal = {
-                    latitude: latitudFinal,
-                    longitude: longitudFinal,
-                  };
-
-                  // Calcular distancia en metros usando haversine
-                  const distanciaMetros = haversine(puntoInicial, puntoFinal);
-                  const distanciaKm = distanciaMetros / 1000; // Convertir a kilómetros
-
-                  // Calcular monto basado en la distancia
-                  const tarifaBaseUpdate =
-                    Number(transaccionAbiertaFisica.monto) ||
-                    Number(tarifaInfoUpdate?.TarifaBase) ||
-                    0;
-                  let montoCalculado = tarifaBaseUpdate;
-
-                  // Tarifa por estaciones (TipoTarifa=3): calcular por número de estaciones recorridas
-                  if (
-                    tarifaInfoUpdate &&
-                    Number(tarifaInfoUpdate.TipoTarifa) ===
-                      EnumTipoTarifa.ESTACIONES
-                  ) {
-                    const estaciones =
-                      this.obtenerEstacionesDeVariante(varianteUpdate);
-                    const idxInicio = this.encontrarIndiceEstacionMasCercana(
-                      estaciones,
-                      Number(transaccionAbiertaFisica.latitudInicial),
-                      Number(transaccionAbiertaFisica.longitudInicial),
-                    );
-                    const idxFin = this.encontrarIndiceEstacionMasCercana(
-                      estaciones,
-                      Number(latitudFinal),
-                      Number(longitudFinal),
-                    );
-
-                    const costoPorEstacion = tarifaInfoUpdate.CostoPorEstacion
-                      ? Number(tarifaInfoUpdate.CostoPorEstacion)
-                      : 0;
-                    const cantidadBase = tarifaInfoUpdate.CantidadEstacionesBase
-                      ? Number(tarifaInfoUpdate.CantidadEstacionesBase)
-                      : 0;
-                    const estacionesRecorridas =
-                      idxInicio !== -1 && idxFin !== -1
-                        ? Math.abs(idxFin - idxInicio)
-                        : 0;
-                    const extras = Math.max(
-                      0,
-                      estacionesRecorridas - Math.max(0, cantidadBase),
-                    );
-                    montoCalculado = parseFloat(
-                      (
-                        tarifaBaseUpdate +
-                        extras * Math.max(0, costoPorEstacion)
-                      ).toFixed(2),
-                    );
-                  }
-                  // Si es tarifa INCREMENTAL (tipoTarifa === 2) y hay configuración de costo adicional
-                  else if (
-                    tarifaInfoUpdate &&
-                    tarifaInfoUpdate.TipoTarifa === 2
-                  ) {
-                    const costoAdicional = tarifaInfoUpdate.CostoAdicional
-                      ? Number(tarifaInfoUpdate.CostoAdicional)
-                      : 0;
-                    const distanciaBaseKm = tarifaInfoUpdate.DistanciaBaseKm
-                      ? Number(tarifaInfoUpdate.DistanciaBaseKm)
-                      : 0;
-                    const incrementoCadaMetros =
-                      tarifaInfoUpdate.IncrementoCadaMetros
-                        ? Number(tarifaInfoUpdate.IncrementoCadaMetros)
-                        : 0;
-
-                    if (costoAdicional > 0 && incrementoCadaMetros > 0) {
-                      const distanciaBaseMetros = distanciaBaseKm * 1000;
-
-                      // Si la distancia recorrida excede la distancia base, calcular el extra
-                      if (distanciaMetros > distanciaBaseMetros) {
-                        const distanciaExcedente =
-                          distanciaMetros - distanciaBaseMetros;
-                        const numeroIncrementos = Math.ceil(
-                          distanciaExcedente / incrementoCadaMetros,
-                        );
-                        const extraPorDistancia =
-                          numeroIncrementos * costoAdicional;
-                        montoCalculado = tarifaBaseUpdate + extraPorDistancia;
-                      }
-                    }
-                  }
-
-                  // Validar que el monto calculado no exceda el cobro máximo
-                  if (transaccionAbiertaFisica.cobroMaximo) {
-                    const cobroMaximoNum = Number(
-                      transaccionAbiertaFisica.cobroMaximo,
-                    );
-                    if (montoCalculado > cobroMaximoNum) {
-                      montoCalculado = cobroMaximoNum;
-                    }
-                  }
-
-                  // Aplicar descuentos (igual que en el PATCH)
-                  let montoConDescuento = montoCalculado;
-
-                  // PASO 1: Aplicar descuento por tipo de pasajero SOLO cuando la tarifa es ABIERTA o ESTACIONES
-                  const tipoTarifaUpdate =
-                    tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa
-                      ? Number(tarifaInfoUpdate.TipoTarifa)
-                      : null;
-
-                  if (
-                    (tipoTarifaUpdate === EnumTipoTarifa.ABIERTA ||
-                      tipoTarifaUpdate === EnumTipoTarifa.ESTACIONES) &&
-                    monedero.idTipoPasajero
-                  ) {
-                    const tipoPasajero =
-                      await this.CatTiposPasajerosRepository.findOne({
-                        where: { id: monedero.idTipoPasajero },
-                        relations: ['CatTipoDescuento'],
-                      });
-
-                    if (
-                      tipoPasajero &&
-                      tipoPasajero.cantidad &&
-                      tipoPasajero.cantidad > 0 &&
-                      tipoPasajero.idCatTipoDescuento
-                    ) {
-                      const tipoDescuento = Number(
-                        tipoPasajero.idCatTipoDescuento,
-                      );
-                      const cantidad = Number(tipoPasajero.cantidad);
-
-                      // idCatTipoDescuento: 1 = PORCENTAJE, 2 = MONETARIO
-                      if (tipoDescuento === 1) {
-                        const descuentoPorcentual =
-                          (montoConDescuento * cantidad) / 100;
-                        montoConDescuento =
-                          montoConDescuento - descuentoPorcentual;
-                      } else if (tipoDescuento === 2) {
-                        montoConDescuento = montoConDescuento - cantidad;
-                      }
-
-                      if (montoConDescuento < 0) {
-                        montoConDescuento = 0;
-                      }
-                    }
-                  }
-
-                  // PASO 2: Aplicar descuento de transbordo
-                  if (
-                    transaccionAbiertaFisica.descuentoTransbordo !== null &&
-                    transaccionAbiertaFisica.descuentoTransbordo !==
-                      undefined &&
-                    transaccionAbiertaFisica.tipoDescuentoTransbordo !== null
-                  ) {
-                    const descuentoTransbordo = Number(
-                      transaccionAbiertaFisica.descuentoTransbordo,
-                    );
-                    const tipoDescuentoTransbordo = Number(
-                      transaccionAbiertaFisica.tipoDescuentoTransbordo,
-                    );
-
-                    if (descuentoTransbordo > 0) {
-                      if (
-                        tipoDescuentoTransbordo ===
-                        EnumTipoDescuentoTransbordo.MONETARIO
-                      ) {
-                        montoConDescuento =
-                          montoConDescuento - descuentoTransbordo;
-                      } else if (
-                        tipoDescuentoTransbordo ===
-                        EnumTipoDescuentoTransbordo.PORCENTAJE
-                      ) {
-                        const descuentoPorcentual =
-                          (montoConDescuento * descuentoTransbordo) / 100;
-                        montoConDescuento =
-                          montoConDescuento - descuentoPorcentual;
-                      }
-
-                      if (montoConDescuento < 0) {
-                        montoConDescuento = 0;
-                      }
-                    }
-                  }
-
-                  // Descuento ATÓMICO del saldo al cerrar la transacción abierta
-                  // física. Descuenta y valida en una sola sentencia con lock de
-                  // fila, evitando el doble-cobro por concurrencia.
-                  const descontado =
-                    await this.monederosService.descontarSaldoAtomico(
-                      monedero.numeroSerie,
-                      montoConDescuento,
-                      idUser,
-                    );
-
-                  if (!descontado) {
-                    throw new BadRequestException(
-                      `Saldo insuficiente para cerrar transacción abierta física ID: ${transaccionAbiertaFisica.id}`,
-                    );
-                  }
-
-                  // Actualizar monedero local para reflejar el nuevo saldo
-                  monedero.saldo = Number(monedero.saldo) - montoConDescuento;
-
-                  // Obtener fecha actual con desfase de -6 horas
-                  const fechaHoraFinal = fechaHoraActual
-                    .toISOString()
-                    .slice(0, 19)
-                    .replace('T', ' ');
-
-                  // Actualizar la transacción: cerrarla (controlTransaccion = 0)
-                  await this.transaccionesdebitoRepository.update(
-                    transaccionAbiertaFisica.id,
-                    {
-                      idTipoTransaccion: EnumTipoTransaccion.DEBITO,
-                      monto: montoConDescuento,
-                      controlTransaccion: EnumControlTransacciones.PAGADO,
-                      latitudFinal: latitudFinal,
-                      longitudFinal: longitudFinal,
-                      fechaHoraFinal: fechaHoraFinal,
-                      distanciaRecorrida: parseFloat(distanciaKm.toFixed(2)),
-                    },
-                  );
-
-                  // Obtener la transacción actualizada para guardarla en histórico
-                  const transaccionActualizada =
-                    await this.transaccionesdebitoRepository.findOne({
-                      where: { id: transaccionAbiertaFisica.id },
-                    });
-
-                  if (transaccionActualizada) {
-                    const { id: _, ...transaccionBody } =
-                      transaccionActualizada;
-                    await this.historicoTransaccionesDebitoRepository.save(
-                      transaccionBody,
-                    );
-                  }
-
-                  console.log(
-                    `[POST_DEBITO] Transacción abierta física ID: ${transaccionAbiertaFisica.id} cerrada correctamente. Monto: $${montoConDescuento.toFixed(2)}`,
-                  );
-                }
-              }
-
-              // Actualizar estatus del QR a 0 después de cerrar las transacciones
-              if (monedero.idPasajero) {
-                const qrActivo = await this.qrCodesRepository.findOne({
-                  where: {
-                    idPasajero: monedero.idPasajero,
-                    estatus: 1, // ACTIVO
-                  },
-                  order: {
-                    id: 'DESC', // Más reciente
-                  },
-                });
-
-                if (qrActivo) {
-                  await this.qrCodesRepository.update(qrActivo.id, {
-                    estatus: 0, // INACTIVO
-                  });
-                  qrActualizado = true;
-                  console.log(
-                    `[POST_DEBITO] QR ID: ${qrActivo.id} actualizado a estatus 0 (INACTIVO)`,
-                  );
-                }
-              }
-            }
-          } else {
-            // Si el tiempo es < 1 minuto, continuar normalmente (se creará una nueva transacción abierta)
-            console.log(
-              `[POST_DEBITO] Tiempo < 1 minuto (${tiempoTranscurridoMinutos.toFixed(2)} minutos). Continuando con creación de nueva transacción abierta`,
-            );
+          if (cobrado !== null && mismoViaje(abierta)) {
+            cobradoBajada += cobrado;
+            idBajada = Number(abierta.id);
           }
-        } else {
-          // No hay transacciones abiertas físicas previas, continuar normalmente
-          console.log(
-            `[POST_DEBITO] No se encontraron transacciones abiertas físicas previas. Continuando con creación de nueva transacción`,
-          );
+        }
+
+        // El QR del pasajero queda inactivo al cerrar sus viajes.
+        if (monedero.idPasajero) {
+          const qrActivo = await this.qrCodesRepository.findOne({
+            where: { idPasajero: monedero.idPasajero, estatus: 1 },
+            order: { id: 'DESC' },
+          });
+          if (qrActivo) {
+            await this.qrCodesRepository.update(qrActivo.id, { estatus: 0 });
+            qrActualizado = true;
+          }
+        }
+
+        if (idBajada !== null) {
+          return {
+            status: 'success',
+            message: `Viaje cerrado: $${cobradoBajada.toFixed(2)}`,
+            data: {
+              id: idBajada,
+              cantidadPasajes: 1,
+              nombre: monedero?.numeroSerie || '',
+            },
+          };
         }
       }
 
@@ -2075,12 +2247,6 @@ export class TransaccionesService {
         // Por defecto, si no se puede determinar, usar PAGADO
         controlTransaccion = EnumControlTransacciones.PAGADO;
       }
-
-      console.log('[TRANSACCIONES] ===== CONTROL DE TRANSACCIÓN =====');
-      console.log(
-        `[TRANSACCIONES] Control transacción: ${controlTransaccion === EnumControlTransacciones.PAGADO ? 'PAGADO (0)' : 'ABIERTA (1)'}`,
-      );
-      console.log('[TRANSACCIONES] ========================================');
 
       // 2.6?? Calculamos el monto seg?n el tipo de tarifa
       // Si TipoTarifa = 1 (Fija), usar TarifaBase
@@ -2120,9 +2286,7 @@ export class TransaccionesService {
       ) {
         // Calculamos la fecha l?mite hacia atr?s (tiempo en minutos)
         // Aplicar desfase de -6 horas para la zona horaria
-        const ahora = new Date();
-        const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-        const fechaHoraTransaccion = new Date(ahora.getTime() + desfaseMs);
+        const fechaHoraTransaccion = nowDb();
         const tiempoEnMs = transbordoPermitido.tiempo * 60 * 1000; // Convertir minutos a milisegundos
         const fechaLimite = new Date(
           fechaHoraTransaccion.getTime() - tiempoEnMs,
@@ -2143,9 +2307,6 @@ export class TransaccionesService {
         if (!ultimaTransaccionFinalizada) {
           // No hay transacciones finalizadas, es la primera (cobro inicial)
           numeroTransbordo = 0;
-          console.log(
-            `[TRANSBORDO] Paso 1: No hay transacciones finalizadas -> numeroTransbordo = 0`,
-          );
         } else {
           // Verificar si la última transacción está dentro del rango de tiempo permitido
           // Usamos fechaHoraInicio porque el tiempo de transbordo se cuenta desde el inicio
@@ -2157,9 +2318,6 @@ export class TransaccionesService {
           // Si la última transacción está fuera del rango de tiempo, reiniciamos a 0
           if (fechaUltimaTransaccion < fechaLimite) {
             numeroTransbordo = 0;
-            console.log(
-              `[TRANSBORDO] Paso 2: Última transacción (ID: ${ultimaTransaccionFinalizada.id}) fuera del rango de tiempo -> numeroTransbordo = 0`,
-            );
           } else {
             // La última transacción está dentro del rango de tiempo
             // Buscar todas las transacciones finalizadas del monedero
@@ -2181,10 +2339,6 @@ export class TransaccionesService {
               const fecha = new Date(fechaInicio);
               return fecha >= fechaLimite && fecha < fechaHoraTransaccion;
             });
-
-            console.log(
-              `[TRANSBORDO] Paso 3: Transacciones en rango: ${transaccionesFiltradas.length} (IDs: ${transaccionesFiltradas.map((t) => `${t.id}(${t.numeroTransbordo})`).join(', ')})`,
-            );
 
             // Buscar el cobro inicial (numeroTransbordo = 0) MÁS RECIENTE dentro del rango
             // Ordenar por fecha descendente para encontrar el más reciente
@@ -2214,9 +2368,6 @@ export class TransaccionesService {
               // Si el tiempo desde el cobro inicial ya pasó, reiniciamos el contador a 0
               if (fechaHoraTransaccion > fechaExpiracionCobroInicial) {
                 numeroTransbordo = 0;
-                console.log(
-                  `[TRANSBORDO] Paso 4: Tiempo del cobro inicial expiró -> numeroTransbordo = 0`,
-                );
               } else {
                 // El cobro inicial todavía está vigente
                 // Contar solo las transacciones desde el cobro inicial más reciente hasta ahora
@@ -2236,10 +2387,6 @@ export class TransaccionesService {
                   .map((t) => t.numeroTransbordo)
                   .filter((n) => n !== null && n !== undefined);
 
-                console.log(
-                  `[TRANSBORDO] Paso 4: Transacciones desde cobro inicial (ID: ${cobroInicial.id}): ${transaccionesDesdeCobroInicial.length}, Números: [${numerosTransbordo.join(', ')}]`,
-                );
-
                 if (numerosTransbordo.length > 0) {
                   const maxNumeroTransbordo = Math.max(...numerosTransbordo);
                   const siguienteTransbordo = maxNumeroTransbordo + 1;
@@ -2249,29 +2396,17 @@ export class TransaccionesService {
                     siguienteTransbordo > transbordoPermitido.numeroTransbordos
                   ) {
                     numeroTransbordo = 0;
-                    console.log(
-                      `[TRANSBORDO] Paso 5: Máximo alcanzado (${siguienteTransbordo} > ${transbordoPermitido.numeroTransbordos}) -> numeroTransbordo = 0 (reinicio - nuevo cobro inicial)`,
-                    );
                   } else {
                     numeroTransbordo = siguienteTransbordo;
-                    console.log(
-                      `[TRANSBORDO] Paso 5: Máximo encontrado: ${maxNumeroTransbordo}, Siguiente: ${siguienteTransbordo} -> numeroTransbordo = ${numeroTransbordo}`,
-                    );
                   }
                 } else {
                   // Solo existe el cobro inicial, el siguiente es 1
                   numeroTransbordo = 1;
-                  console.log(
-                    `[TRANSBORDO] Paso 5: Solo existe cobro inicial -> numeroTransbordo = 1`,
-                  );
                 }
               }
             } else {
               // No hay cobro inicial en el rango, empezamos en 0
               numeroTransbordo = 0;
-              console.log(
-                `[TRANSBORDO] Paso 4: No se encontró cobro inicial en rango -> numeroTransbordo = 0`,
-              );
             }
           }
         }
@@ -2325,53 +2460,23 @@ export class TransaccionesService {
           const tipoDescuento = Number(tipoPasajero.idCatTipoDescuento);
           const cantidad = Number(tipoPasajero.cantidad);
 
-          console.log(
-            '[TRANSACCIONES] ===== PASO 1: DESCUENTO POR TIPO DE PASAJERO (FIJA) =====',
-          );
-          console.log(
-            `[TRANSACCIONES] Tipo de descuento: ${tipoDescuento} (1=Porcentaje, 2=Monetario)`,
-          );
-          console.log(`[TRANSACCIONES] Cantidad: ${cantidad}`);
-          console.log(
-            `[TRANSACCIONES] Monto antes de descuento por tipo de pasajero: $${montoConDescuento.toFixed(2)}`,
-          );
-
           // idCatTipoDescuento: 1 = PORCENTAJE, 2 = MONETARIO
           if (tipoDescuento === 1) {
             // Tipo 1: PORCENTAJE - cantidad es el porcentaje a descontar
             const descuentoPorcentual = (montoConDescuento * cantidad) / 100;
             montoConDescuento = montoConDescuento - descuentoPorcentual;
-            console.log(
-              `[TRANSACCIONES] Descuento en PORCENTAJE: ${cantidad}% = $${descuentoPorcentual.toFixed(2)}`,
-            );
           } else if (tipoDescuento === 2) {
             // Tipo 2: MONETARIO - cantidad es el monto a restar directamente
             montoConDescuento = montoConDescuento - cantidad;
-            console.log(
-              `[TRANSACCIONES] Descuento en PESOS: $${cantidad.toFixed(2)}`,
-            );
           }
 
           // Asegurar que el monto no sea negativo
           if (montoConDescuento < 0) {
             montoConDescuento = 0;
           }
-
-          console.log(
-            `[TRANSACCIONES] Monto después de descuento por tipo de pasajero: $${montoConDescuento.toFixed(2)}`,
-          );
-          console.log(
-            '[TRANSACCIONES] =============================================',
-          );
         } else {
-          console.log(
-            '[TRANSACCIONES] No se aplica descuento por tipo de pasajero (cantidad <= 0 o no existe)',
-          );
         }
       } else if (tipoTarifa !== EnumTipoTarifa.FIJA) {
-        console.log(
-          '[TRANSACCIONES] Tipo de tarifa no es FIJA, el descuento por tipo de pasajero se aplicará en el PATCH',
-        );
       }
 
       // PASO 2: Aplicar descuento por transbordo sobre el monto ya descontado por tipo de pasajero
@@ -2381,23 +2486,10 @@ export class TransaccionesService {
         tipoDescuentoTransbordo !== null &&
         costoTransbordo > 0
       ) {
-        console.log(
-          '[TRANSACCIONES] ===== PASO 2: DESCUENTO POR TRANSBORDO =====',
-        );
-        console.log(
-          `[TRANSACCIONES] Costo transbordo: $${costoTransbordo.toFixed(2)}, Tipo: ${tipoDescuentoTransbordo} (1=Pesos, 2=Porcentaje)`,
-        );
-        console.log(
-          `[TRANSACCIONES] Monto antes de descuento por transbordo: $${montoConDescuento.toFixed(2)}`,
-        );
-
         // Evaluar el tipo de descuento: 1 = PESOS (resta directa), 2 = PORCENTAJE
         if (tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.MONETARIO) {
           // Tipo 1: PESOS - resta directa sobre el monto ya descontado por tipo de pasajero
           montoConDescuento = montoConDescuento - costoTransbordo;
-          console.log(
-            `[TRANSACCIONES] Descuento en PESOS: $${costoTransbordo.toFixed(2)}`,
-          );
         } else if (
           tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.PORCENTAJE
         ) {
@@ -2406,22 +2498,12 @@ export class TransaccionesService {
           const descuentoPorcentual =
             (montoConDescuento * costoTransbordo) / 100;
           montoConDescuento = montoConDescuento - descuentoPorcentual;
-          console.log(
-            `[TRANSACCIONES] Descuento en PORCENTAJE: ${costoTransbordo}% = $${descuentoPorcentual.toFixed(2)}`,
-          );
         }
 
         // Asegurar que el monto no sea negativo
         if (montoConDescuento < 0) {
           montoConDescuento = 0;
         }
-
-        console.log(
-          `[TRANSACCIONES] Monto después de descuento por transbordo: $${montoConDescuento.toFixed(2)}`,
-        );
-        console.log(
-          '[TRANSACCIONES] =============================================',
-        );
       }
 
       // Determinar cantidad de pasajes a procesar
@@ -2440,9 +2522,7 @@ export class TransaccionesService {
 
       // Calcular distancia inicial y cobro máximo ANTES de la validación de saldo
       // Aplicar desfase de -6 horas para la zona horaria
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas en milisegundos
-      const fechaHoraInicio = new Date(ahora.getTime() + desfaseMs);
+      const fechaHoraInicio = nowDb();
 
       // Calcular distancia inicial desde el punto inicial de la variante
       const distanciaInicialKm = this.calcularDistanciaInicialKm(
@@ -2547,42 +2627,10 @@ export class TransaccionesService {
 
       const montoFinal = Number(monedero.saldo) - montoTotalAValidar;
 
-      console.log('[TRANSACCIONES] ===== VALIDACIÓN DE SALDO =====');
-      console.log(
-        `[TRANSACCIONES] Saldo actual: $${Number(monedero.saldo).toFixed(2)}`,
-      );
-      console.log(
-        `[TRANSACCIONES] Tipo de tarifa: ${tipoTarifa === EnumTipoTarifa.FIJA ? 'FIJA' : tipoTarifa === EnumTipoTarifa.ABIERTA ? 'ABIERTA' : 'OTRO'}`,
-      );
-      console.log(`[TRANSACCIONES] Cantidad de pasajes: ${cantidadPasajes}`);
       if (tipoTarifa === EnumTipoTarifa.FIJA) {
-        console.log(
-          `[TRANSACCIONES] Monto por pasaje (con descuentos): $${montoConDescuento.toFixed(2)}`,
-        );
-        console.log(
-          `[TRANSACCIONES] Monto total a validar: $${montoTotalAValidar.toFixed(2)}`,
-        );
       } else if (tipoTarifa === EnumTipoTarifa.ABIERTA) {
-        console.log(
-          `[TRANSACCIONES] Cobro máximo por pasaje: $${(cobroMaximo || 0).toFixed(2)}`,
-        );
-        console.log(
-          `[TRANSACCIONES] Monto total a validar (cobro máximo × pasajes): $${montoTotalAValidar.toFixed(2)}`,
-        );
       } else if (esTarifaPorEstaciones) {
-        console.log(
-          `[TRANSACCIONES] Cobro máximo por pasaje (estaciones): $${(cobroMaximoEstaciones || 0).toFixed(2)}`,
-        );
-        console.log(
-          `[TRANSACCIONES] Monto total a validar (cobro máximo × pasajes): $${montoTotalAValidar.toFixed(2)}`,
-        );
       }
-      console.log(
-        `[TRANSACCIONES] Saldo después de validación: $${montoFinal.toFixed(2)}`,
-      );
-      console.log(
-        '[TRANSACCIONES] =============================================',
-      );
 
       // 4?? Validaci?n de saldo - Aplica para ambos tipos de tarifa
       // Para tarifa FIJA: valida con montoConDescuento
@@ -2620,34 +2668,121 @@ export class TransaccionesService {
       // Para tarifas ABIERTA: no se descuenta el saldo todavía
       const montoTotalADescontar = montoConDescuento * cantidadPasajes;
 
-      // Solo actualizar el saldo del monedero si la transacci?n es PAGADO
-      // Si es ABIERTA, no se descuenta el saldo todav?a
+      // Insert primero, descuento después, todo en una TX (H-09 / H-10 / V2-03).
+      // Si la clave ya existe, el UNIQUE aborta sin mover saldo. Si el
+      // descuento falla, el rollback deshace los inserts.
       let montoAGuardar = 0;
       if (controlTransaccion === EnumControlTransacciones.PAGADO) {
-        console.log(
-          '[TRANSACCIONES] ===== DESCONTANDO SALDO DEL MONEDERO (ATÓMICO) =====',
-        );
-        console.log(
-          `[TRANSACCIONES] Número de serie del monedero: ${monedero.numeroSerie}`,
-        );
-        console.log(
-          `[TRANSACCIONES] Monto a descontar: $${montoTotalADescontar.toFixed(2)}`,
-        );
-        console.log(`[TRANSACCIONES] Control transacción: PAGADO`);
+        if (
+          tipoTarifa === EnumTipoTarifa.ABIERTA ||
+          tipoTarifa === EnumTipoTarifa.ESTACIONES
+        ) {
+          montoAGuardar = tarifaBase;
+        } else {
+          montoAGuardar = montoConDescuento;
+        }
+      } else if (
+        tipoTarifa === EnumTipoTarifa.ABIERTA ||
+        tipoTarifa === EnumTipoTarifa.ESTACIONES
+      ) {
+        montoAGuardar = tarifaBase;
+      }
 
-        // Descuento ATÓMICO: el UPDATE condicional (Saldo = Saldo - monto
-        // WHERE Saldo >= monto) descuenta y valida el saldo en una sola sentencia
-        // con lock de fila. Evita el doble-cargo cuando dos peticiones concurrentes
-        // leían el mismo saldo y la última escritura pisaba a la anterior.
-        const descontado = await this.monederosService.descontarSaldoAtomico(
-          monedero.numeroSerie,
-          montoTotalADescontar,
-          idUser,
-        );
+      const transaccionesCreadas: number[] = [];
 
-        if (!descontado) {
-          // Otra petición concurrente consumió el saldo entre la validación y el
-          // cobro. Registramos el rechazo y abortamos (lanza BadRequestException).
+      try {
+        await this.dataSource.transaction(async (manager) => {
+          const debitoRepo = manager.getRepository(TransaccionesDebito);
+          const historicoRepo = manager.getRepository(
+            HistoricoTransaccionesDebito,
+          );
+
+          for (let i = 0; i < cantidadPasajes; i++) {
+            const newTransaccion = debitoRepo.create({
+              idTipoTransaccion: EnumTipoTransaccion.DEBITO,
+              monto: montoAGuardar,
+              controlTransaccion: controlTransaccion,
+              latitudInicial: createTransaccioneDebitoDto.latitud,
+              longitudInicial: createTransaccioneDebitoDto.longitud,
+              distanciaInicialKm: distanciaInicialKmFinal,
+              fechaHoraInicio: fechaHoraInicio,
+              numeroSerieMonedero: monedero.numeroSerie,
+              numeroSerieValidador:
+                createTransaccioneDebitoDto.numeroSerieValidador,
+              numeroTransbordo,
+              idViaje: idViaje,
+              esQR: createTransaccioneDebitoDto.esQR ? 1 : 0,
+              cobroMaximo: esTarifaPorEstaciones
+                ? cobroMaximoEstaciones
+                : cobroMaximo,
+              descuentoTransbordo:
+                costoTransbordo !== null && costoTransbordo !== undefined
+                  ? parseFloat(costoTransbordo.toFixed(2))
+                  : null,
+              tipoDescuentoTransbordo:
+                tipoDescuentoTransbordo !== null &&
+                tipoDescuentoTransbordo !== undefined
+                  ? Number(tipoDescuentoTransbordo)
+                  : null,
+              esMultiple: createTransaccioneDebitoDto.esMultiple ? 1 : 0,
+              claveIdempotencia: i === 0 ? claveIdempotencia : null,
+            });
+
+            let transaccionSave: TransaccionesDebito;
+            try {
+              transaccionSave = await debitoRepo.save(newTransaccion);
+            } catch (error) {
+              if (
+                claveIdempotencia &&
+                i === 0 &&
+                (error?.code === 'ER_DUP_ENTRY' || error?.errno === 1062)
+              ) {
+                throw new IdempotenciaDuplicadaError(claveIdempotencia);
+              }
+              throw error;
+            }
+            transaccionesCreadas.push(Number(transaccionSave.id));
+
+            if (controlTransaccion === EnumControlTransacciones.PAGADO) {
+              const { id: liveId, ...historicoBody } = transaccionSave;
+              await historicoRepo.save({
+                ...historicoBody,
+                idTransaccionOrigen: Number(liveId),
+              });
+            }
+          }
+
+          if (controlTransaccion === EnumControlTransacciones.PAGADO) {
+            // H-08/H-09/V2-06: lock de BD sobre la fila del monedero ANTES de
+            // mutar el saldo. Serializa el cobro entre instancias; el KeyedMutex
+            // solo cubre concurrencia intra-proceso. El UPDATE condicional sigue
+            // como defensa.
+            await this.monederosService.bloquearMonederoParaActualizar(
+              monedero.numeroSerie,
+              manager,
+            );
+            const descontado =
+              await this.monederosService.descontarSaldoAtomico(
+                monedero.numeroSerie,
+                montoTotalADescontar,
+                idUser,
+                manager,
+              );
+            if (!descontado) {
+              throw new SaldoInsuficienteTxError();
+            }
+            monedero.saldo = Number(monedero.saldo) - montoTotalADescontar;
+          }
+        });
+      } catch (error) {
+        if (error instanceof IdempotenciaDuplicadaError) {
+          const previa = await this.debitoPorClave(
+            error.clave,
+            monedero.numeroSerie,
+          );
+          if (previa) return previa;
+        }
+        if (error instanceof SaldoInsuficienteTxError) {
           estado = transicionarEstado(
             estado,
             EventoTransaccion.SALDO_INSUFICIENTE,
@@ -2669,125 +2804,7 @@ export class TransaccionesService {
             tipoDescuentoTransbordo,
           });
         }
-
-        // Mantener coherente el saldo local para logs/lógica posterior.
-        monedero.saldo = Number(monedero.saldo) - montoTotalADescontar;
-
-        console.log(
-          '[TRANSACCIONES] Saldo del monedero descontado atómicamente',
-        );
-        console.log(
-          '[TRANSACCIONES] =================================================',
-        );
-
-        // ABIERTA y ESTACIONES: guardar tarifa base; FIJA: monto con descuento
-        if (
-          tipoTarifa === EnumTipoTarifa.ABIERTA ||
-          tipoTarifa === EnumTipoTarifa.ESTACIONES
-        ) {
-          montoAGuardar = tarifaBase;
-        } else {
-          montoAGuardar = montoConDescuento;
-        }
-      } else {
-        console.log(
-          '[TRANSACCIONES] ===== TRANSACCIÓN ABIERTA - NO SE DESCUENTA SALDO =====',
-        );
-        console.log(`[TRANSACCIONES] Control transacción: ABIERTA`);
-        console.log(
-          `[TRANSACCIONES] El saldo del monedero NO se descuenta todavía`,
-        );
-        console.log(
-          '[TRANSACCIONES] =======================================================',
-        );
-
-        // ABIERTA y ESTACIONES: persistir tarifa base al abrir (el extra se calcula al cerrar)
-        if (
-          tipoTarifa === EnumTipoTarifa.ABIERTA ||
-          tipoTarifa === EnumTipoTarifa.ESTACIONES
-        ) {
-          montoAGuardar = tarifaBase;
-        } else {
-          montoAGuardar = 0;
-        }
-      }
-
-      // 6?? Guardamos transacci?n(es) aprobada(s)
-      const transaccionesCreadas: number[] = [];
-
-      // Crear múltiples débitos si esMultiple es true
-      for (let i = 0; i < cantidadPasajes; i++) {
-        const newTransaccion = this.transaccionesdebitoRepository.create({
-          idTipoTransaccion: EnumTipoTransaccion.DEBITO,
-          monto: montoAGuardar,
-          controlTransaccion: controlTransaccion,
-          latitudInicial: createTransaccioneDebitoDto.latitud,
-          longitudInicial: createTransaccioneDebitoDto.longitud,
-          distanciaInicialKm: distanciaInicialKmFinal,
-          fechaHoraInicio: fechaHoraInicio,
-          numeroSerieMonedero: monedero.numeroSerie,
-          numeroSerieValidador:
-            createTransaccioneDebitoDto.numeroSerieValidador,
-          numeroTransbordo,
-          idViaje: idViaje,
-          esQR: createTransaccioneDebitoDto.esQR ? 1 : 0,
-          cobroMaximo: esTarifaPorEstaciones
-            ? cobroMaximoEstaciones
-            : cobroMaximo,
-          descuentoTransbordo:
-            costoTransbordo !== null && costoTransbordo !== undefined
-              ? parseFloat(costoTransbordo.toFixed(2))
-              : null,
-          tipoDescuentoTransbordo:
-            tipoDescuentoTransbordo !== null &&
-            tipoDescuentoTransbordo !== undefined
-              ? Number(tipoDescuentoTransbordo)
-              : null,
-          esMultiple: createTransaccioneDebitoDto.esMultiple ? 1 : 0,
-          // La clave de idempotencia se guarda solo en la primera transacción
-          // (el índice único no permitiría repetirla en los pasajes múltiples).
-          claveIdempotencia: i === 0 ? claveIdempotencia : null,
-        });
-
-        let transaccionSave: TransaccionesDebito;
-        try {
-          transaccionSave =
-            await this.transaccionesdebitoRepository.save(newTransaccion);
-        } catch (error) {
-          // Backstop de idempotencia: el índice único sobre ClaveIdempotencia
-          // impide registrar dos veces la misma clave si dos peticiones entran
-          // casi al mismo tiempo. Ante el duplicado devolvemos la transacción ya
-          // registrada en vez de propagar el error.
-          if (
-            claveIdempotencia &&
-            i === 0 &&
-            (error?.code === 'ER_DUP_ENTRY' || error?.errno === 1062)
-          ) {
-            const previa = await this.transaccionesdebitoRepository.findOne({
-              where: { claveIdempotencia },
-              order: { id: 'ASC' },
-            });
-            if (previa) {
-              return {
-                status: 'success',
-                message: 'Transacción ya procesada (idempotencia)',
-                data: {
-                  id: Number(previa.id),
-                  nombre: previa.numeroSerieMonedero || '',
-                },
-              };
-            }
-          }
-          throw error;
-        }
-        transaccionesCreadas.push(Number(transaccionSave.id));
-
-        // Se guardará la transacción en el historico de transacciones solamente cuando controltransaccion sea pagado
-        if (controlTransaccion === EnumControlTransacciones.PAGADO) {
-          await this.historicoTransaccionesDebitoRepository.save(
-            newTransaccion,
-          );
-        }
+        throw error;
       }
 
       // 7?? Bit?cora de ?xito
@@ -2800,7 +2817,11 @@ export class TransaccionesService {
         'Transacciones',
         mensajeBitacora,
         'CREATE',
-        { createTransaccioneDebitoDto },
+        {
+          ids: transaccionesCreadas,
+          cantidadPasajes,
+          claveIdempotencia,
+        },
         idUser,
         EnumModulos.TRANSACCIONES,
         EstatusEnumBitcora.SUCCESS,
@@ -2828,17 +2849,11 @@ export class TransaccionesService {
             tipoTarifa === EnumTipoTarifa.ESTACIONES;
 
           if (esPagoConQR && esTarifaAbierta) {
-            console.log(
-              `[POST_DEBITO] Pago con QR y tarifa ABIERTA: QR ID ${qrActivo.id} se mantiene en estatus 1 (ACTIVO)`,
-            );
           } else {
             // Cambiar el QR a estatus 0 (INACTIVO)
             await this.qrCodesRepository.update(qrActivo.id, {
               estatus: EstatusEnum.INACTIVO, // 0 = INACTIVO
             });
-            console.log(
-              `[POST_DEBITO] QR ID: ${qrActivo.id} actualizado a estatus 0 (INACTIVO)`,
-            );
           }
         }
       }
@@ -2868,10 +2883,15 @@ export class TransaccionesService {
       }
 
       // Bit?cora de error
-      const querylogger = { createTransaccioneDebitoDto };
+      const querylogger = {
+        claveIdempotencia:
+          createTransaccioneDebitoDto.claveIdempotencia ?? null,
+        numeroSerieValidador:
+          createTransaccioneDebitoDto.numeroSerieValidador ?? null,
+      };
       await this.bitacoraLogger.logToBitacora(
         'Transacciones',
-        `Error en transacción de d?bito`,
+        `Error en transacción de débito`,
         'CREATE',
         querylogger,
         idUser,
@@ -2957,8 +2977,13 @@ export class TransaccionesService {
     });
     await this.transaccionesdebitoRepository.save(newTransaccion);
 
-    //se guarda en el historico
-    await this.historicoTransaccionesDebitoRepository.save(newTransaccion);
+    // Histórico como fila nueva (V2-16): guardar la misma entidad llevaba el Id
+    // de TransaccionesDebito y save() sobrescribía el histórico con ese Id.
+    const { id: liveId, ...rechazoBody } = newTransaccion;
+    await this.historicoTransaccionesDebitoRepository.insert({
+      ...rechazoBody,
+      idTransaccionOrigen: Number(liveId),
+    });
 
     // Registrar en bitácora
     const tipoTarifaTexto =
@@ -2981,7 +3006,11 @@ export class TransaccionesService {
       'Transacciones',
       mensajeRechazo,
       'CREATE',
-      { createTransaccioneDebitoDto: dto },
+      {
+        numeroSerieMonedero: dto.numeroSerieMonedero ?? null,
+        numeroSerieValidador: dto.numeroSerieValidador ?? null,
+        cantidadPasajes,
+      },
       idUser,
       EnumModulos.TRANSACCIONES,
       EstatusEnumBitcora.ERROR,
@@ -2998,22 +3027,294 @@ export class TransaccionesService {
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
+  }
 
-    const idsFiltrados = clientesFiltrado[0]; // El primer ?ndice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
+  /**
+   * Cierra una transacción ABIERTA (tarifa abierta o por estaciones) en el punto
+   * de la validación actual: calcula el monto con la tarifa de su viaje, aplica
+   * descuentos, descuenta el saldo y la pasa a PAGADO (todo en una TX).
+   * Devuelve el monto cobrado, o null si otra lectura ya la había cerrado.
+   */
+  private async cerrarTransaccionAbierta(
+    transaccionAbiertaFisica: TransaccionesDebito,
+    monedero: Monederos,
+    latitudFinal: number,
+    longitudFinal: number,
+    fechaHoraActual: Date,
+    idUser: number,
+  ): Promise<number | null> {
+    // Obtener variante y tarifa de la transacción existente usando idViaje
+    let varianteUpdate: Variantes | null = null;
+    let tarifaInfoUpdate: any = null;
+
+    if (transaccionAbiertaFisica.idViaje) {
+      const viaje = await this.viajesRepository.findOne({
+        where: { id: transaccionAbiertaFisica.idViaje },
+        relations: ['idVariante2'],
+      });
+
+      if (viaje && viaje.idVariante) {
+        varianteUpdate = await this.variantesRepository.findOne({
+          where: { id: viaje.idVariante },
+        });
+
+        if (varianteUpdate) {
+          const tarifa = await this.tarifasRepository.findOne({
+            where: { idVariante: viaje.idVariante, estatus: 1 },
+          });
+
+          if (tarifa) {
+            tarifaInfoUpdate = {
+              TarifaBase: tarifa.tarifaBase,
+              CostoAdicional: tarifa.costoAdicional,
+              DistanciaBaseKm: tarifa.distanciaBaseKm,
+              IncrementoCadaMetros: tarifa.incrementoCadaMetros,
+              TipoTarifa: tarifa.tipoTarifa,
+              CostoPorEstacion: tarifa.costoPorEstacion,
+              CantidadEstacionesBase: tarifa.cantidadEstacionesBase,
+            };
+          }
+        }
+      }
     }
 
-    // 3. Construir el query din?mico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    // Calcular distancia desde punto inicial hasta punto final usando haversine
+    if (
+      transaccionAbiertaFisica.latitudInicial &&
+      transaccionAbiertaFisica.longitudInicial
+    ) {
+      const puntoInicial = {
+        latitude: transaccionAbiertaFisica.latitudInicial,
+        longitude: transaccionAbiertaFisica.longitudInicial,
+      };
+      const puntoFinal = {
+        latitude: latitudFinal,
+        longitude: longitudFinal,
+      };
+
+      // Calcular distancia en metros usando haversine
+      const distanciaMetros = haversine(puntoInicial, puntoFinal);
+      const distanciaKm = distanciaMetros / 1000; // Convertir a kilómetros
+
+      // Calcular monto basado en la distancia
+      const tarifaBaseUpdate =
+        Number(transaccionAbiertaFisica.monto) ||
+        Number(tarifaInfoUpdate?.TarifaBase) ||
+        0;
+      let montoCalculado = tarifaBaseUpdate;
+
+      // Tarifa por estaciones (TipoTarifa=3): calcular por número de estaciones recorridas
+      if (
+        tarifaInfoUpdate &&
+        Number(tarifaInfoUpdate.TipoTarifa) === EnumTipoTarifa.ESTACIONES
+      ) {
+        const estaciones = this.obtenerEstacionesDeVariante(varianteUpdate);
+        const idxInicio = this.encontrarIndiceEstacionMasCercana(
+          estaciones,
+          Number(transaccionAbiertaFisica.latitudInicial),
+          Number(transaccionAbiertaFisica.longitudInicial),
+        );
+        const idxFin = this.encontrarIndiceEstacionMasCercana(
+          estaciones,
+          Number(latitudFinal),
+          Number(longitudFinal),
+        );
+
+        const costoPorEstacion = tarifaInfoUpdate.CostoPorEstacion
+          ? Number(tarifaInfoUpdate.CostoPorEstacion)
+          : 0;
+        const cantidadBase = tarifaInfoUpdate.CantidadEstacionesBase
+          ? Number(tarifaInfoUpdate.CantidadEstacionesBase)
+          : 0;
+        const estacionesRecorridas =
+          idxInicio !== -1 && idxFin !== -1 ? Math.abs(idxFin - idxInicio) : 0;
+        const extras = Math.max(
+          0,
+          estacionesRecorridas - Math.max(0, cantidadBase),
+        );
+        montoCalculado = parseFloat(
+          (tarifaBaseUpdate + extras * Math.max(0, costoPorEstacion)).toFixed(
+            2,
+          ),
+        );
+      }
+      // Si es tarifa INCREMENTAL (tipoTarifa === 2) y hay configuración de costo adicional
+      else if (tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa === 2) {
+        const costoAdicional = tarifaInfoUpdate.CostoAdicional
+          ? Number(tarifaInfoUpdate.CostoAdicional)
+          : 0;
+        const distanciaBaseKm = tarifaInfoUpdate.DistanciaBaseKm
+          ? Number(tarifaInfoUpdate.DistanciaBaseKm)
+          : 0;
+        const incrementoCadaMetros = tarifaInfoUpdate.IncrementoCadaMetros
+          ? Number(tarifaInfoUpdate.IncrementoCadaMetros)
+          : 0;
+
+        if (costoAdicional > 0 && incrementoCadaMetros > 0) {
+          const distanciaBaseMetros = distanciaBaseKm * 1000;
+
+          // Si la distancia recorrida excede la distancia base, calcular el extra
+          if (distanciaMetros > distanciaBaseMetros) {
+            const distanciaExcedente = distanciaMetros - distanciaBaseMetros;
+            const numeroIncrementos = Math.ceil(
+              distanciaExcedente / incrementoCadaMetros,
+            );
+            const extraPorDistancia = numeroIncrementos * costoAdicional;
+            montoCalculado = tarifaBaseUpdate + extraPorDistancia;
+          }
+        }
+      }
+
+      // Validar que el monto calculado no exceda el cobro máximo
+      if (transaccionAbiertaFisica.cobroMaximo) {
+        const cobroMaximoNum = Number(transaccionAbiertaFisica.cobroMaximo);
+        if (montoCalculado > cobroMaximoNum) {
+          montoCalculado = cobroMaximoNum;
+        }
+      }
+
+      // Aplicar descuentos (igual que en el PATCH)
+      let montoConDescuento = montoCalculado;
+
+      // PASO 1: Aplicar descuento por tipo de pasajero SOLO cuando la tarifa es ABIERTA o ESTACIONES
+      const tipoTarifaUpdate =
+        tarifaInfoUpdate && tarifaInfoUpdate.TipoTarifa
+          ? Number(tarifaInfoUpdate.TipoTarifa)
+          : null;
+
+      if (
+        (tipoTarifaUpdate === EnumTipoTarifa.ABIERTA ||
+          tipoTarifaUpdate === EnumTipoTarifa.ESTACIONES) &&
+        monedero.idTipoPasajero
+      ) {
+        const tipoPasajero = await this.CatTiposPasajerosRepository.findOne({
+          where: { id: monedero.idTipoPasajero },
+          relations: ['CatTipoDescuento'],
+        });
+
+        if (
+          tipoPasajero &&
+          tipoPasajero.cantidad &&
+          tipoPasajero.cantidad > 0 &&
+          tipoPasajero.idCatTipoDescuento
+        ) {
+          const tipoDescuento = Number(tipoPasajero.idCatTipoDescuento);
+          const cantidad = Number(tipoPasajero.cantidad);
+
+          // idCatTipoDescuento: 1 = PORCENTAJE, 2 = MONETARIO
+          if (tipoDescuento === 1) {
+            const descuentoPorcentual = (montoConDescuento * cantidad) / 100;
+            montoConDescuento = montoConDescuento - descuentoPorcentual;
+          } else if (tipoDescuento === 2) {
+            montoConDescuento = montoConDescuento - cantidad;
+          }
+
+          if (montoConDescuento < 0) {
+            montoConDescuento = 0;
+          }
+        }
+      }
+
+      // PASO 2: Aplicar descuento de transbordo
+      if (
+        transaccionAbiertaFisica.descuentoTransbordo !== null &&
+        transaccionAbiertaFisica.descuentoTransbordo !== undefined &&
+        transaccionAbiertaFisica.tipoDescuentoTransbordo !== null
+      ) {
+        const descuentoTransbordo = Number(
+          transaccionAbiertaFisica.descuentoTransbordo,
+        );
+        const tipoDescuentoTransbordo = Number(
+          transaccionAbiertaFisica.tipoDescuentoTransbordo,
+        );
+
+        if (descuentoTransbordo > 0) {
+          if (
+            tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.MONETARIO
+          ) {
+            montoConDescuento = montoConDescuento - descuentoTransbordo;
+          } else if (
+            tipoDescuentoTransbordo === EnumTipoDescuentoTransbordo.PORCENTAJE
+          ) {
+            const descuentoPorcentual =
+              (montoConDescuento * descuentoTransbordo) / 100;
+            montoConDescuento = montoConDescuento - descuentoPorcentual;
+          }
+
+          if (montoConDescuento < 0) {
+            montoConDescuento = 0;
+          }
+        }
+      }
+
+      // Date, no texto: un string se reinterpreta con la zona del equipo.
+      const fechaHoraFinal = fechaHoraActual;
+
+      // Descuento, cierre condicionado e histórico en una sola TX
+      // (H-08 / V2-06): si otra lectura de la misma tarjeta ya cerró
+      // esta ABIERTA (affected = 0), se revierte el descuento y no
+      // se cobra dos veces.
+      try {
+        await this.dataSource.transaction(async (manager) => {
+          const descontado = await this.monederosService.descontarSaldoAtomico(
+            monedero.numeroSerie,
+            montoConDescuento,
+            idUser,
+            manager,
+          );
+          if (!descontado) {
+            throw new BadRequestException(
+              `Saldo insuficiente para cerrar transacción abierta física ID: ${transaccionAbiertaFisica.id}`,
+            );
+          }
+
+          const cierre = await manager
+            .getRepository(TransaccionesDebito)
+            .update(
+              {
+                id: transaccionAbiertaFisica.id,
+                controlTransaccion: EnumControlTransacciones.ABIERTA,
+              },
+              {
+                idTipoTransaccion: EnumTipoTransaccion.DEBITO,
+                monto: montoConDescuento,
+                controlTransaccion: EnumControlTransacciones.PAGADO,
+                latitudFinal: latitudFinal,
+                longitudFinal: longitudFinal,
+                fechaHoraFinal: fechaHoraFinal,
+                distanciaRecorrida: parseFloat(distanciaKm.toFixed(2)),
+              },
+            );
+          if (!cierre.affected) {
+            throw new Error('ABIERTA_YA_CERRADA');
+          }
+
+          const transaccionActualizada = await manager
+            .getRepository(TransaccionesDebito)
+            .findOne({ where: { id: transaccionAbiertaFisica.id } });
+          if (transaccionActualizada) {
+            const { id: liveId, ...transaccionBody } = transaccionActualizada;
+            await manager.getRepository(HistoricoTransaccionesDebito).save({
+              ...transaccionBody,
+              idTransaccionOrigen: Number(liveId),
+            });
+          }
+        });
+        monedero.saldo = Number(monedero.saldo) - montoConDescuento;
+      } catch (cierreError) {
+        if (
+          cierreError instanceof Error &&
+          cierreError.message === 'ABIERTA_YA_CERRADA'
+        ) {
+          return null;
+        }
+        throw cierreError;
+      }
+      return montoConDescuento;
+    }
+
+    return null;
   }
 
   private obtenerEstacionesDeVariante(
@@ -3078,11 +3379,9 @@ export class TransaccionesService {
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
       // Solo la fecha del momento
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())}`;
 
       //Si fechaInicio y fechaFin son null arroja las transacciones del dia de la tabla TransaccionesRecarga y TransaccionesDebito
       if (!fechaInicio && !fechaFin) {
@@ -3107,8 +3406,15 @@ export class TransaccionesService {
       } else {
         //Si fechaInicio y fechaFin no son null arroja las transacciones del dia de la tabla HistoricoTransaccionesRecarga y HistoricoTransaccionesDebito
         //asigna fechaActual solo si el valor de la izquierda es null o undefined
-        fechaInicio = fechaInicio?.split('T')[0] ?? fechaActual;
-        fechaFin = fechaFin?.split('T')[0] ?? fechaActual;
+        fechaInicio = assertIsoDate(
+          fechaInicio?.split('T')[0] ?? fechaActual,
+          'fechaInicio',
+        );
+        fechaFin = assertIsoDate(
+          fechaFin?.split('T')[0] ?? fechaActual,
+          'fechaFin',
+        );
+        assertDateWindow(fechaInicio, fechaFin);
         // Rol 11 (Cajero): solo recargas por IdUsuario (histórico)
         entidadRecarga =
           rol === 11
@@ -3147,7 +3453,6 @@ export class TransaccionesService {
       }
       throw new BadRequestException({
         message: 'Error al obtener transacciones paginado.',
-        error: error.message,
       });
     }
   }
@@ -3170,11 +3475,9 @@ export class TransaccionesService {
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
       // Solo la fecha del momento
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())}`;
 
       //Si fechaInicio y fechaFin son null arroja las transacciones del dia de la tabla TransaccionesDebito
       if (!fechaInicio && !fechaFin) {
@@ -3194,8 +3497,15 @@ export class TransaccionesService {
       } else {
         //Si fechaInicio y fechaFin no son null arroja las transacciones del dia de la tabla HistoricoTransaccionesDebito
         //asigna fechaActual solo si el valor de la izquierda es null o undefined
-        fechaInicio = fechaInicio?.split('T')[0] ?? fechaActual;
-        fechaFin = fechaFin?.split('T')[0] ?? fechaActual;
+        fechaInicio = assertIsoDate(
+          fechaInicio?.split('T')[0] ?? fechaActual,
+          'fechaInicio',
+        );
+        fechaFin = assertIsoDate(
+          fechaFin?.split('T')[0] ?? fechaActual,
+          'fechaFin',
+        );
+        assertDateWindow(fechaInicio, fechaFin);
         entidadDebito = 'HistoricoTransaccionesDebito';
         transacciones = await this.resolverPorRolDebitoQR(
           fechaInicio,
@@ -3227,7 +3537,6 @@ export class TransaccionesService {
       }
       throw new BadRequestException({
         message: 'Error al obtener transacciones débito QR paginado.',
-        error: error.message,
       });
     }
   }
@@ -3247,7 +3556,7 @@ export class TransaccionesService {
       let transacciones;
       const offset = (page - 1) * limit;
 
-      switch (rol) {
+      switch (Number(rol)) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
             `
@@ -3258,8 +3567,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -3352,8 +3661,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -3417,6 +3726,7 @@ AND td.EsQR = 1;
 
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (admin, operador, etc.): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -3434,8 +3744,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -3544,7 +3854,6 @@ AND td.EsQR = 1;
       }
       throw new BadRequestException({
         message: 'Error al obtener transacciones débito QR paginado.',
-        error: error.message,
       });
     }
   }
@@ -3566,7 +3875,7 @@ AND td.EsQR = 1;
       let transacciones;
       const offset = (page - 1) * limit;
 
-      switch (rol) {
+      switch (Number(rol)) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
             `
@@ -3578,8 +3887,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -3757,12 +4066,6 @@ LIMIT ? OFFSET ?;
             Number(offset),
           ];
 
-          console.log('[paginado][rol=11] Query recargas:', queryRecargasRol11);
-          console.log(
-            '[paginado][rol=11] Params recargas:',
-            queryRecargasRol11Params,
-          );
-
           transacciones =
             await this.historicoTransaccionesRecargaRepository.query(
               queryRecargasRol11,
@@ -3830,8 +4133,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -3978,6 +4281,7 @@ AND p.Id = ?
 
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (admin, operador, etc.): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -3990,8 +4294,8 @@ SELECT
     td.Monto AS monto,
     td.LatitudInicial AS latitudInicial,
     td.LongitudInicial AS longitudInicial,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraInicio AS fechaHoraInicio,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
@@ -4163,11 +4467,9 @@ AND m.IdCliente IN (${placeholders})
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new BadRequestException({
-        message: 'Error al obtener transacciones paginadas por rol',
-        error: error.message,
-        details: error.stack,
-      });
+      throw new BadRequestException(
+        'Error al obtener transacciones paginadas por rol',
+      );
     }
   }
 
@@ -4183,14 +4485,14 @@ AND m.IdCliente IN (${placeholders})
       let totalResult;
       let transacciones;
       const offset = (page - 1) * limit;
-      switch (rol) {
+      switch (Number(rol)) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
             `
 SELECT 
-    'DEBITO' AS origenTabla,        -- ?? de qu? tabla viene
+    'DEBITO' AS origenTabla,
     td.Id AS id,
-    ctt.Nombre AS tipoTransaccion,  -- ?? tipo seg?n el cat?logo (RECARGA, DEBITO o RECHAZADO)
+    ctt.Nombre AS tipoTransaccion,
     td.Monto AS monto,
     td.Latitud AS latitud,
     td.Longitud AS longitud,
@@ -4213,7 +4515,7 @@ SELECT
 
 
 
-    -- Pasajero (v?a Monedero)
+    -- Pasajero (via Monedero)
     p.Id AS idPasajero,
     p.Nombre AS nombrePasajero,
     p.ApellidoPaterno AS apellidoPaternoPasajero,
@@ -4234,9 +4536,9 @@ INNER JOIN Clientes c
 UNION ALL
 
 SELECT 
-    'RECARGA' AS origenTabla,       -- ?? solo indica de qu? tabla proviene
+    'RECARGA' AS origenTabla,
     tr.Id AS id,
-    ctt.Nombre AS tipoTransaccion,  -- ?? valor real del tipo
+    ctt.Nombre AS tipoTransaccion,
     tr.Monto AS monto,
     tr.Latitud AS latitud,
     tr.Longitud AS longitud,
@@ -4409,7 +4711,7 @@ FROM (
     INNER JOIN CatTiposTransacciones ctt ON td.IdTipoTransaccion = ctt.Id
     INNER JOIN Monederos m ON td.NumeroSerieMonedero = m.NumeroSerie
     INNER JOIN Pasajeros p ON m.IdPasajero = p.Id
-    WHERE p.Id = ?  -- ?? pasajero espec?fico
+    WHERE p.Id = ?
       AND m.Estatus = 1
 
     UNION ALL
@@ -4419,16 +4721,17 @@ FROM (
     INNER JOIN CatTiposTransacciones ctt ON tr.IdTipoTransaccion = ctt.Id
     INNER JOIN Monederos m ON tr.NumeroSerieMonedero = m.NumeroSerie
     INNER JOIN Pasajeros p ON m.IdPasajero = p.Id
-    WHERE p.Id = ?  -- ?? mismo pasajero
+    WHERE p.Id = ?
       AND m.Estatus = 1
 ) AS transacciones_pasajero;
 
   `,
-            [Number(pasajero.id), Number(pasajero.id)], // <-- Aqu? debe ir como segundo argumento de query()
+            [Number(pasajero.id), Number(pasajero.id)], // <-- Aquí debe ir como segundo argumento de query()
           );
 
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (admin, operador, etc.): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -4477,7 +4780,7 @@ FROM (
   INNER JOIN Clientes c
 	ON m.IdCliente = c.Id
 
-  WHERE m.IdCliente IN (${placeholders})   -- ?? aqu? colocas el ID del cliente que quieres consultar
+  WHERE m.IdCliente IN (${placeholders})
 
   UNION ALL
 
@@ -4523,7 +4826,7 @@ FROM (
   INNER JOIN Clientes c
 	ON m.IdCliente = c.Id
 
-  WHERE m.IdCliente IN (${placeholders})   -- ?? aqu? colocas el ID del cliente que quieres consultar
+  WHERE m.IdCliente IN (${placeholders})
 )
 ORDER BY FHRegistro DESC
 LIMIT ? OFFSET ?;
@@ -4540,14 +4843,14 @@ FROM (
   SELECT td.Id
   FROM TransaccionesDebito td
   INNER JOIN Monederos m ON td.NumeroSerieMonedero = m.NumeroSerie
-  WHERE m.IdCliente IN (${placeholders})   -- ?? aqu? colocas el ID del cliente que quieres consultar
+  WHERE m.IdCliente IN (${placeholders})
 
   UNION ALL
 
   SELECT tr.Id
   FROM TransaccionesRecarga tr
   INNER JOIN Monederos m ON tr.NumeroSerieMonedero = m.NumeroSerie
-  WHERE m.IdCliente IN (${placeholders})   -- ?? aqu? colocas el ID del cliente que quieres consultar
+  WHERE m.IdCliente IN (${placeholders})
 ) AS todas;
 
   `,
@@ -4586,6 +4889,9 @@ FROM (
       if (error instanceof HttpException) {
         throw error;
       }
+      this.logger.error(
+        `Error al obtener transacciones: ${(error as Error)?.message}`,
+      );
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });
@@ -4605,27 +4911,25 @@ FROM (
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
+      const fechaDesfasada = nowDb();
       // Solo la fecha del momento
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())}`;
 
       fechaInicio = fechaActual;
       fechaFin = fechaActual;
       entidadRecarga = 'TransaccionesRecarga';
       entidadDebito = 'TransaccionesDebito';
-      switch (rol) {
+      switch (Number(rol)) {
         case 1:
           transacciones = await this.transaccionesrecargaRepository.query(
             `
 SELECT 
-    'DEBITO' AS origenTabla,        -- ?? de qu? tabla viene
+    'DEBITO' AS origenTabla,
     td.Id AS id,
-    ctt.Nombre AS tipoTransaccion,  -- ?? tipo seg?n el cat?logo (RECARGA, DEBITO o RECHAZADO)
+    ctt.Nombre AS tipoTransaccion,
     td.Monto AS monto,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
     td.NumeroSerieMonedero AS numeroSerieMonedero,
@@ -4645,7 +4949,7 @@ SELECT
     d.Marca AS marcaValidador,
     d.Modelo AS modeloValidador,
 
-    -- Pasajero (v?a Monedero)
+    -- Pasajero (via Monedero)
     p.Id AS idPasajero,
     p.Nombre AS nombrePasajero,
     p.ApellidoPaterno AS apellidoPaternoPasajero,
@@ -4664,15 +4968,15 @@ LEFT JOIN Clientes c
 	ON m.IdCliente = c.Id
     
 -- condiciones
-WHERE DATE(td.FHRegistro) BETWEEN '${fechaInicio}' AND '${fechaFin}'
+WHERE DATE(td.FHRegistro) BETWEEN ? AND ?
 
 
 UNION ALL
 
 SELECT 
-    'RECARGA' AS origenTabla,       -- ?? solo indica de qu? tabla proviene
+    'RECARGA' AS origenTabla,
     tr.Id AS id,
-    ctt.Nombre AS tipoTransaccion,  -- ?? valor real del tipo
+    ctt.Nombre AS tipoTransaccion,
     tr.Monto AS monto,
     tr.LatitudFinal AS latitudFinal,
     tr.LongitudFinal AS longitudFinal,
@@ -4714,19 +5018,20 @@ LEFT JOIN Clientes c
 	ON m.IdCliente = c.Id
     
 -- condiciones
-WHERE DATE(tr.FHRegistro) BETWEEN '${fechaInicio}' AND '${fechaFin}'
+WHERE DATE(tr.FHRegistro) BETWEEN ? AND ?
 
 ORDER BY FHRegistro DESC
         `,
+            [fechaInicio, fechaFin, fechaInicio, fechaFin],
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (admin, operador, etc.): filtrar por idCliente + hijos
           const { ids, placeholders } = await this.clienteHijos(cliente);
           transacciones = await this.transaccionesrecargaRepository.query(
             `
-(
   SELECT 
       'DEBITO' AS origenTabla,
       td.Id AS id,
@@ -4734,8 +5039,8 @@ ORDER BY FHRegistro DESC
       td.Monto AS monto,
       NULL AS latitudInicial,
       NULL AS longitudInicial,
-      td.LatitudFinal AS latitudFinal,
-      td.LongitudFinal AS longitudFinal,
+      COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+      COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
       NULL AS fechaHoraInicio,
       td.FechaHoraFinal AS fechaHoraFinal,
       td.FHRegistro AS fhRegistro,
@@ -4754,7 +5059,7 @@ ORDER BY FHRegistro DESC
       d.Marca AS marcaDispositivo,
       d.Modelo AS modeloDispositivo,
 
-      -- Pasajero (v?a Monedero)
+      -- Pasajero (via Monedero)
       p.Id AS idPasajero,
       p.Nombre AS nombrePasajero,
       p.ApellidoPaterno AS apellidoPaternoPasajero,
@@ -4773,16 +5078,16 @@ LEFT JOIN Clientes c
 	ON m.IdCliente = c.Id
     
 -- condiciones
-WHERE DATE(td.FHRegistro) BETWEEN '${fechaInicio}' AND '${fechaFin}'
-AND m.IdCliente IN (${placeholders})   -- ?? aqu? colocas el ID del cliente que quieres consultar
+WHERE DATE(td.FHRegistro) BETWEEN ? AND ?
+AND m.IdCliente IN (${placeholders})
 
 
 UNION ALL
 
 SELECT 
-    'RECARGA' AS origenTabla,       -- ?? solo indica de qu? tabla proviene
+    'RECARGA' AS origenTabla,
     tr.Id AS id,
-    ctt.Nombre AS tipoTransaccion,  -- ?? valor real del tipo
+    ctt.Nombre AS tipoTransaccion,
     tr.Monto AS monto,
     NULL AS latitudInicial,
     NULL AS longitudInicial,
@@ -4826,13 +5131,13 @@ LEFT JOIN Clientes c
 	ON m.IdCliente = c.Id
     
 -- condiciones
-WHERE DATE(tr.FHRegistro) BETWEEN '${fechaInicio}' AND '${fechaFin}'
-AND m.IdCliente IN (${placeholders})   -- ?? aqu? colocas el ID del cliente que quieres consultar
+WHERE DATE(tr.FHRegistro) BETWEEN ? AND ?
+AND m.IdCliente IN (${placeholders})
 
 ORDER BY FHRegistro DESC
 
         `,
-            [...ids, ...ids],
+            [fechaInicio, fechaFin, ...ids, fechaInicio, fechaFin, ...ids],
           );
           break;
       }
@@ -4857,23 +5162,34 @@ ORDER BY FHRegistro DESC
       if (error instanceof HttpException) {
         throw error;
       }
+      this.logger.error(
+        `Error al obtener transacciones: ${(error as Error)?.message}`,
+      );
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
-        error: error?.message || 'Error desconocido',
       });
     }
   }
 
-  async findOneTransaccionRecarga(id: number) {
+  async findOneTransaccionRecarga(id: number, cliente = 0, rol = 1) {
     try {
-      let transacciones;
+      let whereSql = 'WHERE tr.Id = ?';
+      let params: number[] = [id];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Transaccion no encontrada');
+        }
+        whereSql += ` AND m.IdCliente IN (${placeholders})`;
+        params = [id, ...ids];
+      }
 
-      transacciones = await this.transaccionesrecargaRepository.query(
+      const transacciones = await this.transaccionesrecargaRepository.query(
         `
 SELECT 
-    'RECARGA' AS origenTabla,       -- ?? solo indica de qu? tabla proviene
+    'RECARGA' AS origenTabla,
     tr.Id AS id,
-    ctt.Nombre AS tipoTransaccion,  -- ?? valor real del tipo
+    ctt.Nombre AS tipoTransaccion,
     tr.Monto AS monto,
     tr.LatitudFinal AS latitudFinal,
     tr.LongitudFinal AS longitudFinal,
@@ -4910,14 +5226,14 @@ LEFT JOIN Pasajeros p
     ON m.IdPasajero = p.Id
 INNER JOIN Clientes c
 	ON m.IdCliente = c.Id
-    WHERE tr.Id = ?
+    ${whereSql}
 
         `,
-        [id],
+        params,
       );
 
-      if (!transacciones)
-        throw new NotFoundException('Transaccion no encontradas');
+      if (!transacciones || transacciones.length === 0)
+        throw new NotFoundException('Transaccion no encontrada');
 
       // ?? Transformaci?n de datos (ids ? number, nombreCompleto)
       const data = transacciones.map((item) => ({
@@ -4938,25 +5254,55 @@ INNER JOIN Clientes c
       if (error instanceof HttpException) {
         throw error;
       }
+      this.logger.error(
+        `Error al obtener transacciones: ${(error as Error)?.message}`,
+      );
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });
     }
   }
 
-  async findOneTransaccionDebito(id: number) {
+  async findOneTransaccionDebito(id: number | string, cliente = 0, rol = 1) {
     try {
-      let transacciones;
+      // H-66: acepta id numérico o PublicId (ULID); se resuelve a Id numérico.
+      let idNum: number;
+      if (esPublicId(id)) {
+        const row = await this.transaccionesdebitoRepository.findOne({
+          where: { publicId: String(id) },
+        });
+        if (!row) {
+          throw new NotFoundException('Transaccion no encontrada');
+        }
+        idNum = Number(row.id);
+      } else {
+        idNum = Number(id);
+        if (!Number.isInteger(idNum) || idNum <= 0) {
+          throw new NotFoundException('Transaccion no encontrada');
+        }
+      }
 
-      transacciones = await this.transaccionesrecargaRepository.query(
+      let whereSql = 'WHERE td.Id = ?';
+      let params: number[] = [idNum];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Transaccion no encontrada');
+        }
+        whereSql += ` AND m.IdCliente IN (${placeholders})`;
+        params = [idNum, ...ids];
+      }
+
+      const transacciones = await this.transaccionesrecargaRepository.query(
         `
-SELECT 
-    'DEBITO' AS origenTabla,        -- ?? de qu? tabla viene
+SELECT
+    'DEBITO' AS origenTabla,
     td.Id AS id,
-    ctt.Nombre AS tipoTransaccion,  -- ?? tipo seg?n el cat?logo (RECARGA, DEBITO o RECHAZADO)
+    td.PublicId AS publicId,
+    ctt.Nombre AS tipoTransaccion,
     td.Monto AS monto,
-    td.LatitudFinal AS latitudFinal,
-    td.LongitudFinal AS longitudFinal,
+    COALESCE(td.LatitudFinal, td.LatitudInicial) AS latitudFinal,
+    COALESCE(td.LongitudFinal, td.LongitudInicial) AS longitudFinal,
     td.FechaHoraFinal AS fechaHoraFinal,
     td.FHRegistro AS fhRegistro,
     td.NumeroSerieMonedero AS numeroSerieMonedero,
@@ -4975,7 +5321,7 @@ SELECT
     d.Marca AS marcaValidador,
     d.Modelo AS modeloValidador,
 
-    -- Pasajero (v?a Monedero)
+    -- Pasajero (via Monedero)
     p.Id AS idPasajero,
     p.Nombre AS nombrePasajero,
     p.ApellidoPaterno AS apellidoPaternoPasajero,
@@ -4992,14 +5338,14 @@ LEFT JOIN Pasajeros p
     ON m.IdPasajero = p.Id
 INNER JOIN Clientes c
 	ON m.IdCliente = c.Id
-    WHERE td.Id = ?
+    ${whereSql}
 
         `,
-        [id],
+        params,
       );
 
-      if (!transacciones)
-        throw new NotFoundException('Transaccion no encontradas');
+      if (!transacciones || transacciones.length === 0)
+        throw new NotFoundException('Transaccion no encontrada');
       // ?? Transformaci?n de datos (ids ? number, nombreCompleto)
       const data = transacciones.map((item) => ({
         ...item,
@@ -5019,6 +5365,9 @@ INNER JOIN Clientes c
       if (error instanceof HttpException) {
         throw error;
       }
+      this.logger.error(
+        `Error al obtener transacciones: ${(error as Error)?.message}`,
+      );
       throw new BadRequestException({
         message: 'Error al obtener transacciones',
       });
@@ -5042,15 +5391,14 @@ INNER JOIN Clientes c
     getHistoricoRecargasDto: GetHistoricoRecargasDto,
   ): Promise<ApiResponseCommon> {
     try {
-      console.log('[getHistoricoRecargasPaginado] Inicio - Parámetros:', {
-        idUser,
-        email,
-        cliente,
-        rol,
-        dto: getHistoricoRecargasDto,
-      });
-
-      const { page, limit, fechaInicio, fechaFin } = getHistoricoRecargasDto;
+      const { page, limit } = getHistoricoRecargasDto;
+      let { fechaInicio, fechaFin } = getHistoricoRecargasDto;
+      if (fechaInicio) {
+        fechaInicio = assertIsoDate(fechaInicio.split('T')[0], 'fechaInicio');
+      }
+      if (fechaFin) {
+        fechaFin = assertIsoDate(fechaFin.split('T')[0], 'fechaFin');
+      }
       const offset = (page - 1) * limit;
 
       // Determinar qué tablas usar según las fechas
@@ -5059,10 +5407,8 @@ INNER JOIN Clientes c
       function pad(n: number) {
         return n < 10 ? '0' + n : n;
       }
-      const ahora = new Date();
-      const desfaseMs = -6 * 60 * 60 * 1000; // -6 horas
-      const fechaDesfasada = new Date(ahora.getTime() + desfaseMs);
-      const fechaActual = `${fechaDesfasada.getFullYear()}-${pad(fechaDesfasada.getMonth() + 1)}-${pad(fechaDesfasada.getDate())}`;
+      const fechaDesfasada = nowDb();
+      const fechaActual = `${fechaDesfasada.getUTCFullYear()}-${pad(fechaDesfasada.getUTCMonth() + 1)}-${pad(fechaDesfasada.getUTCDate())}`;
 
       // Construir condición de fechas (separadas para cada tabla)
       // Usar FHRegistro para el filtro de fechas
@@ -5079,9 +5425,9 @@ INNER JOIN Clientes c
         // Esto asegura que se muestren todas las recargas del día actual
         usarTablaActual = true;
         usarTablaHistorico = true;
-        // Agregar condición para histórico: solo del día de hoy
-        fechaConditionHistorico = `AND DATE(htr.FHRegistro) = '${fechaActual}'`;
-        fechaConditionActivo = `AND DATE(tr.FHRegistro) = '${fechaActual}'`;
+        fechaConditionHistorico = `AND DATE(htr.FHRegistro) = ?`;
+        fechaConditionActivo = `AND DATE(tr.FHRegistro) = ?`;
+        queryParams.push(assertIsoDate(fechaActual, 'fechaActual'));
       } else {
         // Con fechas: si incluyen hoy, usar ambas tablas
         const fechaInicioComparar = fechaInicio?.split('T')[0] ?? fechaActual;
@@ -5109,25 +5455,12 @@ INNER JOIN Clientes c
         }
       }
 
-      console.log('[getHistoricoRecargasPaginado] Configuración de tablas:', {
-        usarTablaActual,
-        usarTablaHistorico,
-        fechaActual,
-        fechaInicio,
-        fechaFin,
-        fechaConditionHistorico,
-        fechaConditionActivo,
-      });
-
       let recargas: any[];
       let totalResult: any[];
 
-      switch (rol) {
+      switch (Number(rol)) {
         case 1:
           // SA = Todas las recargas
-          console.log(
-            '[getHistoricoRecargasPaginado] Caso 1 - Ejecutando query',
-          );
           if (usarTablaActual && usarTablaHistorico) {
             // Consultar ambas tablas con UNION ALL
             recargas = await this.historicoTransaccionesRecargaRepository.query(
@@ -5382,17 +5715,11 @@ ${fechaCondition};
                 queryParams,
               );
           }
-          console.log('[getHistoricoRecargasPaginado] Caso 1 - Resultado:', {
-            cantidad: Array.isArray(recargas) ? recargas.length : 'no es array',
-            total: totalResult?.[0]?.total,
-          });
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (admin, etc.): filtrar por idCliente + hijos
-          console.log(
-            '[getHistoricoRecargasPaginado] Default (clienteHijos) - Ejecutando query',
-          );
           const { ids, placeholders } = await this.clienteHijos(cliente);
 
           if (usarTablaActual && usarTablaHistorico) {
@@ -5649,35 +5976,12 @@ ${fechaCondition};
                 [...ids, ...queryParams],
               );
           }
-          console.log(
-            '[getHistoricoRecargasPaginado] Default (clienteHijos) - Resultado:',
-            {
-              cantidad: Array.isArray(recargas)
-                ? recargas.length
-                : 'no es array',
-              total: totalResult?.[0]?.total,
-            },
-          );
           break;
 
         case 3:
           // Cajero = Solo sus recargas (por IdUsuario) Y filtrar por clientes hijos
-          console.log(
-            '[getHistoricoRecargasPaginado] Caso 3 - Ejecutando query, idUser:',
-            idUser,
-            'cliente:',
-            cliente,
-          );
           const { ids: idsCajero, placeholders: placeholdersCajero } =
             await this.clienteHijos(cliente);
-          console.log(
-            '[getHistoricoRecargasPaginado] Caso 3 - Clientes hijos obtenidos:',
-            {
-              ids: idsCajero,
-              placeholders: placeholdersCajero,
-              cantidad: idsCajero?.length,
-            },
-          );
 
           if (usarTablaActual && usarTablaHistorico) {
             // Consultar ambas tablas con UNION ALL
@@ -5815,10 +6119,6 @@ ${fechaCondition};
                 [idUser, ...idsCajero, ...queryParams],
               );
           }
-          console.log('[getHistoricoRecargasPaginado] Caso 3 - Resultado:', {
-            cantidad: Array.isArray(recargas) ? recargas.length : 'no es array',
-            total: totalResult?.[0]?.total,
-          });
           break;
 
         case 9:
@@ -5858,20 +6158,8 @@ ${fechaCondition};
           // Buscar recargas solo en HistoricoTransaccionesRecarga
           // Filtrar por: IdUsuario del usuario Y clientes hijos (solo las recargas que él realizó en su cliente y clientes hijos)
           // Para pasajero: solo mostrar las recargas donde IdUsuario = idUser AND m.IdCliente IN (clientes hijos)
-          console.log(
-            '[getHistoricoRecargasPaginado] Caso 9 - Obteniendo clientes hijos para cliente:',
-            cliente,
-          );
           const { ids: idsPasajero, placeholders: placeholdersPasajero } =
             await this.clienteHijos(cliente);
-          console.log(
-            '[getHistoricoRecargasPaginado] Caso 9 - Clientes hijos obtenidos:',
-            {
-              ids: idsPasajero,
-              placeholders: placeholdersPasajero,
-              cantidad: idsPasajero?.length,
-            },
-          );
 
           const condicionesWhereHistorico = `htr.IdUsuario = ? AND (m.IdCliente IN (${placeholdersPasajero}) OR m.IdCliente IS NULL)`;
           const paramsWhere = [idUser, ...idsPasajero, ...queryParams];
@@ -5928,10 +6216,6 @@ LIMIT ? OFFSET ?;
             [...paramsWhere, limit, offset],
           );
 
-          // Query para total
-          console.log(
-            '[getHistoricoRecargasPaginado] Caso 9 - Ejecutando query de total',
-          );
           totalResult =
             await this.historicoTransaccionesRecargaRepository.query(
               `
@@ -5943,34 +6227,13 @@ ${fechaConditionHistorico};
             `,
               paramsWhere,
             );
-          console.log('[getHistoricoRecargasPaginado] Caso 9 - Resultado:', {
-            cantidad: Array.isArray(recargas) ? recargas.length : 'no es array',
-            total: totalResult?.[0]?.total,
-          });
           break;
       }
 
-      console.log('[getHistoricoRecargasPaginado] Procesando resultados:', {
-        recargasEsArray: Array.isArray(recargas),
-        recargasLength: Array.isArray(recargas)
-          ? recargas.length
-          : 'no es array',
-        totalResult,
-        total: totalResult?.[0]?.total,
-      });
-
       const total = Number(totalResult[0]?.total || 0);
-      console.log('[getHistoricoRecargasPaginado] Total calculado:', total);
 
       // Validar que recargas sea un array
       if (!Array.isArray(recargas)) {
-        console.error(
-          '[getHistoricoRecargasPaginado] ERROR: recargas no es un array:',
-          {
-            tipo: typeof recargas,
-            valor: recargas,
-          },
-        );
         throw new BadRequestException({
           message: 'Error: las recargas no se obtuvieron correctamente',
         });
@@ -5993,11 +6256,6 @@ ${fechaConditionHistorico};
           : null,
       }));
 
-      console.log(
-        '[getHistoricoRecargasPaginado] Datos transformados - cantidad:',
-        data.length,
-      );
-
       const result: ApiResponseCommon = {
         data: data,
         paginated: {
@@ -6007,30 +6265,13 @@ ${fechaConditionHistorico};
         },
       };
 
-      console.log('[getHistoricoRecargasPaginado] Respuesta final:', {
-        cantidadData: data.length,
-        total,
-        page,
-        lastPage: Math.ceil(total / limit),
-      });
-
       return result;
     } catch (error) {
-      console.error('[getHistoricoRecargasPaginado] ERROR:', {
-        message: error.message,
-        stack: error.stack,
-        error: error,
-        rol,
-        cliente,
-        email,
-        dto: getHistoricoRecargasDto,
-      });
       if (error instanceof HttpException) {
         throw error;
       }
       throw new BadRequestException({
         message: 'Error al obtener histórico de recargas',
-        error: error.message,
       });
     }
   }

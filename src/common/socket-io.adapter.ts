@@ -3,6 +3,10 @@ import { MessageMappingProperties } from '@nestjs/websockets';
 import { Observable, fromEvent, EMPTY } from 'rxjs';
 import { mergeMap, filter } from 'rxjs/operators';
 import { Server, ServerOptions } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import { Redis } from 'ioredis';
+import { Logger } from '@nestjs/common';
+import { isOriginAllowed } from './cors-origins';
 
 /**
  * Adaptador de Socket.IO para NestJS
@@ -11,6 +15,29 @@ import { Server, ServerOptions } from 'socket.io';
  */
 export class SocketIOAdapter implements WebSocketAdapter {
   private static ioServer: Server | null = null;
+  private static readonly logger = new Logger('SocketIOAdapter');
+
+  /**
+   * H-16: escalado horizontal. Si REDIS_URL está definido, conecta el
+   * @socket.io/redis-adapter para propagar eventos entre instancias. Sin la
+   * variable, el servidor sigue en memoria (comportamiento actual, local).
+   */
+  private static attachRedis(server: Server): void {
+    const url = process.env.REDIS_URL;
+    if (!url) return;
+    try {
+      const pub = new Redis(url, { lazyConnect: false, maxRetriesPerRequest: 3 });
+      const sub = pub.duplicate();
+      pub.on('error', (e) => this.logger.error(`Redis pub: ${e.message}`));
+      sub.on('error', (e) => this.logger.error(`Redis sub: ${e.message}`));
+      server.adapter(createAdapter(pub, sub));
+      this.logger.log('Socket.IO con adaptador Redis (escalado horizontal).');
+    } catch (e) {
+      this.logger.error(
+        `No se pudo conectar el adaptador Redis; se sigue en memoria: ${(e as Error).message}`,
+      );
+    }
+  }
 
   constructor(private app: INestApplicationContext) {}
 
@@ -45,15 +72,22 @@ export class SocketIOAdapter implements WebSocketAdapter {
         : SocketIOAdapter.ioServer;
     }
 
-    // Crear UNA ÚNICA instancia del servidor Socket.IO adjunto al servidor HTTP de NestJS
+    // Crear UNA ÚNICA instancia del servidor Socket.IO adjunto al servidor HTTP de NestJS.
+    // El CORS es del servidor (no del namespace): se fija siempre con la allowlist de HTTP,
+    // sin importar qué gateway se cree primero; nunca '*'.
     SocketIOAdapter.ioServer = new Server(httpServer, {
       ...options,
-      cors: options?.cors || {
-        origin: '*',
+      cors: {
+        origin: (
+          origin: string | undefined,
+          cb: (e: Error | null, ok?: boolean) => void,
+        ) => cb(null, isOriginAllowed(origin)),
         methods: ['GET', 'POST'],
         credentials: true,
       },
     });
+
+    SocketIOAdapter.attachRedis(SocketIOAdapter.ioServer);
 
     // Si se solicita un namespace, retornarlo
     if (options?.namespace) {

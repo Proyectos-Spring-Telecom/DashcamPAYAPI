@@ -22,13 +22,17 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { ApiResponseCommon, ApiCrudResponse } from 'src/common/ApiResponse';
+import { Roles } from 'src/guard/roles.decorator';
+import { TenantExempt } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Catálogo métodos de pago')
 @ApiBearerAuth('bearer-token')
+@TenantExempt('Catálogo global sin IdCliente')
 @Controller('cat-metodo-pago')
 export class CatMetodoPagoController {
   constructor(private readonly catMetodoPagoService: CatMetodoPagoService) {}
 
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard)
   @Post()
   @ApiOperation({
@@ -56,6 +60,7 @@ export class CatMetodoPagoController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Roles(1, 2, 3, 9, 11)
   @Get('list')
   @ApiOperation({
     summary: 'Obtener listado de métodos de pago',
@@ -75,6 +80,7 @@ export class CatMetodoPagoController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Roles(1, 2, 3, 9, 11)
   @Get(':id')
   @ApiOperation({
     summary: 'Obtener un método de pago por ID',
@@ -97,6 +103,7 @@ export class CatMetodoPagoController {
     return this.catMetodoPagoService.findOne(id);
   }
 
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard)
   @Put(':id')
   @ApiOperation({
@@ -132,6 +139,7 @@ export class CatMetodoPagoController {
     );
   }
 
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard)
   @Patch(':id')
   @ApiOperation({
@@ -164,6 +172,7 @@ export class CatMetodoPagoController {
     );
   }
 
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
   @ApiOperation({

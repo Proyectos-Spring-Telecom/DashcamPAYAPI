@@ -2,6 +2,7 @@ import { ApiProperty, PartialType } from '@nestjs/swagger';
 import { CreateInstalacionesDto } from './create-instalacione.dto';
 import {
   IsArray,
+  ArrayMaxSize,
   IsIn,
   IsInt,
   IsNumber,
@@ -58,6 +59,7 @@ export class UpdateInstalacioneDto extends PartialType(CreateInstalacionesDto) {
   })
   @IsOptional({ message: 'Los IdContadores son opcionales' })
   @IsArray({ message: 'IdContadores debe ser un array' })
+  @ArrayMaxSize(20, { message: 'No se permiten más de 20 contadores' })
   @IsNumber({}, { each: true, message: 'Cada IdContador debe ser un número' })
   idContadores?: number[];
 
@@ -73,6 +75,7 @@ export class UpdateInstalacioneDto extends PartialType(CreateInstalacionesDto) {
     message: 'Para saber el estado de los componentes en caso de cambiarlos',
   })
   @IsArray({ message: 'ContadoresAnteriores debe ser un array' })
+  @ArrayMaxSize(20, { message: 'No se permiten más de 20 contadores' })
   @ValidateNested({ each: true })
   @Type(() => ContadorAnteriorDto)
   contadoresAnteriores?: ContadorAnteriorDto[];

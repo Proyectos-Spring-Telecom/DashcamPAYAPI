@@ -1,6 +1,7 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { CatTipoTarifaService } from './cat-tipo-tarifa.service';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import {
   ApiBearerAuth,
   ApiTags,
@@ -12,6 +13,7 @@ import { ApiResponseCommon } from 'src/common/ApiResponse';
 @ApiTags('Catálogo tipo tarifa')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2, 3, 11)
 @Controller('cat-tipo-tarifa')
 export class CatTipoTarifaController {
   constructor(private readonly catTipoTarifaService: CatTipoTarifaService) {}

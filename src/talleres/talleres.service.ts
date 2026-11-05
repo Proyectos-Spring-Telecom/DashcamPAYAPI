@@ -1,3 +1,4 @@
+import { clienteHijosDesdeSp, clientesPermitidos, tieneIdsTenant } from 'src/common/tenant/ownership-resolvers';
 import {
   BadRequestException,
   HttpException,
@@ -7,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { CreateTallereDto } from './dto/create-tallere.dto';
 import { UpdateTallereDto } from './dto/update-tallere.dto';
+import { forbidTenantMove } from 'src/common/tenant/forbid-tenant-move';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Talleres } from 'src/entities/Talleres';
 import { Repository } from 'typeorm';
@@ -27,8 +29,23 @@ export class TalleresService {
     @InjectRepository(Clientes)
     private readonly clienteRepository: Repository<Clientes>,
   ) {}
-  async create(createTallereDto: CreateTallereDto, idUser) {
+  async create(
+    createTallereDto: CreateTallereDto,
+    idUser,
+    clienteActor = 0,
+    rol = 1,
+  ) {
     try {
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(createTallereDto.idCliente))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       const create = await this.talleresRepository.create(createTallereDto);
       const saved = await this.talleresRepository.save(create);
       const result: ApiCrudResponse = {
@@ -73,25 +90,25 @@ export class TalleresService {
   }
 
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-    const idsFiltrados = clientesFiltrado[0];
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] };
-    }
-    const placeholders = ids.map(() => '?').join(',');
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
+  }
 
-    return { ids, placeholders };
+  private async assertTallerTenant(
+    taller: { idCliente?: number | null },
+    id: number,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids) || !ids.includes(Number(taller.idCliente))) {
+      throw new NotFoundException('No se ha encontrado el taller solicitado');
+    }
   }
 
   async findAll(req: any) {
     try {
-      const { ids, placeholders: _placeholders } = await this.clienteHijos(
+      const { ids, placeholders } = await this.clienteHijos(
         Number(req.user.cliente),
       );
 
@@ -102,9 +119,9 @@ export class TalleresService {
           c.nombre AS nombreCliente
         FROM Talleres t
         JOIN Clientes c ON t.idCliente = c.id
-        WHERE t.idCliente IN (?)
+        WHERE t.idCliente IN (${placeholders})
         `,
-        [ids],
+        [...ids],
       );
       return talleres;
     } catch (error) {
@@ -123,11 +140,11 @@ export class TalleresService {
     limit: number,
   ): Promise<ApiResponseCommon> {
     try {
-      const { ids, placeholders: _placeholders } = await this.clienteHijos(
+      const { ids, placeholders } = await this.clienteHijos(
         Number(req.user.cliente),
       );
 
-      if (ids.length === 0) {
+      if (!tieneIdsTenant(ids)) {
         return {
           data: [],
           paginated: {
@@ -148,11 +165,11 @@ export class TalleresService {
           c.nombre AS nombreCliente
         FROM Talleres t
         JOIN Clientes c ON t.idCliente = c.id
-        WHERE t.idCliente IN (?)
+        WHERE t.idCliente IN (${placeholders})
         ORDER BY t.id DESC
         LIMIT ? OFFSET ?
         `,
-        [ids, limit, offset],
+        [...ids, limit, offset],
       );
 
       // Query para obtener el total
@@ -161,9 +178,9 @@ export class TalleresService {
         SELECT COUNT(*) AS total
         FROM Talleres t
         JOIN Clientes c ON t.idCliente = c.id
-        WHERE t.idCliente IN (?)
+        WHERE t.idCliente IN (${placeholders})
         `,
-        [ids],
+        [...ids],
       );
 
       const total = totalResult[0]?.total || 0;
@@ -188,12 +205,38 @@ export class TalleresService {
     }
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, cliente = 0, rol = 1) {
     try {
-      const data = await this.talleresRepository.findOne({ where: { id: id } });
-      if (!data)
+      if (Number(rol) === 1) {
+        const data = await this.talleresRepository.findOne({
+          where: { id: id },
+        });
+        if (!data) {
+          throw new NotFoundException(
+            'No se ha encontrado el taller solicitado',
+          );
+        }
+        return data;
+      }
+
+      const { ids, placeholders } = await this.clienteHijos(cliente);
+      if (!tieneIdsTenant(ids)) {
         throw new NotFoundException('No se ha encontrado el taller solicitado');
-      return data;
+      }
+
+      const rows = await this.talleresRepository.query(
+        `
+        SELECT t.*
+        FROM Talleres t
+        WHERE t.Id = ? AND t.IdCliente IN (${placeholders})
+        LIMIT 1
+        `,
+        [id, ...ids],
+      );
+      if (!rows?.length) {
+        throw new NotFoundException('No se ha encontrado el taller solicitado');
+      }
+      return rows[0];
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -204,13 +247,26 @@ export class TalleresService {
     }
   }
 
-  async update(id: number, updateTallereDto: UpdateTallereDto, idUser: number) {
+  async update(
+    id: number,
+    updateTallereDto: UpdateTallereDto,
+    idUser: number,
+    cliente = 0,
+    rol = 1,
+  ) {
     try {
       const exist = await this.talleresRepository.findOne({
         where: { id: id },
       });
       if (!exist)
         throw new NotFoundException('No se ha encontrado el taller solicitado');
+      await this.assertTallerTenant(exist, id, cliente, rol);
+      forbidTenantMove(
+        exist.idCliente,
+        updateTallereDto as any,
+        'idCliente',
+        'Taller no encontrado',
+      );
       await this.talleresRepository.update(id, updateTallereDto);
       const result: ApiCrudResponse = {
         status: 'success',
@@ -254,13 +310,14 @@ export class TalleresService {
     }
   }
 
-  async remove(id: number, idUser: number) {
+  async remove(id: number, idUser: number, cliente = 0, rol = 1) {
     let exist: any; // Declaramos fuera del try para poder usarlo en el catch
 
     try {
       exist = await this.talleresRepository.findOne({ where: { id } });
       if (!exist)
         throw new NotFoundException('No se ha encontrado el taller solicitado');
+      await this.assertTallerTenant(exist, id, cliente, rol);
 
       exist.estatus = 0;
       await this.talleresRepository.update(id, exist);
@@ -309,13 +366,14 @@ export class TalleresService {
     }
   }
 
-  async activar(id: number, idUser: number) {
+  async activar(id: number, idUser: number, cliente = 0, rol = 1) {
     let exist: any; // Declaramos fuera del try para poder usarlo en el catch
 
     try {
       exist = await this.talleresRepository.findOne({ where: { id } });
       if (!exist)
         throw new NotFoundException('No se ha encontrado el taller solicitado');
+      await this.assertTallerTenant(exist, id, cliente, rol);
 
       exist.estatus = 1;
       await this.talleresRepository.update(id, exist);

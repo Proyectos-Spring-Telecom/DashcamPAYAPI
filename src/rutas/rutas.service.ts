@@ -1,3 +1,8 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
+import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
 import {
   BadRequestException,
   HttpException,
@@ -21,6 +26,7 @@ import { UsuariosZonas } from 'src/entities/UsuariosZonas';
 import { UpdateRutasEstatusDto } from './dto/update-ruta-estatus.dto';
 import { Clientes } from 'src/entities/Clientes';
 import { EnumModulos } from 'src/common/estatus.enum';
+import { forbidTenantMove } from 'src/common/tenant/forbid-tenant-move';
 
 @Injectable()
 export class RutasService {
@@ -46,17 +52,40 @@ export class RutasService {
     createRutaDto: CreateRutaDto,
   ): Promise<ApiCrudResponse> {
     try {
+      // N-07: 404 uniforme (no revelar si la zona existe en otro tenant).
+      await assertPadresEnTenant(
+        this.rutasRepository.manager.connection,
+        { cliente, rol, userId: idUser },
+        { zona: createRutaDto.idZona },
+      );
+      await assertPadresEnTenant(
+        this.rutasRepository.manager.connection,
+        { cliente, rol, userId: idUser },
+        { zona: createRutaDto.idZonaFin || undefined },
+      );
       const zona = await this.zonasRepository.findOne({
         where: { id: createRutaDto.idZona },
       });
       if (!zona) throw new NotFoundException('Zona no encontrada');
 
       // Si tiene idZonaFin, validar que exista
+      let zonaFin: Zonas | null = null;
       if (createRutaDto.idZonaFin) {
-        const zonaFin = await this.zonasRepository.findOne({
+        zonaFin = await this.zonasRepository.findOne({
           where: { id: createRutaDto.idZonaFin },
         });
         if (!zonaFin) throw new NotFoundException('Zona final no encontrada');
+      }
+
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        if (
+          !tieneIdsTenant(ids) ||
+          !ids.includes(Number(zona.idCliente)) ||
+          (zonaFin != null && !ids.includes(Number(zonaFin.idCliente)))
+        ) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
       }
 
       const newRuta = this.rutasRepository.create(createRutaDto);
@@ -146,29 +175,13 @@ export class RutasService {
       }
       throw new InternalServerErrorException({
         message: 'Error al crear ruta',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   private async consultarRutasPaginado(
@@ -328,6 +341,7 @@ WHERE
         );
         break;
 
+      case 3:
       default:
         // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
         data = await this.consultarRutasPaginado(cliente, limit, offset);
@@ -492,6 +506,7 @@ ORDER BY ru.Id DESC
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           rutas = await this.consultarRutasListado(cliente);
@@ -526,7 +541,6 @@ ORDER BY ru.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener listado de rutas',
-        error: error.message,
       });
     }
   }
@@ -615,7 +629,6 @@ ORDER BY ru.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener rutas por zona',
-        error: error.message,
       });
     }
   }
@@ -701,7 +714,6 @@ ORDER BY ru.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener rutas por cliente',
-        error: error.message,
       });
     }
   }
@@ -821,6 +833,7 @@ ORDER BY ru.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Consulta de datos paginados Usuario SuperAdministrador
           ruta = await this.consultarRutasOne(id, cliente);
@@ -855,7 +868,6 @@ ORDER BY ru.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al obtener una ruta',
-        error: error.message,
       });
     }
   }
@@ -871,6 +883,26 @@ ORDER BY ru.Id DESC;
     updateRutasEstatusDto: UpdateRutasEstatusDto,
   ) {
     try {
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Ruta no encontrada');
+        }
+        const owned = await this.rutasRepository.query(
+          `
+SELECT ru.Id
+FROM Rutas ru
+INNER JOIN Zonas z ON ru.IdZona = z.Id
+WHERE ru.Id = ? AND z.IdCliente IN (${placeholders})
+LIMIT 1
+          `,
+          [id, ...ids],
+        );
+        if (!owned?.length) {
+          throw new NotFoundException('Ruta no encontrada');
+        }
+      }
+
       const ruta = await this.rutasRepository.findOne({ where: { id: id } });
       if (!ruta) throw new NotFoundException('Ruta no encontrada');
 
@@ -917,7 +949,6 @@ ORDER BY ru.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar estatus de una ruta',
-        error: error.message,
       });
     }
   }
@@ -933,8 +964,58 @@ ORDER BY ru.Id DESC;
     updateRutaDto: UpdateRutaDto,
   ) {
     try {
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Ruta no encontrada');
+        }
+        const owned = await this.rutasRepository.query(
+          `
+SELECT ru.Id
+FROM Rutas ru
+INNER JOIN Zonas z ON ru.IdZona = z.Id
+WHERE ru.Id = ? AND z.IdCliente IN (${placeholders})
+LIMIT 1
+          `,
+          [id, ...ids],
+        );
+        if (!owned?.length) {
+          throw new NotFoundException('Ruta no encontrada');
+        }
+      }
+
       const ruta = await this.rutasRepository.findOne({ where: { id: id } });
       if (!ruta) throw new NotFoundException('Ruta no encontrada');
+      forbidTenantMove(
+        (ruta as any).idCliente,
+        updateRutaDto as any,
+        'idCliente',
+        'Ruta no encontrada',
+      );
+      if (
+        updateRutaDto.idZona !== undefined &&
+        Number(updateRutaDto.idZona) !== Number(ruta.idZona)
+      ) {
+        const zonaNueva = await this.zonasRepository.findOne({
+          where: { id: updateRutaDto.idZona },
+        });
+        const zonaActual = await this.zonasRepository.findOne({
+          where: { id: ruta.idZona },
+        });
+        if (
+          !zonaNueva ||
+          !zonaActual ||
+          Number(zonaNueva.idCliente) !== Number(zonaActual.idCliente)
+        ) {
+          throw new NotFoundException('Ruta no encontrada');
+        }
+      }
+      // N-07: idZonaFin no se validaba; también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.rutasRepository.manager.connection,
+        { cliente, rol },
+        { zona: updateRutaDto.idZonaFin },
+      );
 
       await this.rutasRepository.update(id, updateRutaDto);
 
@@ -978,7 +1059,6 @@ ORDER BY ru.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar ruta',
-        error: error.message,
       });
     }
   }
@@ -986,8 +1066,28 @@ ORDER BY ru.Id DESC;
   // ========================================
   // 🔹 ELIMINADO LOGICO
   // ========================================
-  async remove(id: number, idUser: number, _rol: number) {
+  async remove(id: number, idUser: number, cliente: number, rol: number) {
     try {
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Ruta no encontrada');
+        }
+        const owned = await this.rutasRepository.query(
+          `
+SELECT ru.Id
+FROM Rutas ru
+INNER JOIN Zonas z ON ru.IdZona = z.Id
+WHERE ru.Id = ? AND z.IdCliente IN (${placeholders})
+LIMIT 1
+          `,
+          [id, ...ids],
+        );
+        if (!owned?.length) {
+          throw new NotFoundException('Ruta no encontrada');
+        }
+      }
+
       const ruta = await this.rutasRepository.findOne({ where: { id: id } });
       if (!ruta) throw new NotFoundException('Ruta no encontrada');
 
@@ -1033,7 +1133,6 @@ ORDER BY ru.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al eliminado logico una ruta',
-        error: error.message,
       });
     }
   }
@@ -1054,6 +1153,7 @@ ORDER BY ru.Id DESC;
           if (!ruta) throw new NotFoundException('Ruta no encontrada');
           break;
 
+        case 3:
         default:
           // Usuarios normales - solo sus zonas asignadas
           throw new BadRequestException(`Acceso denegado`);
@@ -1102,7 +1202,6 @@ ORDER BY ru.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al eliminado permanente una ruta',
-        error: error.message,
       });
     }
   }

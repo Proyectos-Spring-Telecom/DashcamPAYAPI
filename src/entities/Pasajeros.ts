@@ -17,6 +17,16 @@ export class Pasajeros {
   @PrimaryGeneratedColumn({ type: 'bigint', name: 'Id' })
   id: number;
 
+  // H-66: identificador opaco (ULID). Aditivo y compatible: la PK sigue siendo
+  // `Id`. Nullable + UNIQUE tolerante a NULL para históricos sin backfill.
+  @Column('char', {
+    name: 'PublicId',
+    length: 26,
+    nullable: true,
+    unique: true,
+  })
+  publicId: string | null;
+
   @Column('varchar', { name: 'Nombre', length: 100 })
   nombre: string;
 

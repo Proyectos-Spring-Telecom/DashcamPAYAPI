@@ -16,6 +16,7 @@ import { UpdateTurnoDto } from './dto/update-turno.dto';
 import { UpdateTurnosEstatusDto } from './dto/update-turno-estatus.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -23,6 +24,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 @ApiTags('Turnos')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('turnos')
 @TenantResource('turno')
 export class TurnosController {
@@ -85,13 +87,13 @@ export class TurnosController {
     @Body() updateTurnosEstatusDto: UpdateTurnosEstatusDto,
     @Request() req,
   ): Promise<ApiCrudResponse> {
-    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const _rol = req.user.rol;
     return await this.turnosService.updateEstatus(
       id,
       +idUser,
       updateTurnosEstatusDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -119,9 +121,12 @@ export class TurnosController {
     @Param('id', ParseIntPipe) id: number,
     @Request() req,
   ): Promise<ApiCrudResponse> {
-    const _cliente = req.user.cliente;
     const idUser = req.user.userId;
-    const _rol = req.user.rol;
-    return await this.turnosService.remove(id, +idUser);
+    return await this.turnosService.remove(
+      id,
+      +idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

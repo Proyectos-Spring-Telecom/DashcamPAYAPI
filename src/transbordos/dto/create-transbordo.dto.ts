@@ -8,8 +8,10 @@ import {
   IsArray,
   ValidateNested,
   ArrayMinSize,
+  ArrayMaxSize,
   MaxLength,
   Min,
+  Max,
   IsPositive,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -51,6 +53,7 @@ export class CreateTransbordoDto {
   @IsInt({ message: 'El número de transbordos debe ser un número entero' })
   @IsPositive({ message: 'El número de transbordos debe ser positivo' })
   @Min(1, { message: 'El número de transbordos debe ser al menos 1' })
+  @Max(20, { message: 'El número de transbordos no puede ser mayor a 20' })
   numeroTransbordos: number;
 
   @ApiProperty({
@@ -85,6 +88,9 @@ export class CreateTransbordoDto {
   @IsArray({ message: 'Los detalles deben ser un array' })
   @ArrayMinSize(1, {
     message: 'Debe proporcionar al menos un detalle de transbordo',
+  })
+  @ArrayMaxSize(20, {
+    message: 'No se permiten más de 20 detalles de transbordo',
   })
   @ValidateNested({ each: true })
   @Type(() => CreateDetalleTransbordoDto)

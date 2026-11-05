@@ -23,6 +23,7 @@ import { UsuariosinstalacionesService } from './usuariosinstalaciones.service';
 import { CreateUsuariosInstalacionesDto } from './dto/create-usuariosinstalacione.dto';
 import { UpdateUsuariosinstalacioneDto } from './dto/update-usuariosinstalacione.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse } from 'src/common/ApiResponse';
@@ -31,6 +32,7 @@ import { UpdateUsuariosInstalacionesEstatusDto } from './dto/update-usuariosinst
 @ApiTags('Usuarios instalaciones')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2)
 @Controller('usuariosinstalaciones')
 @TenantResource('usuarioInstalacion')
 export class UsuariosinstalacionesController {
@@ -71,6 +73,8 @@ export class UsuariosinstalacionesController {
     return await this.usuariosinstalacionesService.create(
       +idUser,
       createUsuariosInstalacionesDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -89,8 +93,11 @@ export class UsuariosinstalacionesController {
     status: 401,
     description: 'Token de autorización inválido o faltante',
   })
-  async findAllList() {
-    return this.usuariosinstalacionesService.findAllList();
+  async findAllList(@Request() req) {
+    return this.usuariosinstalacionesService.findAllList(
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get('usuario/:idUsuario')
@@ -154,8 +161,14 @@ export class UsuariosinstalacionesController {
   async findAll(
     @Param('page', ParseIntPipe) page: number,
     @Param('limit', ParseIntPipe) limit: number,
+    @Request() req,
   ) {
-    return this.usuariosinstalacionesService.findAll(page, limit);
+    return this.usuariosinstalacionesService.findAll(
+      page,
+      limit,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   // ✅ Ruta con parámetro dinámico al final
@@ -183,8 +196,12 @@ export class UsuariosinstalacionesController {
     status: 401,
     description: 'Token de autorización inválido o faltante',
   })
-  async findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.usuariosinstalacionesService.findOne(id);
+  async findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.usuariosinstalacionesService.findOne(
+      id,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Put(':idUsuario')

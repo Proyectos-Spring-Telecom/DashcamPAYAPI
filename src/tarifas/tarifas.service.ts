@@ -1,3 +1,8 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
+import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
 import {
   BadRequestException,
   HttpException,
@@ -9,7 +14,7 @@ import { CreateTarifaDto } from './dto/create-tarifa.dto';
 import { UpdateTarifaDto } from './dto/update-tarifa.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Tarifas } from 'src/entities/Tarifas';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { BitacoraLoggerService } from 'src/bitacora/bitacora.service';
 import { Variantes } from 'src/entities/Variantes';
 import { UsuariosZonas } from 'src/entities/UsuariosZonas';
@@ -36,6 +41,27 @@ export class TarifasService {
     private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
 
+  /**
+   * El cobro usa la tarifa activa de la variante: debe haber una sola.
+   */
+  private async assertSinOtraTarifaActiva(
+    idVariante: number,
+    excluirId?: number,
+  ): Promise<void> {
+    const otra = await this.tarifasRepository.findOne({
+      where: {
+        idVariante,
+        estatus: 1,
+        ...(excluirId ? { id: Not(excluirId) } : {}),
+      },
+    });
+    if (otra) {
+      throw new BadRequestException(
+        'La variante ya tiene una tarifa activa. Desactívala antes de activar o crear otra.',
+      );
+    }
+  }
+
   // ========================================
   // 🔹 CREAR UN TARIFA
   // ========================================
@@ -46,11 +72,32 @@ export class TarifasService {
     createTarifaDto: CreateTarifaDto,
   ): Promise<ApiCrudResponse> {
     try {
+      // N-07: 404 uniforme (no revelar si la variante existe en otro tenant).
+      await assertPadresEnTenant(
+        this.tarifasRepository.manager.connection,
+        { cliente, rol, userId: idUser },
+        { variante: createTarifaDto.idVariante },
+      );
       const variante = await this.variantesRepository.findOne({
         where: { id: createTarifaDto.idVariante },
+        relations: ['idRuta2', 'idRuta2.idZona2'],
       });
       if (!variante)
         throw new NotFoundException(`La variante no fue encontrada.`);
+
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        const idClienteZona = variante.idRuta2?.idZona2?.idCliente;
+        if (
+          !tieneIdsTenant(ids) ||
+          idClienteZona == null ||
+          !ids.includes(Number(idClienteZona))
+        ) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
+      await this.assertSinOtraTarifaActiva(createTarifaDto.idVariante);
 
       // Mapear idTipoTarifa del DTO a tipoTarifa de la entidad
       const { idTipoTarifa, ...restDto } = createTarifaDto;
@@ -67,6 +114,7 @@ export class TarifasService {
 
       let tarifaRegresoSave: Tarifas | null = null;
       if (varianteRegreso) {
+        await this.assertSinOtraTarifaActiva(varianteRegreso.id);
         // Crear también la tarifa para la variante de regreso
         const newTarifaRegreso = this.tarifasRepository.create({
           ...restDto,
@@ -135,29 +183,13 @@ export class TarifasService {
 
       throw new InternalServerErrorException({
         message: 'Error al crear la tarifa.',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   private async consultarTarifasListado(cliente: number) {
@@ -295,6 +327,7 @@ ORDER BY t.Id DESC
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           data = await this.consultarTarifasListado(cliente);
@@ -332,7 +365,6 @@ ORDER BY t.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar obtener el listado de tarifas.',
-        error: error.message,
       });
     }
   }
@@ -522,6 +554,7 @@ WHERE r.Estatus = 1
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           data = await this.consultarTarifasPaginado(cliente, limit, offset);
@@ -569,7 +602,6 @@ WHERE r.Estatus = 1
 
       throw new InternalServerErrorException({
         message: 'Error al obtener las tarifas paginadas.',
-        error: error.message,
       });
     }
   }
@@ -707,6 +739,7 @@ ORDER BY t.Id DESC
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           data = await this.consultarTotalTarifasOne(id, cliente);
@@ -750,7 +783,6 @@ ORDER BY t.Id DESC
 
       throw new InternalServerErrorException({
         message: 'Error al obtener una tarifa.',
-        error: error.message,
       });
     }
   }
@@ -848,7 +880,6 @@ ORDER BY t.Id DESC
 
       throw new InternalServerErrorException({
         message: 'Error al obtener la tarifa por variante.',
-        error: error.message,
       });
     }
   }
@@ -860,8 +891,32 @@ ORDER BY t.Id DESC
     id: number,
     idUser: number,
     updateTarifasEstatusDto: UpdateTarifasEstatusDto,
+    cliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException(`Error al obtener una tarifa.`);
+        }
+        const owned = await this.tarifasRepository.query(
+          `
+SELECT t.Id
+FROM Tarifas t
+INNER JOIN Variantes v ON t.IdVariante = v.Id
+INNER JOIN Rutas ru ON v.IdRuta = ru.Id
+INNER JOIN Zonas z ON ru.IdZona = z.Id
+WHERE t.Id = ? AND z.IdCliente IN (${placeholders})
+LIMIT 1
+          `,
+          [id, ...ids],
+        );
+        if (!owned?.length) {
+          throw new NotFoundException(`Error al obtener una tarifa.`);
+        }
+      }
+
       const tarifa = await this.tarifasRepository.findOne({
         where: { id: id },
       });
@@ -869,6 +924,9 @@ ORDER BY t.Id DESC
 
       //actualizacion de estatus
       const estatus = updateTarifasEstatusDto.estatus;
+      if (Number(estatus) === 1) {
+        await this.assertSinOtraTarifaActiva(tarifa.idVariante, tarifa.id);
+      }
       await this.tarifasRepository.update(id, { estatus: estatus });
 
       // Registro en la bitácora SUCCESS
@@ -912,20 +970,66 @@ ORDER BY t.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar el estatus de la tarifa.',
-        error: error.message,
       });
+    }
+  }
+
+  private async assertTarifaTenant(id: number, cliente: number, rol: number) {
+    if (Number(rol) === 1) return;
+    const { ids, placeholders } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids)) {
+      throw new NotFoundException(`Tarifa no encontrada.`);
+    }
+    const owned = await this.tarifasRepository.query(
+      `
+SELECT t.Id
+FROM Tarifas t
+INNER JOIN Variantes v ON t.IdVariante = v.Id
+INNER JOIN Rutas ru ON v.IdRuta = ru.Id
+INNER JOIN Zonas z ON ru.IdZona = z.Id
+WHERE t.Id = ? AND z.IdCliente IN (${placeholders})
+LIMIT 1
+      `,
+      [id, ...ids],
+    );
+    if (!owned?.length) {
+      throw new NotFoundException(`Tarifa no encontrada.`);
     }
   }
 
   // ========================================
   // 🔹 ACTUALIZAR TARIFA
   // ========================================
-  async update(id: number, idUser: number, updateTarifaDto: UpdateTarifaDto) {
+  async update(
+    id: number,
+    idUser: number,
+    updateTarifaDto: UpdateTarifaDto,
+    cliente = 0,
+    rol = 1,
+  ) {
     try {
+      await this.assertTarifaTenant(id, cliente, rol);
       const tarifa = await this.tarifasRepository.findOne({
         where: { id: id },
       });
       if (!tarifa) throw new NotFoundException(`Tarifa no encontrada.`);
+      if (
+        updateTarifaDto.idVariante !== undefined &&
+        Number(updateTarifaDto.idVariante) !== Number(tarifa.idVariante)
+      ) {
+        const rows = await this.clienteRepository.query(
+          `SELECT z.IdCliente AS idCliente
+           FROM Variantes v
+           INNER JOIN Rutas r ON v.IdRuta = r.Id
+           INNER JOIN Zonas z ON r.IdZona = z.Id
+           WHERE v.Id IN (?, ?)`,
+          [tarifa.idVariante, updateTarifaDto.idVariante],
+        );
+        const clientes = (rows || []).map((r: any) => Number(r.idCliente));
+        if (clientes.length < 2 || clientes[0] !== clientes[1]) {
+          throw new NotFoundException('Tarifa no encontrada.');
+        }
+      }
 
       // Mapear idTipoTarifa del DTO a tipoTarifa de la entidad si viene en el DTO
       const updateData: any = { ...updateTarifaDto };
@@ -977,7 +1081,6 @@ ORDER BY t.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar la tarifa.',
-        error: error.message,
       });
     }
   }
@@ -985,8 +1088,9 @@ ORDER BY t.Id DESC
   // ========================================
   // 🔹 ELIMINADO LOGICO
   // ========================================
-  async remove(id: number, idUser: number) {
+  async remove(id: number, idUser: number, cliente = 0, rol = 1) {
     try {
+      await this.assertTarifaTenant(id, cliente, rol);
       const tarifa = await this.tarifasRepository.findOne({
         where: { id: id },
       });
@@ -1035,7 +1139,6 @@ ORDER BY t.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Hubo un error al eliminar lógicamente la tarifa.',
-        error: error.message,
       });
     }
   }
@@ -1103,7 +1206,6 @@ ORDER BY t.Id DESC
       }
       throw new InternalServerErrorException({
         message: 'Hubo un problema al eliminar la tarifa permanentemente.',
-        error: error.message,
       });
     }
   }
