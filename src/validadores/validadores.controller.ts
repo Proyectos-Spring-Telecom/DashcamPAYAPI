@@ -15,6 +15,7 @@ import { ValidadoresService } from './validadores.service';
 import { CreateValidadorDto } from './dto/create-validador.dto';
 import { UpdateValidadorDto } from './dto/update-validador.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { UpdateValidadorEstatusDto } from './dto/update-validador-estatus.dto';
@@ -22,6 +23,7 @@ import { ApiResponseCommon } from 'src/common/ApiResponse';
 import { UpdateValidadorEstadoDto } from './dto/update-validador-estado.dto';
 
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('validadores')
 @TenantResource('validador')
 export class ValidadoresController {
@@ -33,7 +35,12 @@ export class ValidadoresController {
     @Request() req,
   ) {
     const idUser = req.user.userId;
-    return this.ValidadoresService.createValidador(createValidadorDto, +idUser);
+    return this.ValidadoresService.createValidador(
+      createValidadorDto,
+      +idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get('list')
@@ -52,10 +59,11 @@ export class ValidadoresController {
   ): Promise<ApiResponseCommon> {
     const _idUser = req.user.userId;
     const cliente = req.user.cliente;
-    const _rol = req.user.rol;
+    const rol = req.user.rol;
     return await this.ValidadoresService.findAllListValidadoresClientes(
       +id,
       +cliente,
+      +rol,
     );
   }
 
@@ -104,6 +112,8 @@ export class ValidadoresController {
       +id,
       +idUser,
       updateValidadorEstatusDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -118,12 +128,19 @@ export class ValidadoresController {
       +id,
       +idUser,
       updateValidadorDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
   @Delete(':id')
   removeValidador(@Param('id') id: string, @Request() req) {
     const idUser = req.user.userId;
-    return this.ValidadoresService.removeValidador(+id, +idUser);
+    return this.ValidadoresService.removeValidador(
+      +id,
+      +idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

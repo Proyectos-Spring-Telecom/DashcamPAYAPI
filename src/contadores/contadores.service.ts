@@ -1,4 +1,9 @@
 import {
+  clienteHijosDesdeSp,
+  clientesPermitidos,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -7,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { CreateContadoresDto } from './dto/create-contadores.dto';
 import { UpdateContadoresDto } from './dto/update-contadores.dto';
+import { forbidTenantMove } from 'src/common/tenant/forbid-tenant-move';
 import {
   ApiCrudResponse,
   ApiResponseCommon,
@@ -41,8 +47,20 @@ export class ContadoresService {
   async create(
     idUser: number,
     createContadorDto: CreateContadoresDto,
+    clienteActor = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      if (Number(rol) !== 1) {
+        const permitidos = await clientesPermitidos(
+          this.clienteRepository.manager,
+          clienteActor,
+        );
+        if (!permitidos.includes(Number(createContadorDto.idCliente))) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+      }
+
       const contador = await this.contadoresRepository.findOne({
         where: { numeroSerie: createContadorDto.numeroSerie },
       });
@@ -98,34 +116,25 @@ export class ContadoresService {
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar crear un Contador.',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   //Obtener los contadores por cliente -- incluye disponibles y el que está en uso
-  async findAllListClientes(id: number, _cliente: number) {
+  async findAllListClientes(id: number, clienteActor: number, rol = 1) {
     try {
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(clienteActor);
+        if (!tieneIdsTenant(ids) || !ids.includes(Number(id))) {
+          return { data: [] };
+        }
+      }
+
       // Consulta SQL para obtener contadores DISPONIBLES y ASIGNADOS
       // Para los asignados a instalaciones, se agrega "-Asignado" al numeroSerie
       const contadores = await this.contadoresRepository.query(
@@ -183,7 +192,6 @@ ORDER BY
       }
       throw new InternalServerErrorException({
         message: `Error al obtener los contadores.`,
-        error: error.message,
       });
     }
   }
@@ -240,6 +248,7 @@ INNER JOIN Clientes c ON b.IdCliente = c.Id
           );
           break;
 
+        case 3:
         default:
           // Consulta de datos paginados resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -310,7 +319,6 @@ WHERE b.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente
       }
       throw new InternalServerErrorException({
         message: `Error al obtener paginado Contadores.`,
-        error: error.message,
       });
     }
   }
@@ -351,6 +359,7 @@ ORDER BY b.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Consulta de datos listado resto Usuario
           const { ids, placeholders } = await this.clienteHijos(cliente);
@@ -442,6 +451,7 @@ ORDER BY b.Id DESC;
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
           contadores = await this.contadoresRepository.query(
@@ -498,11 +508,28 @@ ORDER BY b.Id DESC;
     }
   }
 
+  private async assertContadorTenant(
+    contador: { idCliente?: number | null },
+    id: number,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids) || !ids.includes(Number(contador.idCliente))) {
+      throw new NotFoundException(
+        `No se encontró un Contador con ID: ${id}.`,
+      );
+    }
+  }
+
   //Actualizar equipo
   async update(
     id: number,
     idUser: number,
     updateContadorDto: UpdateContadoresDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
       const contador = await this.contadoresRepository.findOne({
@@ -512,6 +539,13 @@ ORDER BY b.Id DESC;
         throw new NotFoundException(
           `No se encontró un Contador con ID: ${id}.`,
         );
+      await this.assertContadorTenant(contador, id, cliente, rol);
+      forbidTenantMove(
+        contador.idCliente,
+        updateContadorDto as any,
+        'idCliente',
+        'Contador no encontrado',
+      );
       await this.contadoresRepository.update(id, updateContadorDto);
 
       //-----Registro en la bitacora----- SUCCESS
@@ -556,7 +590,6 @@ ORDER BY b.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar actualizar contador.',
-        error: error.message,
       });
     }
   }
@@ -566,6 +599,8 @@ ORDER BY b.Id DESC;
     id: number,
     idUser: number,
     updateContadorEstatusDto: UpdateContadoresEstatusDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
       //buscamos y validamos que exista
@@ -576,6 +611,7 @@ ORDER BY b.Id DESC;
         throw new NotFoundException(
           `No se encontró un Contador con ID: ${id}.`,
         );
+      await this.assertContadorTenant(contador, id, cliente, rol);
 
       //Obtenemos el estatus
       const estatus = updateContadorEstatusDto.estatus;
@@ -645,7 +681,6 @@ ORDER BY b.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar estatus del contador.',
-        error: error.message,
       });
     }
   }
@@ -655,6 +690,8 @@ ORDER BY b.Id DESC;
     id: number,
     idUser: number,
     updateContadorEstadoDto: UpdateContadoresEstadoDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
       //buscamos y validamos que exista
@@ -665,6 +702,7 @@ ORDER BY b.Id DESC;
         throw new NotFoundException(
           `No se encontró un Contador con ID: ${id}.`,
         );
+      await this.assertContadorTenant(contador, id, cliente, rol);
 
       //buscamos que no este asignado a una instalacion
       const contadorInstalacion =
@@ -733,12 +771,11 @@ ORDER BY b.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Error al actualizar estado del contador.',
-        error: error.message,
       });
     }
   }
 
-  async remove(id: number, idUser: number) {
+  async remove(id: number, idUser: number, cliente = 0, rol = 1) {
     try {
       //buscamos y validamos que exista
       const contador = await this.contadoresRepository.findOne({
@@ -748,6 +785,7 @@ ORDER BY b.Id DESC;
         throw new NotFoundException(
           `No se encontró un Contador con ID: ${id}.`,
         );
+      await this.assertContadorTenant(contador, id, cliente, rol);
 
       //buscamos que no este asignado a una instalacion
       const contadorInstalacion =
@@ -804,7 +842,6 @@ ORDER BY b.Id DESC;
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar eliminar el contador.',
-        error: error.message,
       });
     }
   }

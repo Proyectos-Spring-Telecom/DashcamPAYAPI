@@ -14,14 +14,26 @@ import {
 import { ConteopasajerosService } from './conteopasajeros.service';
 import { CreateConteoPasajerosDto } from './dto/create-conteopasajero.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
-import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
+import {
+  TenantExempt,
+  TenantResource,
+} from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { UpdateConteoPasajerosDto } from './dto/update-conteopasajero.dto';
+import { assertIsoDate } from 'src/common/sql-date';
+import { Public } from 'src/guard/public.decorator';
+import {
+  DeviceOrJwtGuard,
+  DispositivoCredencial,
+} from 'src/posiciones/device-auth.guard';
 
 @ApiTags('Conteo pasajeros')
 @ApiBearerAuth('bearer-token')
+@Roles(1, 2, 3, 11)
 @Controller('conteopasajeros')
 export class ConteopasajerosController {
   constructor(
@@ -38,6 +50,8 @@ export class ConteopasajerosController {
     return this.conteopasajerosService.create(
       createConteopasajeroDto,
       req.user.userId,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -50,14 +64,19 @@ export class ConteopasajerosController {
     return this.conteopasajerosService.update(
       updateConteoPasajerosDto,
       req.user.userId,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
   // RUTAS ESPECÍFICAS PRIMERO (orden correcto)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('list')
-  async findAllList(): Promise<ApiResponseCommon> {
-    return await this.conteopasajerosService.findAllList();
+  async findAllList(@Request() req): Promise<ApiResponseCommon> {
+    return await this.conteopasajerosService.findAllList(
+      Number(req.user.cliente),
+      Number(req.user.rol),
+    );
   }
 
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
@@ -65,8 +84,14 @@ export class ConteopasajerosController {
   async findToday(
     @Query('page') page: number,
     @Query('limit') limit: number,
+    @Request() req,
   ): Promise<ApiResponseCommon> {
-    return await this.conteopasajerosService.findTodayPaginated(page, limit);
+    return await this.conteopasajerosService.findTodayPaginated(
+      page,
+      limit,
+      Number(req.user.cliente),
+      Number(req.user.rol),
+    );
   }
 
   // 📅 5. OBTENER DATOS DE LA ÚLTIMA SEMANA
@@ -76,8 +101,14 @@ export class ConteopasajerosController {
   async findLastWeek(
     @Query('page') page: number,
     @Query('limit') limit: number,
+    @Request() req,
   ): Promise<ApiResponseCommon> {
-    return await this.conteopasajerosService.findLastWeekPaginated(page, limit);
+    return await this.conteopasajerosService.findLastWeekPaginated(
+      page,
+      limit,
+      Number(req.user.cliente),
+      Number(req.user.rol),
+    );
   }
 
   // 🗓️ 1. OBTENER DATOS DE UN DÍA ESPECÍFICO
@@ -87,11 +118,14 @@ export class ConteopasajerosController {
     @Param('fecha') fecha: string,
     @Query('page') page: number,
     @Query('limit') limit: number,
+    @Request() req,
   ): Promise<ApiResponseCommon> {
     return await this.conteopasajerosService.findByDatePaginated(
       fecha,
       page,
       limit,
+      Number(req.user.cliente),
+      Number(req.user.rol),
     );
   }
 
@@ -144,53 +178,92 @@ export class ConteopasajerosController {
     @Param('hora') hora: string,
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
+    @Request() req,
   ): Promise<ApiResponseCommon> {
     return await this.conteopasajerosService.findByDateTimePaginated(
       fecha,
       hora,
       page,
       limit,
+      Number(req.user.cliente),
+      Number(req.user.rol),
     );
   }
 
+  // Ingesta/consulta por dispositivo contador: acepta x-device-token O JWT de
+  // operador (transición). @Public desactiva los guards globales para habilitar
+  // la vía de dispositivo; DeviceOrJwtGuard aplica la autenticación real. La
+  // serie ya quedó verificada por el guard, por lo que el acceso se limita a su
+  // propia serie (el servicio filtra por numeroSerieContador).
+  @UseGuards(DeviceOrJwtGuard, TenantOwnershipGuard)
+  @Public()
+  @DispositivoCredencial('contador')
   @Get('contador/:numeroSerie/hoy')
+  @TenantExempt(
+    'Serie validada en el servicio contra seriesContadoresPermitidas',
+  )
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   async findByContadorToday(
     @Param('numeroSerie') numeroSerie: string,
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
+    @Request() req,
   ): Promise<ApiResponseCommon> {
     const today = new Date().toISOString().split('T')[0];
+    const cliente = req.deviceAuth ? 0 : Number(req.user.cliente);
+    const rol = req.deviceAuth ? 1 : Number(req.user.rol);
     return await this.conteopasajerosService.findByContadorAndDatePaginated(
       numeroSerie,
       today,
       today,
       page,
       limit,
+      cliente,
+      rol,
     );
   }
 
+  @UseGuards(DeviceOrJwtGuard, TenantOwnershipGuard)
+  @Public()
+  @DispositivoCredencial('contador')
   @Get('contador/:numeroSerie/rango/:fechaInicio/:fechaFin')
+  @TenantExempt(
+    'Serie validada en el servicio contra seriesContadoresPermitidas',
+  )
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   async findByContadorAndDate(
     @Param('numeroSerie') numeroSerie: string,
     @Param('fechaInicio') fechaInicio: string,
     @Param('fechaFin') fechaFin: string,
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
+    @Request() req,
   ): Promise<ApiResponseCommon> {
+    const cliente = req.deviceAuth ? 0 : Number(req.user.cliente);
+    const rol = req.deviceAuth ? 1 : Number(req.user.rol);
     return await this.conteopasajerosService.findByContadorAndDatePaginated(
       numeroSerie,
-      fechaInicio,
-      fechaFin,
+      assertIsoDate(fechaInicio, 'fechaInicio'),
+      assertIsoDate(fechaFin, 'fechaFin'),
       page,
       limit,
+      cliente,
+      rol,
     );
   }
 
   // Resúmenes (sin paginación)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get('resumen-horas/:fecha')
-  async getHourlySummary(@Param('fecha') fecha: string): Promise<any[]> {
-    return await this.conteopasajerosService.getHourlySummary(fecha);
+  async getHourlySummary(
+    @Param('fecha') fecha: string,
+    @Request() req,
+  ): Promise<any[]> {
+    return await this.conteopasajerosService.getHourlySummary(
+      fecha,
+      Number(req.user.cliente),
+      Number(req.user.rol),
+    );
   }
 
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
@@ -198,8 +271,14 @@ export class ConteopasajerosController {
   async getDailySummary(
     @Param('year', ParseIntPipe) year: number,
     @Param('month', ParseIntPipe) month: number,
+    @Request() req,
   ): Promise<any[]> {
-    return await this.conteopasajerosService.getDailySummary(year, month);
+    return await this.conteopasajerosService.getDailySummary(
+      year,
+      month,
+      Number(req.user.cliente),
+      Number(req.user.rol),
+    );
   }
 
   // RUTAS DINÁMICAS AL FINAL
@@ -225,7 +304,11 @@ export class ConteopasajerosController {
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get(':id')
   @TenantResource('conteoPasajero')
-  findOne(@Param('id') id: string) {
-    return this.conteopasajerosService.findOne(+id);
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.conteopasajerosService.findOne(
+      +id,
+      Number(req.user?.cliente) || 0,
+      Number(req.user?.rol) || 0,
+    );
   }
 }

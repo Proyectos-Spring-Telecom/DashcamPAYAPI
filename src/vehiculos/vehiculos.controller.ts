@@ -15,6 +15,7 @@ import { VehiculosService } from './vehiculos.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
@@ -30,6 +31,7 @@ import {
 @ApiTags('Vehiculos')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @TenantResource('vehiculo')
 @Controller('vehiculos')
 export class VehiculosController {
@@ -38,7 +40,12 @@ export class VehiculosController {
   @Post()
   create(@Body() createVehiculoDto: CreateVehiculoDto, @Request() req) {
     const idUser = req.user.userId;
-    return this.vehiculosService.create(createVehiculoDto, +idUser);
+    return this.vehiculosService.create(
+      createVehiculoDto,
+      +idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get('list')
@@ -89,8 +96,12 @@ export class VehiculosController {
     @Request() req,
   ): Promise<ApiResponseCommon> {
     const cliente = req.user.cliente;
-    const _rol = req.user.rol;
-    return await this.vehiculosService.findAllListClientes(id, +cliente);
+    const rol = req.user.rol;
+    return await this.vehiculosService.findAllListClientes(
+      id,
+      +cliente,
+      +rol,
+    );
   }
 
   @Get(':page/:limit')
@@ -118,7 +129,13 @@ export class VehiculosController {
     @Body() updateVehiculoDto: UpdateVehiculoDto,
   ) {
     const idUser = req.user.userId;
-    return this.vehiculosService.update(+id, +idUser, updateVehiculoDto);
+    return this.vehiculosService.update(
+      +id,
+      +idUser,
+      updateVehiculoDto,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Patch('estatus/:id')
@@ -132,12 +149,19 @@ export class VehiculosController {
       +id,
       idUser,
       UpdateVehiculoEstatusDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req) {
     const idUser = req.user.userId;
-    return this.vehiculosService.remove(+id, +idUser);
+    return this.vehiculosService.remove(
+      +id,
+      +idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

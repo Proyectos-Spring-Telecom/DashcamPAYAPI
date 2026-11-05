@@ -23,16 +23,21 @@ import {
 } from '@nestjs/swagger';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
+import { TenantExempt } from 'src/common/tenant/tenant-resource.decorator';
 
 @ApiTags('Catálogo referencia servicio')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2, 3, 11)
+@TenantExempt('Catálogo global sin IdCliente')
 @Controller('cat-referencia-servicio')
 export class CatReferenciaServicioController {
   constructor(
     private readonly catReferenciaServicioService: CatReferenciaServicioService,
   ) {}
 
+  @Roles(1, 2)
   @Post()
   @ApiOperation({
     summary: 'Crear una nueva referencia de servicio',
@@ -145,6 +150,7 @@ export class CatReferenciaServicioController {
     return this.catReferenciaServicioService.findOne(id);
   }
 
+  @Roles(1, 2)
   @Patch(':id')
   @ApiOperation({
     summary: 'Actualizar una referencia de servicio',
@@ -189,6 +195,7 @@ export class CatReferenciaServicioController {
     );
   }
 
+  @Roles(1, 2)
   @Delete(':id')
   @ApiOperation({
     summary: 'Eliminar una referencia de servicio',

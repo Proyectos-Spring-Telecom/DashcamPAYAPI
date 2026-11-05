@@ -1,6 +1,5 @@
-import { ApiProperty, PartialType } from '@nestjs/swagger';
-import { CreateContadoresDto } from './create-contadores.dto';
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
 
 export class UpdateContadoresDto {
   @IsString()
@@ -28,12 +27,4 @@ export class UpdateContadoresDto {
     required: false,
   })
   modelo?: string;
-
-  @IsNumber()
-  @IsOptional()
-  @ApiProperty({
-    description: 'Identificador del cliente al que pertenece el Contador',
-    example: '123',
-  })
-  idCliente?: number;
 }

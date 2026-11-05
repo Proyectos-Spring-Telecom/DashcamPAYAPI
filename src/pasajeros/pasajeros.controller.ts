@@ -19,6 +19,7 @@ import { CreatePasajeroDto } from './dto/create-pasajero.dto';
 import { UpdatePasajeroDto } from './dto/update-pasajero.dto';
 import { UpdatePasajeroEstatusDto } from './dto/update-pasajeros-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiResponseCommon } from 'src/common/ApiResponse';
@@ -39,6 +40,7 @@ import * as multer from 'multer';
 @ApiTags('Pasajeros')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 9, 11)
 @Controller('pasajeros')
 @TenantResource('pasajero')
 export class PasajerosController {
@@ -85,6 +87,7 @@ export class PasajerosController {
       idUser,
       +cliente,
       documentacionFile,
+      +req.user.rol,
     );
   }
 
@@ -142,8 +145,13 @@ export class PasajerosController {
   }
 
   @Get(':id')
-  findOnePasajero(@Param('id', ParseIntPipe) id: number) {
-    return this.pasajerosService.findOnePasajero(id);
+  // H-66: acepta Id numérico o PublicId (ULID); por eso no usa ParseIntPipe.
+  findOnePasajero(@Param('id') id: string, @Request() req) {
+    return this.pasajerosService.findOnePasajero(
+      id,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   // ========================================
@@ -157,7 +165,13 @@ export class PasajerosController {
     @Request() req,
   ) {
     const idUser = req.user.userId;
-    return this.pasajerosService.updatePasajero(id, idUser, updatePasajeroDto);
+    return this.pasajerosService.updatePasajero(
+      id,
+      idUser,
+      updatePasajeroDto,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   // ========================================
@@ -174,6 +188,8 @@ export class PasajerosController {
       id,
       updatePasajeroEstadoSolicitudDto,
       idUser,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -188,10 +204,15 @@ export class PasajerosController {
       id,
       updatePasajeroEstatusDto,
       idUser,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
   @Patch('customer-netpay/:id')
+  // H-05: el customer de NetPay lo asigna el servidor al registrar al pasajero.
+  // Ningún cliente usa esta ruta; queda solo para soporte (SA).
+  @Roles(1)
   @ApiOperation({
     summary: 'Actualiza el CustomerIdNetPay de un pasajero',
     description:
@@ -213,6 +234,8 @@ export class PasajerosController {
       id,
       updatePasajeroCustomerIdDto,
       idUser,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -223,6 +246,11 @@ export class PasajerosController {
   @Delete(':id')
   removePasajero(@Param('id', ParseIntPipe) id: number, @Request() req) {
     const idUser = req.user.userId;
-    return this.pasajerosService.removePasajero(id, idUser);
+    return this.pasajerosService.removePasajero(
+      id,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

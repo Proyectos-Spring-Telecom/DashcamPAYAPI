@@ -1,5 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, Matches, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  MinLength,
+} from 'class-validator';
 
 export class LoginAuthResetDto {
   @IsString()
@@ -9,6 +15,15 @@ export class LoginAuthResetDto {
     example: 'ejemplo@ejemplo.com',
   })
   userName: string;
+
+  @IsOptional()
+  @IsString()
+  @ApiPropertyOptional({
+    description:
+      'OTP de recuperación. Si se envía, no se usa el Bearer como access token.',
+    example: '123456',
+  })
+  codigo?: string;
 
   @IsString()
   @IsNotEmpty()

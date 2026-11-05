@@ -25,8 +25,12 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import { Public } from 'src/guard/public.decorator';
+import { Roles } from 'src/guard/roles.decorator';
 
 @ApiTags('Clientes')
+@Roles(1, 2, 3, 11)
 @Controller('clientes')
 export class ClientesController {
   constructor(private readonly clientesService: ClientesService) {}
@@ -34,7 +38,9 @@ export class ClientesController {
   // ========================================
   // 🔹 ENDPOINT PÚBLICO - SIN AUTENTICACIÓN
   // ========================================
+  @Public()
   @Get('public')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({
     summary: 'Obtener todos los clientes activos (público)',
     description:
@@ -56,18 +62,23 @@ export class ClientesController {
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   //Crear cliente
   @Post()
+  @Roles(1, 2)
   async createCliente(
     @Body() createClienteDto: CreateClienteDto,
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.clientesService.createCliente(createClienteDto, idUser);
+    return await this.clientesService.createCliente(
+      createClienteDto,
+      idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
   //Obtener todos los clientes
   @Get('list')
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   async getAllListClientes(@Request() req): Promise<ApiResponseCommon> {
-    console.log(req.user, 'REQ');
     if (!req.user) {
       throw new Error('Usuario no autenticado');
     }
@@ -122,14 +133,16 @@ export class ClientesController {
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @TenantResource('cliente')
   getOneCliente(@Param('id') id: string, @Request() req) {
-    const _cliente = req.user.cliente;
-    const _idUser = req.user.userId;
-    const _rol = req.user.rol;
-    return this.clientesService.getOneCliente(+id);
+    return this.clientesService.getOneCliente(
+      +id,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   //Actualizar el estatus del cliente
   @Patch('estatus/:id')
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @TenantResource('cliente')
   updateEstatusClientes(
@@ -144,11 +157,13 @@ export class ClientesController {
       idUser,
       +cliente,
       updateClienteEstatusDto,
+      +req.user.rol,
     );
   }
 
   //Actualizar un cliente
   @Put(':id')
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @TenantResource('cliente')
   async updateCliente(
@@ -161,11 +176,14 @@ export class ClientesController {
       +id,
       idUser,
       updateClienteDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
   //Eliminar Cliente
   @Delete(':id')
+  @Roles(1, 2)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @TenantResource('cliente')
   async removeClientes(
@@ -174,6 +192,11 @@ export class ClientesController {
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
     const cliente = req.user.cliente;
-    return await this.clientesService.removeCliente(+id, idUser, +cliente);
+    return await this.clientesService.removeCliente(
+      +id,
+      idUser,
+      +cliente,
+      +req.user.rol,
+    );
   }
 }

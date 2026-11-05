@@ -5,6 +5,8 @@ import {
   Length,
   IsInt,
   IsIn,
+  Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
@@ -34,6 +36,8 @@ export class CreatePosicionesDto {
     example: 45.75,
   })
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(250)
   velocidad: number;
 
   @ApiProperty({
@@ -41,6 +45,8 @@ export class CreatePosicionesDto {
     example: 180.25,
   })
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(360)
   direccion: number;
 
   @ApiProperty({

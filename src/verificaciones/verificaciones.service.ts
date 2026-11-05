@@ -1,3 +1,8 @@
+import { assertPadresEnTenant } from 'src/common/tenant/tenant-scope';
+import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
 import {
   BadRequestException,
   HttpException,
@@ -44,30 +49,26 @@ export class VerificacionesService {
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { ids: [], placeholders: '' }; // No hay clientes que consultar
-    }
-
-    // Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   async create(
     createVerificacionesDto: CreateVerificacionesDto,
     idUser: number,
     notaVerificacionFile?: Express.Multer.File,
+    idCliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      // N-07: las FK padre deben ser del tenant (404 sin revelar existencia).
+      await assertPadresEnTenant(
+        this.verificacionesRepository.manager.connection,
+        { cliente: idCliente, rol },
+        {
+          instalacion: createVerificacionesDto.idInstalacion,
+          operador: createVerificacionesDto.idOperador,
+        },
+      );
       // Validar claves foráneas si se proporcionan
       if (
         createVerificacionesDto.idInstalacion !== undefined &&
@@ -80,6 +81,15 @@ export class VerificacionesService {
           throw new BadRequestException(
             `La instalación con ID ${createVerificacionesDto.idInstalacion} no existe.`,
           );
+        }
+        if (Number(rol) !== 1) {
+          const { ids } = await this.clienteHijos(idCliente);
+          if (
+            !tieneIdsTenant(ids) ||
+            !ids.includes(Number(instalacionExists.idCliente))
+          ) {
+            throw new NotFoundException('Verificación no encontrada');
+          }
         }
       }
 
@@ -119,7 +129,8 @@ export class VerificacionesService {
           notaVerificacionFile,
           'Verificaciones',
           idUser,
-          6, // ID del módulo de verificaciones (ajustar según corresponda)
+          6,
+          Number(idCliente) || 0,
         );
         notaVerificacionUrl = uploadResult.url;
       }
@@ -356,6 +367,7 @@ INNER JOIN Clientes c ON i.IdCliente = c.Id
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(idCliente);
           if (ids.length === 0) {
@@ -491,9 +503,7 @@ WHERE c.Id IN (${placeholders})
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new BadRequestException(
-        error.message || 'Error al obtener las verificaciones',
-      );
+      throw new BadRequestException('Error al obtener las verificaciones');
     }
   }
 
@@ -552,6 +562,7 @@ WHERE v.Id = ?
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(idCliente);
           if (ids.length === 0) {
@@ -668,13 +679,50 @@ AND v.Id = ?
     }
   }
 
+  private async assertVerificacionTenant(
+    id: number,
+    idCliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids, placeholders } = await this.clienteHijos(idCliente);
+    if (!tieneIdsTenant(ids)) {
+      throw new NotFoundException('Verificación no encontrada');
+    }
+    const rows = await this.verificacionesRepository.query(
+      `
+SELECT v.Id
+FROM Verificaciones v
+INNER JOIN Instalaciones i ON v.IdInstalacion = i.Id
+WHERE v.Id = ? AND i.IdCliente IN (${placeholders})
+LIMIT 1
+      `,
+      [id, ...ids],
+    );
+    if (!rows?.length) {
+      throw new NotFoundException('Verificación no encontrada');
+    }
+  }
+
   async update(
     id: number,
     updateVerificacionesDto: UpdateVerificacionesDto,
     idUser: number,
     notaVerificacionFile?: Express.Multer.File,
+    idCliente = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     try {
+      await this.assertVerificacionTenant(id, idCliente, rol);
+      // N-07: la FK padre nueva también debe ser del tenant.
+      await assertPadresEnTenant(
+        this.verificacionesRepository.manager.connection,
+        { cliente: idCliente, rol },
+        {
+          instalacion: updateVerificacionesDto.idInstalacion,
+          operador: updateVerificacionesDto.idOperador,
+        },
+      );
       const verificacion = await this.verificacionesRepository.findOne({
         where: { id: id },
       });
@@ -733,7 +781,8 @@ AND v.Id = ?
           notaVerificacionFile,
           'Verificaciones',
           idUser,
-          6, // ID del módulo de verificaciones (ajustar según corresponda)
+          6,
+          Number(idCliente) || 0,
         );
         notaVerificacionUrl = uploadResult.url;
       }
@@ -901,8 +950,14 @@ AND v.Id = ?
     }
   }
 
-  async desactivar(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async desactivar(
+    id: number,
+    idUser: number,
+    idCliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
+      await this.assertVerificacionTenant(id, idCliente, rol);
       const verificacion = await this.verificacionesRepository.findOne({
         where: { id: id },
       });
@@ -954,13 +1009,18 @@ AND v.Id = ?
       }
       throw new InternalServerErrorException({
         message: 'Error al desactivar la verificación.',
-        error: error.message,
       });
     }
   }
 
-  async activar(id: number, idUser: number): Promise<ApiCrudResponse> {
+  async activar(
+    id: number,
+    idUser: number,
+    idCliente = 0,
+    rol = 1,
+  ): Promise<ApiCrudResponse> {
     try {
+      await this.assertVerificacionTenant(id, idCliente, rol);
       const verificacion = await this.verificacionesRepository.findOne({
         where: { id: id },
       });
@@ -1016,7 +1076,6 @@ AND v.Id = ?
       }
       throw new InternalServerErrorException({
         message: 'Error al activar la verificación.',
-        error: error.message,
       });
     }
   }
@@ -1051,8 +1110,7 @@ AND v.Id = ?
         throw error;
       }
       throw new BadRequestException(
-        error.message ||
-          'Error al obtener las categorías de mantenimiento mecánico',
+        'Error al obtener las categorías de mantenimiento mecánico',
       );
     }
   }

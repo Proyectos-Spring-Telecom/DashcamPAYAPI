@@ -10,6 +10,9 @@ export class HistoricoTransaccionesRecarga {
   @PrimaryGeneratedColumn({ type: 'bigint', name: 'Id' })
   id: number;
 
+  @Column('bigint', { name: 'IdTransaccionOrigen', nullable: true })
+  idTransaccionOrigen: number | null;
+
   @Column('bigint', { name: 'IdTipoTransaccion' })
   idTipoTransaccion: number;
 
@@ -73,5 +76,10 @@ export class HistoricoTransaccionesRecarga {
   @Column('varchar', { name: 'ReferenceIdNetPay', nullable: true, length: 150 })
   referenceIdNetPay: string | null;
 
-  // -------- RELACIONES --------
+  @Column('varchar', {
+    name: 'ClaveIdempotencia',
+    length: 100,
+    nullable: true,
+  })
+  claveIdempotencia: string | null;
 }

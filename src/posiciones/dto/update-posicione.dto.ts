@@ -6,6 +6,8 @@ import {
   IsInt,
   IsIn,
   IsOptional,
+  Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
@@ -37,6 +39,8 @@ export class UpdatePosicionesDto {
     example: 45.75,
   })
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(250)
   @IsOptional()
   velocidad?: number;
 
@@ -45,6 +49,8 @@ export class UpdatePosicionesDto {
     example: 180.25,
   })
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(360)
   @IsOptional()
   direccion?: number;
 

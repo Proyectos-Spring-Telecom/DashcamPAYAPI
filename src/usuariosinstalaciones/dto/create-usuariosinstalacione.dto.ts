@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsIn, IsInt, IsNotEmpty, IsNumber } from 'class-validator';
+import { IsArray, ArrayMaxSize, IsIn, IsInt, IsNotEmpty, IsNumber } from 'class-validator';
 
 export class CreateUsuariosInstalacionesDto {
   @IsNotEmpty({ message: 'Confirmar estatus en valor de 0 ó 1' })
@@ -25,6 +25,7 @@ export class CreateUsuariosInstalacionesDto {
   })
   @IsNotEmpty()
   @IsArray()
+  @ArrayMaxSize(100, { message: 'No se permiten más de 100 instalaciones' })
   @IsNumber({}, { each: true })
   idsInstalaciones: number[];
 }

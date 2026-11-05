@@ -15,12 +15,14 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { KpiDto } from './dto/kpi.dto';
 import { MetricsFilterDto } from './dto/metrics-filter.dto';
 
 @ApiTags('Dashboard')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard)
+@Roles(1, 2, 3, 11)
 @Controller('dashboard')
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}

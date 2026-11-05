@@ -13,23 +13,46 @@ import { PosicionesService } from './posiciones.service';
 import { CreatePosicionesDto } from './dto/create-posicione.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UpdatePosicionesDto } from './dto/update-posicione.dto';
+import { Public } from 'src/guard/public.decorator';
+import { DeviceOrJwtGuard, DispositivoCredencial } from './device-auth.guard';
 
 @ApiTags('Posiciones')
 @ApiBearerAuth('bearer-token')
+@Roles(1, 2, 3)
 @Controller('posiciones')
 export class PosicionesController {
   constructor(private readonly posicionesService: PosicionesService) {}
 
+  // Ingesta: acepta credencial de dispositivo (x-device-token) O, en transición,
+  // el JWT de operador. @Public desactiva los guards globales (JwtAuthGuard /
+  // RolesGuard) para habilitar la vía de dispositivo; DeviceOrJwtGuard aplica la
+  // autenticación real (dispositivo o JWT + @Roles).
   @Post()
-  create(@Body() createPosicionesDto: CreatePosicionesDto) {
-    return this.posicionesService.create(createPosicionesDto);
+  @Public()
+  @UseGuards(DeviceOrJwtGuard)
+  @DispositivoCredencial('validador')
+  @Roles(1, 2, 3)
+  create(@Body() createPosicionesDto: CreatePosicionesDto, @Request() req) {
+    if (req.deviceAuth) {
+      return this.posicionesService.create(createPosicionesDto, {
+        device: true,
+        numeroSerieValidador: req.deviceAuth.numeroSerie,
+      });
+    }
+    return this.posicionesService.create(createPosicionesDto, {
+      userId: Number(req.user.userId),
+      cliente: Number(req.user.cliente),
+      rol: Number(req.user.rol),
+    });
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @TenantResource('posicion')
   async update(
     @Param('id', ParseIntPipe) id: number,
@@ -69,7 +92,11 @@ export class PosicionesController {
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @Get(':id')
   @TenantResource('posicion')
-  findOne(@Param('id') id: string) {
-    return this.posicionesService.findOne(+id);
+  findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.posicionesService.findOne(
+      +id,
+      Number(req.user.cliente),
+      Number(req.user.rol),
+    );
   }
 }

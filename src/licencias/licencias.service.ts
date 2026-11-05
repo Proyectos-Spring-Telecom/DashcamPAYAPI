@@ -1,4 +1,9 @@
 import {
+  clienteHijosDesdeSp,
+  clientesPermitidos,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -38,8 +43,16 @@ export class LicenciasService {
     idUser: number,
     createLicenciaDto: CreateLicenciaDto,
     licenciaFile?: Express.Multer.File,
+    idCliente = 0,
+    rol = 1,
   ) {
     try {
+      await this.assertOperadorEnAlcance(
+        createLicenciaDto.idOperador,
+        idCliente,
+        rol,
+      );
+
       const numeroLicencia = await this.licenciasRepository.findOne({
         where: {
           numeroLicencia: createLicenciaDto.numeroLicencia,
@@ -56,7 +69,8 @@ export class LicenciasService {
           licenciaFile,
           'Licencias',
           idUser,
-          EnumModulos.OPERADORES, // ID del módulo de operadores (las licencias están relacionadas con operadores)
+          EnumModulos.OPERADORES,
+          Number(idCliente) || 0,
         );
         licenciaUrl = uploadResult.url;
       }
@@ -112,29 +126,13 @@ export class LicenciasService {
 
       throw new InternalServerErrorException({
         message: 'Error al crear la licencia.',
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   async findAll(
@@ -198,6 +196,7 @@ INNER JOIN CatCategoriaLicencia ccl ON l.IdCategoriaLicencia = ccl.Id
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
           // Consulta de datos paginados resto Usuario
@@ -273,7 +272,6 @@ WHERE u.IdCliente IN (${placeholders})   -- 🔹 aquí colocas el ID del cliente
       }
       throw new InternalServerErrorException({
         message: `Se produjo un error al obtener la paginación de licencias.`,
-        error: error.message,
       });
     }
   }
@@ -320,6 +318,7 @@ ORDER BY l.Id ASC
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
           // Consulta de datos paginados resto Usuario
@@ -374,7 +373,6 @@ ORDER BY l.Id ASC
       }
       throw new InternalServerErrorException({
         message: `Se produjo un error al obtener la paginación de licencias.`,
-        error: error.message,
       });
     }
   }
@@ -421,6 +419,7 @@ ORDER BY l.Id ASC
           );
           break;
 
+        case 3:
         default:
           const { ids, placeholders } = await this.clienteHijos(cliente);
           // Consulta de datos paginados resto Usuario
@@ -480,8 +479,61 @@ ORDER BY l.Id ASC
       }
       throw new InternalServerErrorException({
         message: `Se produjo un error al obtener una licencia.`,
-        error: error.message,
       });
+    }
+  }
+
+  private async assertLicenciaTenant(
+    id: number,
+    cliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const { ids, placeholders } = await this.clienteHijos(cliente);
+    if (!tieneIdsTenant(ids)) {
+      throw new NotFoundException('Licencia no fue encontrada.');
+    }
+    const rows = await this.licenciasRepository.query(
+      `
+SELECT l.Id
+FROM Licencias l
+INNER JOIN Operadores o ON l.IdOperador = o.Id
+INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+WHERE l.Id = ? AND u.IdCliente IN (${placeholders})
+LIMIT 1
+      `,
+      [id, ...ids],
+    );
+    if (!rows?.length) {
+      throw new NotFoundException('Licencia no fue encontrada.');
+    }
+  }
+
+  private async assertOperadorEnAlcance(
+    idOperador: number,
+    idCliente: number,
+    rol: number,
+  ) {
+    if (Number(rol) === 1) return;
+    const row = (
+      await this.licenciasRepository.query(
+        `SELECT u.IdCliente AS idCliente
+           FROM Operadores o
+           INNER JOIN Usuarios u ON o.IdUsuario = u.Id
+          WHERE o.Id = ?
+          LIMIT 1`,
+        [idOperador],
+      )
+    )?.[0];
+    if (!row) {
+      throw new NotFoundException('Operador no encontrado');
+    }
+    const ids = await clientesPermitidos(
+      this.clienteRepository.manager,
+      Number(idCliente),
+    );
+    if (!tieneIdsTenant(ids) || !ids.includes(Number(row.idCliente))) {
+      throw new NotFoundException('Operador no encontrado');
     }
   }
 
@@ -489,8 +541,18 @@ ORDER BY l.Id ASC
     id: number,
     idUser: number,
     updateLicenciaDto: UpdateLicenciaDto,
+    cliente = 0,
+    rol = 1,
   ) {
     try {
+      await this.assertLicenciaTenant(id, cliente, rol);
+      if (updateLicenciaDto.idOperador != null) {
+        await this.assertOperadorEnAlcance(
+          updateLicenciaDto.idOperador,
+          cliente,
+          rol,
+        );
+      }
       const licencia = await this.licenciasRepository.findOne({
         where: {
           id: id,
@@ -542,13 +604,13 @@ ORDER BY l.Id ASC
 
       throw new InternalServerErrorException({
         message: 'Error al actualizar la licencia.',
-        error: error.message,
       });
     }
   }
 
-  async remove(id: number, idUser: number) {
+  async remove(id: number, idUser: number, cliente = 0, rol = 1) {
     try {
+      await this.assertLicenciaTenant(id, cliente, rol);
       const licencia = await this.licenciasRepository.findOne({
         where: { id: id },
       });
@@ -600,7 +662,6 @@ ORDER BY l.Id ASC
       }
       throw new InternalServerErrorException({
         message: 'Ocurrió un error al intentar eliminar la licencia.',
-        error: error.message,
       });
     }
   }

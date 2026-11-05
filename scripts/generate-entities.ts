@@ -1,11 +1,9 @@
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as Joi from 'joi';
 import * as dotenv from 'dotenv';
 
-// Cargar .env
 dotenv.config();
 
-// Esquema de validación con Joi
 const envSchema = Joi.object({
   DB_HOST: Joi.string().required(),
   DB_PORT: Joi.number().required(),
@@ -17,23 +15,39 @@ const envSchema = Joi.object({
 const { error, value: envVars } = envSchema.validate(process.env);
 
 if (error) {
-  console.error(`❌ Error en variables de entorno: ${error.message}`);
+  console.error('Error en variables de entorno (detalle omitido).');
   process.exit(1);
 }
 
 const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE } = envVars;
 
-// Comando para generar entidades
-const cmd = `npx typeorm-model-generator \
-  -h ${DB_HOST} \
-  -d ${DB_DATABASE} \
-  -u ${DB_USER} \
-  -x ${DB_PASSWORD || ''} \
-  -p ${DB_PORT} \
-  -e mysql \
-  -o ./src/entities \
-  --noConfig`;
+const args = [
+  'typeorm-model-generator',
+  '-h',
+  String(DB_HOST),
+  '-d',
+  String(DB_DATABASE),
+  '-u',
+  String(DB_USER),
+  '-p',
+  String(DB_PORT),
+  '-e',
+  'mysql',
+  '-o',
+  './src/entities',
+  '--noConfig',
+];
+if (DB_PASSWORD) {
+  args.push('-x', String(DB_PASSWORD));
+}
 
-console.log('🚀 Generando entidades desde la base de datos...');
-execSync(cmd, { stdio: 'inherit' });
-console.log('✅ Entidades generadas en src/entities/');
+const result = spawnSync('npx', args, {
+  stdio: 'inherit',
+  shell: process.platform === 'win32',
+  windowsHide: true,
+  env: process.env,
+});
+
+if (result.status !== 0) {
+  process.exit(result.status ?? 1);
+}

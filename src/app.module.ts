@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
+import { JobsModule } from './jobs/jobs.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CommonModule } from './common/common.module';
+import { mysqlSslOption } from './common/mysql-ssl';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { AuthModule } from './auth/auth.module';
 import { BitacoraModule } from './bitacora/bitacora.module';
@@ -63,12 +66,19 @@ import { CatMetodoPagoModule } from './cat-metodo-pago/cat-metodo-pago.module';
 import { DireccionesModule } from './direcciones/direcciones.module';
 import Joi from 'joi';
 import { LoggerService } from './common/logger.service';
+import { JwtAuthGuard } from './guard/jwt-auth.guard';
+import { RolesGuard } from './guard/roles.guard';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       ignoreEnvFile: true,
+      // PATH, HOME y el resto del entorno del proceso no están en el esquema.
+      validationOptions: {
+        allowUnknown: true,
+        abortEarly: false,
+      },
       validationSchema: Joi.object({
         DB_HOST: Joi.string().required(),
         DB_PORT: Joi.number().default(3306),
@@ -79,6 +89,27 @@ import { LoggerService } from './common/logger.service';
         JWT_EXPIRES_IN: Joi.string().required(),
         JWT_REFRESH_SECRET: Joi.string().required(),
         JWT_REFRESH_EXPIRES: Joi.string().default('7d'),
+        JWT_PURPOSE_SECRET: Joi.string().required(),
+        JWT_CONFIRMACION: Joi.string().default('15m'),
+        JWT_ISSUER: Joi.string().default('dashcampay-api'),
+        JWT_AUDIENCE: Joi.string().default('dashcampay'),
+        RECARGA_MONTO_MAX: Joi.number().default(10000),
+        ENFORCE_PIN_BINDING: Joi.string().valid('true', 'false').default('true'),
+        ENFORCE_CVV2_FORBIDDEN: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
+        ENFORCE_VERIFY_USERNAME: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
+        ENFORCE_IDEMPOTENCY_KEY: Joi.string()
+          .valid('true', 'false')
+          .default('false'),
+        ENFORCE_CASH_RECHARGE_ROLES: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
+        ENFORCE_ROLES_DENY_DEFAULT: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
         AWS_REGION: Joi.string().required(),
         AWS_ACCESS_KEY_ID: Joi.string().required(),
         AWS_SECRET_ACCESS_KEY: Joi.string().required(),
@@ -96,6 +127,7 @@ import { LoggerService } from './common/logger.service';
         NETPAY_BASE_URL: Joi.string().uri().optional(),
         NETPAY_PUBLIC_KEY: Joi.string().optional(),
         NETPAY_PRIVATE_KEY: Joi.string().optional(),
+        FRONTEND_BASE_URL: Joi.string().uri().optional(),
         CORS_ORIGINS: Joi.string().optional(),
         ENFORCE_HTTPS: Joi.string().valid('true', 'false').default('false'),
         SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
@@ -104,7 +136,32 @@ import { LoggerService } from './common/logger.service';
         MAX_LOGIN_ATTEMPTS: Joi.number().default(10),
         LOCKOUT_MINUTES: Joi.number().default(30),
         OTP_MAX_ATTEMPTS: Joi.number().default(5),
+        OTP_PEPPER: Joi.string().min(32).required(),
         BITACORA_HMAC_SECRET: Joi.string().required(),
+        DB_TIME_OFFSET_HOURS: Joi.number().default(-6),
+        ABIERTA_TTL_HOURS: Joi.number().default(4),
+        ABIERTA_SWEEP_MINUTES: Joi.number().default(15),
+        RESERVA_STALE_MINUTES: Joi.number().default(15),
+        CONCILIACION_ENABLED: Joi.string().valid('true', 'false').default('true'),
+        REDIS_URL: Joi.string().optional(),
+        RETENCION_POSICIONES_DIAS: Joi.number().default(0),
+        RETENCION_BITACORA_DIAS: Joi.number().default(0),
+        RETENCION_REFRESH_DIAS: Joi.number().default(0),
+        RETENCION_OTP_DIAS: Joi.number().default(0),
+        DB_POOL_LIMIT: Joi.number().default(10),
+        DB_SLOW_QUERY_MS: Joi.number().default(2000),
+        TRUST_PROXY_HOPS: Joi.number().default(1),
+        MAX_PIN_ATTEMPTS: Joi.number().default(5),
+        DB_SSL: Joi.string().valid('true', 'false').default('false'),
+        DB_SSL_REJECT_UNAUTHORIZED: Joi.string()
+          .valid('true', 'false')
+          .default('true'),
+        PORT: Joi.number().port().default(3000),
+        CLIENTES_HIERARCHY_TTL_MS: Joi.number()
+          .integer()
+          .min(1000)
+          .max(3_600_000)
+          .default(60_000),
       }),
     }),
 
@@ -114,6 +171,8 @@ import { LoggerService } from './common/logger.service';
         limit: 100,
       },
     ]),
+
+    ScheduleModule.forRoot(),
 
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -127,12 +186,31 @@ import { LoggerService } from './common/logger.service';
         database: config.get<string>('DB_DATABASE'),
         autoLoadEntities: false,
         entities: [__dirname + '/entities/*{.ts,.js}'],
+        migrations: [__dirname + '/migrations/*{.ts,.js}'],
+        migrationsRun: false,
         synchronize: false, //Nunca poner en true
-        dateStrings: false,
+        // DATE (nacimiento, licencias, verificaciones) como 'YYYY-MM-DD': con
+        // Date a medianoche UTC, TypeORM y el front lo pasaban a hora local
+        // (UTC-6) y cada edición de un pasajero le restaba un día.
+        dateStrings: ['DATE'],
         timezone: 'Z',
+        ...mysqlSslOption(),
+        // Log de queries que superan el umbral (ms). H-54: visibilidad de
+        // consultas lentas sin cambiar comportamiento.
+        maxQueryExecutionTime: Number(config.get<string>('DB_SLOW_QUERY_MS') ?? 2000),
         extra: {
+          // Tope del pool (H-54): dimensionable por entorno, default conservador.
+          connectionLimit: Number(config.get<string>('DB_POOL_LIMIT') ?? 10),
           // Evita que bigint se devuelvan como string
           decimalNumbers: true,
+          // Tras un rato sin tráfico, la red entre la API y MySQL cortaba las
+          // conexiones del pool en silencio y la primera petición daba 500
+          // (ECONNRESET). Keep-alive TCP las mantiene vivas y las ociosas de
+          // más se cierran antes de que alguien las reutilice rotas.
+          enableKeepAlive: true,
+          keepAliveInitialDelay: 10000,
+          maxIdle: 2,
+          idleTimeout: 60000,
         },
       }),
     }),
@@ -249,6 +327,8 @@ import { LoggerService } from './common/logger.service';
     CatMetodoPagoModule,
 
     DireccionesModule,
+
+    JobsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -257,6 +337,14 @@ import { LoggerService } from './common/logger.service';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
   ],
 })

@@ -9,6 +9,7 @@ import {
   MinLength,
   IsIn,
   IsArray,
+  ArrayMaxSize,
   IsNumber,
   Matches,
 } from 'class-validator';
@@ -24,7 +25,7 @@ export class CreateUsuarioDto {
 
   @IsString()
   @IsNotEmpty({ message: 'El Password es obligatorio' })
-  @MinLength(6, { message: 'El Password debe tener al menos 6 caracteres' })
+  @MinLength(12, { message: 'El Password debe tener al menos 12 caracteres' })
   @Matches(/^(?=.*\p{L})(?=.*\d)(?=.*[@$!%*?&.])[^\s]+$/u, {
     message:
       'El Password debe contener al menos una letra (UTF-8), un número y un símbolo común (@$!%*?&.)',
@@ -109,6 +110,9 @@ export class CreateUsuarioDto {
   estatus?: number = 1;
 
   @IsInt()
+  @IsIn([1, 2, 3, 8, 9, 10, 11, 15], {
+    message: 'Rol no válido',
+  })
   @ApiProperty({ description: 'Rol asignado', example: 2 })
   idRol: number;
 
@@ -119,6 +123,7 @@ export class CreateUsuarioDto {
 
   @IsNotEmpty()
   @IsArray()
+  @ArrayMaxSize(200, { message: 'No se permiten más de 200 permisos' })
   @IsNumber({}, { each: true })
   permisosIds: number[];
 }

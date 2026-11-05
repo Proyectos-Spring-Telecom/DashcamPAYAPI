@@ -16,6 +16,7 @@ import { CreateContadoresDto } from './dto/create-contadores.dto';
 import { UpdateContadoresDto } from './dto/update-contadores.dto';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { UpdateContadoresEstatusDto } from './dto/update-contadores-estatus.dto';
@@ -25,6 +26,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 @ApiTags('Contadores')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('contadores')
 @TenantResource('contador')
 export class ContadoresController {
@@ -36,7 +38,12 @@ export class ContadoresController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return await this.contadoresService.create(+idUser, createContadoresDto);
+    return await this.contadoresService.create(
+      +idUser,
+      createContadoresDto,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get('list')
@@ -56,7 +63,11 @@ export class ContadoresController {
     const _idUser = req.user.userId;
     const cliente = req.user.cliente;
     const _rol = req.user.rol;
-    return await this.contadoresService.findAllListClientes(id, +cliente);
+    return await this.contadoresService.findAllListClientes(
+      id,
+      +cliente,
+      +req.user.rol,
+    );
   }
 
   @Get(':page/:limit')
@@ -86,7 +97,13 @@ export class ContadoresController {
     @Body() updateContadorDto: UpdateContadoresDto,
   ) {
     const idUser = req.user.userId;
-    return this.contadoresService.update(+id, +idUser, updateContadorDto);
+    return this.contadoresService.update(
+      +id,
+      +idUser,
+      updateContadorDto,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Patch('actualizar/estado/:id')
@@ -100,6 +117,8 @@ export class ContadoresController {
       +id,
       +idUser,
       updateContadorEstadoDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -114,12 +133,19 @@ export class ContadoresController {
       +id,
       +idUser,
       updateContadorEstatusDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req) {
     const idUser = req.user.userId;
-    return this.contadoresService.remove(+id, +idUser);
+    return this.contadoresService.remove(
+      +id,
+      +idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

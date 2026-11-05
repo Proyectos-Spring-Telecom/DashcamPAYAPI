@@ -1,7 +1,12 @@
 import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   HttpException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { CreateViajesconteoDto } from './dto/create-viajesconteo.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -26,8 +31,47 @@ export class ViajesconteosService {
     private readonly bitacoraLogger: BitacoraLoggerService,
   ) {}
 
-  async create(idUser: number, createViajesconteoDto: CreateViajesconteoDto) {
+  async create(
+    idUser: number,
+    createViajesconteoDto: CreateViajesconteoDto,
+    cliente = 0,
+    rol = 1,
+  ) {
     try {
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Viaje no encontrado');
+        }
+        const viajeRows = await this.viajesconteosRepository.query(
+          `
+SELECT v.Id
+FROM Viajes v
+WHERE v.Id = ? AND v.IdCliente IN (${placeholders})
+LIMIT 1
+          `,
+          [createViajesconteoDto.idViaje, ...ids],
+        );
+        if (!viajeRows?.length) {
+          throw new NotFoundException('Viaje no encontrado');
+        }
+        if (createViajesconteoDto.idConteo != null) {
+          const conteoRows = await this.viajesconteosRepository.query(
+            `
+SELECT cp.Id
+FROM ConteoPasajeros cp
+INNER JOIN Contadores c ON cp.NumeroSerieContador = c.NumeroSerie
+WHERE cp.Id = ? AND c.IdCliente IN (${placeholders})
+LIMIT 1
+            `,
+            [createViajesconteoDto.idConteo, ...ids],
+          );
+          if (!conteoRows?.length) {
+            throw new NotFoundException('Conteo no encontrado');
+          }
+        }
+      }
+
       const newViajesConteos = await this.viajesconteosRepository.create(
         createViajesconteoDto,
       );
@@ -76,29 +120,13 @@ export class ViajesconteosService {
       }
       throw new InternalServerErrorException({
         message: `Se produjo un error al crear el viajesconteo.`,
-        error: error.message,
       });
     }
   }
 
   //funcion para obtener los clientes hijos
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clienteRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0]; // El primer índice contiene los resultados
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-    if (ids.length === 0) {
-      return { data: [] }; // No hay clientes que consultar
-    }
-
-    // 3. Construir el query dinámico con los IDs
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clienteRepository.manager, cliente);
   }
 
   // Consultar posiciones para roles que usan clientes hijos
@@ -355,6 +383,7 @@ ORDER BY v.Id DESC;
           );
           break;
 
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           viajesconteos = await this.consultarViajesConteos(cliente);
@@ -381,7 +410,6 @@ ORDER BY v.Id DESC;
       throw new InternalServerErrorException({
         message:
           'Ocurrió un error al intentar obtener un listado de viajesconteos.',
-        error: error.message,
       });
     }
   }
@@ -703,6 +731,7 @@ LEFT JOIN ConteoPasajeros cp ON cp.Id = vc.IdConteo
   `,
           );
           break;
+        case 3:
         default:
           // Cualquier otro rol (actual o nuevo): filtrar por idCliente + hijos
           viajesconteos = await this.consultarPoscionesPaginado(
@@ -739,13 +768,23 @@ LEFT JOIN ConteoPasajeros cp ON cp.Id = vc.IdConteo
       }
       throw new InternalServerErrorException({
         message: `Se produjo un error al obtener la paginación de viajesconteos.`,
-        error: error.message,
       });
     }
   }
 
-  async findOneViajes(id: number) {
+  async findOneViajes(id: number, cliente = 0, rol = 1) {
     try {
+      let whereSql = 'WHERE v.Id = ?';
+      let params: number[] = [id];
+      if (Number(rol) !== 1) {
+        const { ids, placeholders } = await this.clienteHijos(cliente);
+        if (!tieneIdsTenant(ids)) {
+          throw new NotFoundException('Viaje no encontrado');
+        }
+        whereSql += ` AND v.IdCliente IN (${placeholders})`;
+        params = [id, ...ids];
+      }
+
       const viajesconteos = await this.viajesconteosRepository.query(
         `
 SELECT
@@ -797,7 +836,7 @@ INNER JOIN Zonas reg ON r.IdZona = reg.Id
 LEFT JOIN ViajesConteos vc ON vc.IdViaje = v.Id
 LEFT JOIN ConteoPasajeros cp ON cp.Id = vc.IdConteo
 
-AND v.Id = ?   -- 🔹 aquí colocas el ID del cliente que quieres consultar
+${whereSql}
 
 GROUP BY
     v.Id,
@@ -821,17 +860,11 @@ GROUP BY
 
 ORDER BY v.Id DESC
         `,
-        [id],
+        params,
       );
-      const _data = viajesconteos.map((item) => ({
-        ...item,
-        idViaje: Number(item.idViaje),
-        idCliente: Number(item.idCliente),
-        idTurno: Number(item.idTurno),
-        idOperador: Number(item.idOperador),
-        idVariante: Number(item.idVariante),
-        idConteo: Number(item.idConteo),
-      }));
+      if (!viajesconteos?.length) {
+        throw new NotFoundException('Viaje no encontrado');
+      }
       const result: ApiResponseCommon = {
         data: viajesconteos,
       };
@@ -843,7 +876,6 @@ ORDER BY v.Id DESC
       throw new InternalServerErrorException({
         message:
           'Ocurrió un error al intentar obtener un listado de viajesconteos.',
-        error: error.message,
       });
     }
   }

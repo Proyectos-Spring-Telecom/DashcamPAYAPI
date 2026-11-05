@@ -1,4 +1,8 @@
 import {
+  clienteHijosDesdeSp,
+  tieneIdsTenant,
+} from 'src/common/tenant/ownership-resolvers';
+import {
   BadRequestException,
   HttpException,
   Injectable,
@@ -19,6 +23,7 @@ import {
   ApiResponseCommon,
   EstatusEnumBitcora,
 } from 'src/common/ApiResponse';
+import { forbidTenantMove } from 'src/common/tenant/forbid-tenant-move';
 
 @Injectable()
 export class TransbordosService {
@@ -42,12 +47,26 @@ export class TransbordosService {
   async create(
     idUser: number,
     createTransbordoDto: CreateTransbordoDto,
+    clienteActor = 0,
+    rol = 1,
   ): Promise<ApiCrudResponse> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(clienteActor);
+        if (
+          !tieneIdsTenant(ids) ||
+          !ids.includes(Number(createTransbordoDto.idCliente))
+        ) {
+          throw new NotFoundException(
+            `Cliente con ID ${createTransbordoDto.idCliente} no encontrado`,
+          );
+        }
+      }
+
       // Validar que el cliente existe
       const cliente = await this.clientesRepository.findOne({
         where: { id: createTransbordoDto.idCliente },
@@ -160,7 +179,6 @@ export class TransbordosService {
 
       throw new InternalServerErrorException({
         message: 'Error al crear Transbordo',
-        error: error.message,
       });
     } finally {
       await queryRunner.release();
@@ -297,7 +315,6 @@ export class TransbordosService {
 
       throw new InternalServerErrorException({
         message: 'Error al obtener listado de Transbordos',
-        error: error.message,
       });
     }
   }
@@ -305,7 +322,12 @@ export class TransbordosService {
   /**
    * Obtener un transbordo por ID con sus detalles
    */
-  async findOne(id: number, idUser: number): Promise<ApiResponseCommon> {
+  async findOne(
+    id: number,
+    idUser: number,
+    cliente = 0,
+    rol = 1,
+  ): Promise<ApiResponseCommon> {
     try {
       const transbordo = await this.transbordosRepository.findOne({
         where: { id },
@@ -318,6 +340,16 @@ export class TransbordosService {
 
       if (!transbordo) {
         throw new NotFoundException(`Transbordo con ID ${id} no encontrado`);
+      }
+
+      if (Number(rol) !== 1) {
+        const { ids } = await this.clienteHijos(cliente);
+        if (
+          !tieneIdsTenant(ids) ||
+          !ids.includes(Number(transbordo.idCliente))
+        ) {
+          throw new NotFoundException(`Transbordo con ID ${id} no encontrado`);
+        }
       }
 
       // Verificar que el transbordo esté activo
@@ -379,7 +411,6 @@ export class TransbordosService {
 
       throw new InternalServerErrorException({
         message: `Error al obtener Transbordo con ID ${id}`,
-        error: error.message,
       });
     }
   }
@@ -408,18 +439,12 @@ export class TransbordosService {
         throw new NotFoundException(`Transbordo con ID ${id} no encontrado`);
       }
 
-      // Si se está actualizando el cliente, validar que existe
-      if (updateTransbordoDto.idCliente) {
-        const cliente = await this.clientesRepository.findOne({
-          where: { id: updateTransbordoDto.idCliente },
-        });
-
-        if (!cliente) {
-          throw new NotFoundException(
-            `Cliente con ID ${updateTransbordoDto.idCliente} no encontrado`,
-          );
-        }
-      }
+      forbidTenantMove(
+        transbordoExistente.idCliente,
+        updateTransbordoDto as any,
+        'idCliente',
+        'Transbordo no encontrado',
+      );
 
       // Determinar el número de transbordos a usar para validación
       const numeroTransbordos =
@@ -490,9 +515,6 @@ export class TransbordosService {
       if (updateTransbordoDto.numeroTransbordos !== undefined) {
         datosActualizacion.numeroTransbordos =
           updateTransbordoDto.numeroTransbordos;
-      }
-      if (updateTransbordoDto.idCliente !== undefined) {
-        datosActualizacion.idCliente = updateTransbordoDto.idCliente;
       }
       if (updateTransbordoDto.idTipoDescuento !== undefined) {
         datosActualizacion.idTipoDescuento =
@@ -565,7 +587,6 @@ export class TransbordosService {
 
       throw new InternalServerErrorException({
         message: `Error al actualizar Transbordo con ID ${id}`,
-        error: error.message,
       });
     } finally {
       await queryRunner.release();
@@ -636,7 +657,6 @@ export class TransbordosService {
 
       throw new InternalServerErrorException({
         message: `Error al dar de baja Transbordo con ID ${id}`,
-        error: error.message,
       });
     }
   }
@@ -705,7 +725,6 @@ export class TransbordosService {
 
       throw new InternalServerErrorException({
         message: `Error al activar Transbordo con ID ${id}`,
-        error: error.message,
       });
     }
   }
@@ -757,7 +776,6 @@ export class TransbordosService {
 
       throw new InternalServerErrorException({
         message: 'Error al obtener listado de tipos de descuento',
-        error: error.message,
       });
     }
   }
@@ -766,21 +784,6 @@ export class TransbordosService {
    * Función privada para obtener los clientes hijos
    */
   private async clienteHijos(cliente: number) {
-    const clientesFiltrado = await this.clientesRepository.query(
-      `CALL spGetClientes(?);`,
-      [cliente],
-    );
-
-    const idsFiltrados = clientesFiltrado[0];
-    const ids = idsFiltrados
-      .map((clientesFiltrado: any) => Number(clientesFiltrado.Id))
-      .filter(Boolean);
-
-    if (ids.length === 0) {
-      return { ids: [], placeholders: '' };
-    }
-
-    const placeholders = ids.map(() => '?').join(', ');
-    return { ids, placeholders };
+    return clienteHijosDesdeSp(this.clientesRepository.manager, cliente);
   }
 }

@@ -16,6 +16,7 @@ import { CreateOperadoreDto } from './dto/create-operadore.dto';
 import { UpdateOperadoreDto } from './dto/update-operadore.dto';
 import { UpdateOperadorStatusDto } from './dto/update-operadores-estatus.dto';
 import { JwtAuthGuard } from 'src/guard/jwt-auth.guard';
+import { Roles } from 'src/guard/roles.decorator';
 import { TenantOwnershipGuard } from 'src/common/tenant/tenant-ownership.guard';
 import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
@@ -30,6 +31,7 @@ import {
 @ApiTags('Operadores')
 @ApiBearerAuth('bearer-token')
 @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+@Roles(1, 2, 3, 11)
 @Controller('operadores')
 @TenantResource('operador')
 export class OperadoresController {
@@ -41,7 +43,12 @@ export class OperadoresController {
     @Request() req,
   ): Promise<ApiCrudResponse> {
     const idUser = req.user.userId;
-    return this.operadoresService.createOperador(createOperadoreDto, +idUser);
+    return this.operadoresService.createOperador(
+      createOperadoreDto,
+      +idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 
   @Get('list')
@@ -123,6 +130,8 @@ export class OperadoresController {
       +id,
       +idUser,
       updateOperadorStatusDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
@@ -137,12 +146,19 @@ export class OperadoresController {
       +id,
       +idUser,
       updateOperadoreDto,
+      +req.user.cliente,
+      +req.user.rol,
     );
   }
 
   @Delete(':id')
   removeOperador(@Param('id') id: string, @Request() req) {
     const idUser = req.user.userId;
-    return this.operadoresService.removeOperador(+id, +idUser);
+    return this.operadoresService.removeOperador(
+      +id,
+      +idUser,
+      +req.user.cliente,
+      +req.user.rol,
+    );
   }
 }

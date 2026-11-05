@@ -1,10 +1,12 @@
 import {
+  BadRequestException,
   Injectable,
   NestInterceptor,
   ExecutionContext,
   CallHandler,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
+import { SecurityFlags } from 'src/common/security-flags';
 
 /**
  * Se ejecuta ANTES del ValidationPipe global: copia alias (nombre, apellidos, telefono)
@@ -17,6 +19,15 @@ export class NormalizeCreateCustomerBodyInterceptor implements NestInterceptor {
     const b = req.body;
 
     if (b && typeof b === 'object' && !Array.isArray(b)) {
+      if (
+        SecurityFlags.cvv2Forbidden() &&
+        (b.cvv2 != null || b.cvv != null || b.CVV2 != null || b.CVV != null)
+      ) {
+        throw new BadRequestException(
+          'cvv2 no está permitido en esta operación.',
+        );
+      }
+
       const trimStr = (v: unknown): string =>
         v === undefined || v === null ? '' : String(v).trim();
 

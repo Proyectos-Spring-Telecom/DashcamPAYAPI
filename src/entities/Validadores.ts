@@ -45,6 +45,15 @@ export class Validadores {
   @Column('tinyint', { name: 'Estatus', default: () => "'1'" })
   estatus: number;
 
+  // H-58 / V2-08: hash SHA-256 (hex) del token de dispositivo. NULL = sin
+  // credencial provisionada todavía (vía de transición con JWT de operador).
+  @Column('varchar', {
+    name: 'DeviceTokenHash',
+    length: 64,
+    nullable: true,
+  })
+  deviceTokenHash: string | null;
+
   @Column('tinyint', { name: 'EstadoActual', unsigned: true })
   estadoActual: number;
 
