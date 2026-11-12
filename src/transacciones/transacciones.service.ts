@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { formatFechaDb, nowDb } from 'src/common/clock';
 import {
   BadRequestException,
@@ -20,6 +21,7 @@ import {
 import { SecurityFlags } from 'src/common/security-flags';
 import { assertDateWindow, assertIsoDate } from 'src/common/sql-date';
 import { CreateTransaccioneRecargaDto } from './dto/create-transaccione-recarga.dto';
+import { CreateReservaRecargaDto } from './dto/create-reserva-recarga.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, IsNull } from 'typeorm';
 import { TransaccionesRecarga } from 'src/entities/TransaccionesRecarga';
@@ -89,8 +91,23 @@ class SaldoInsuficienteTxError extends Error {
 /** Reserva de claveIdempotencia de una recarga (tabla ReservasRecarga). */
 interface ReservaRecarga {
   clave: string;
-  estado: 'EN_PROCESO' | 'PENDIENTE_CONCILIAR';
+  estado: 'EN_PROCESO' | 'PENDIENTE_CONCILIAR' | 'CANCELADA' | 'COMPLETADA';
   tokenId?: string;
+  folio?: string;
+  origen?: 'ECOMMERCE' | 'TPV';
+}
+
+interface ReservaRecargaRow {
+  ClaveIdempotencia: string;
+  NumeroSerieMonedero: string;
+  Monto: number | string;
+  Estado: string;
+  Folio: string | null;
+  IdMetodoPago: number | null;
+  NumeroSerieValidador: string | null;
+  Origen: string | null;
+  IdTransaccionRecarga: number | null;
+  FechaCreacion: Date | string;
 }
 
 @Injectable()
@@ -913,12 +930,263 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
   // ========================================
   // Recarga con la claveIdempotencia reservada antes de cobrar (R3 / V2-15)
   // ========================================
+
+  /** Folio alfanumérico ≤ 20 para SaleRequest de NetPay TPV. */
+  private generarFolioReserva(): string {
+    const stamp = Date.now().toString(36).toUpperCase().slice(-8);
+    const rnd = randomBytes(3).toString('hex').toUpperCase();
+    return `R${stamp}${rnd}`.slice(0, 20);
+  }
+
+  private minutosReservaStale(): number {
+    const staleRaw = Number(process.env.RESERVA_STALE_MINUTES ?? 15);
+    return Number.isFinite(staleRaw) && staleRaw > 0
+      ? Math.floor(staleRaw)
+      : 15;
+  }
+
+  /**
+   * Paso 1 del cobro presencial: reserva antes de SaleRequest en la TPV.
+   * No cobra ni abona; solo valida monedero/tope/validador y crea EN_PROCESO.
+   */
+  async crearReservaRecargaTerminal(
+    dto: CreateReservaRecargaDto,
+    idUser: number,
+    rol: number,
+    cliente: number,
+  ): Promise<{
+    data: {
+      claveIdempotencia: string;
+      folio: string;
+      monto: number;
+      expiraEn: string;
+    };
+  }> {
+    if (Number(dto.idMetodoPago) !== EnumMetodoPago.TARJETA_TERMINAL) {
+      throw new BadRequestException(
+        'La reserva de terminal requiere idMetodoPago = 5.',
+      );
+    }
+    if (![1, 2, 3, 11].includes(Number(rol))) {
+      throw new ForbiddenException(
+        'Solo caja, administración o validador pueden reservar recarga en terminal.',
+      );
+    }
+
+    const clave = dto.claveIdempotencia.trim();
+    const monto = Number(Number(dto.monto).toFixed(2));
+    const tope = Number(process.env.RECARGA_MONTO_MAX ?? 10000);
+    if (!(monto > 0) || monto > tope) {
+      throw new BadRequestException(
+        `El monto debe ser mayor a 0 y no exceder ${tope}.`,
+      );
+    }
+
+    const existentes: ReservaRecargaRow[] =
+      await this.transaccionesrecargaRepository.query(
+        `SELECT * FROM ReservasRecarga WHERE ClaveIdempotencia = ? LIMIT 1`,
+        [clave],
+      );
+    if (existentes?.[0]) {
+      const prev = existentes[0];
+      if (prev.Estado === 'CANCELADA') {
+        throw new ConflictException(
+          'Esa claveIdempotencia ya fue cancelada. Usa una nueva.',
+        );
+      }
+      if (
+        prev.NumeroSerieMonedero !== dto.numeroSerieMonedero ||
+        Number(prev.Monto) !== monto
+      ) {
+        throw new ConflictException(
+          'La claveIdempotencia ya se usó para otra reserva.',
+        );
+      }
+      if (prev.Estado === 'COMPLETADA' && prev.IdTransaccionRecarga) {
+        // Idempotente: la app puede reconsultar folio tras un confirm previo.
+        const creacion = new Date(prev.FechaCreacion);
+        const expira = new Date(
+          creacion.getTime() + this.minutosReservaStale() * 60_000,
+        );
+        return {
+          data: {
+            claveIdempotencia: clave,
+            folio: prev.Folio || '',
+            monto,
+            expiraEn: expira.toISOString(),
+          },
+        };
+      }
+      if (prev.Estado === 'EN_PROCESO' || prev.Estado === 'PENDIENTE_CONCILIAR') {
+        const creacion = new Date(prev.FechaCreacion);
+        const expira = new Date(
+          creacion.getTime() + this.minutosReservaStale() * 60_000,
+        );
+        return {
+          data: {
+            claveIdempotencia: clave,
+            folio: prev.Folio || '',
+            monto,
+            expiraEn: expira.toISOString(),
+          },
+        };
+      }
+    }
+
+    const monedero = await this.monederosService.findOneMonederoBySerie(
+      dto.numeroSerieMonedero,
+    );
+    await this.assertMonederoEnTenant(Number(monedero.data.idCliente), cliente);
+    if (Number(monedero.data.estatus) !== 1) {
+      throw new BadRequestException('El monedero no está activo.');
+    }
+
+    const validador = await this.validadorRepository.findOne({
+      where: { numeroSerie: dto.numeroSerieValidador.trim() },
+    });
+    if (
+      !validador ||
+      Number(validador.estatus) !== 1 ||
+      Number(validador.idCliente) !== Number(monedero.data.idCliente)
+    ) {
+      throw new BadRequestException('Validador no válido para este monedero.');
+    }
+    await this.assertMonederoEnTenant(Number(validador.idCliente), cliente);
+
+    let folio = this.generarFolioReserva();
+    for (let intento = 0; intento < 5; intento++) {
+      const insert: { affectedRows?: number } =
+        await this.transaccionesrecargaRepository.query(
+          `INSERT IGNORE INTO ReservasRecarga
+             (ClaveIdempotencia, NumeroSerieMonedero, Monto, IdUsuario, Estado,
+              Folio, IdMetodoPago, NumeroSerieValidador, Origen)
+           VALUES (?, ?, ?, ?, 'EN_PROCESO', ?, ?, ?, 'TPV')`,
+          [
+            clave,
+            dto.numeroSerieMonedero,
+            monto,
+            idUser,
+            folio,
+            EnumMetodoPago.TARJETA_TERMINAL,
+            dto.numeroSerieValidador.trim(),
+          ],
+        );
+      if (Number(insert?.affectedRows ?? 0) === 1) {
+        const expira = new Date(
+          Date.now() + this.minutosReservaStale() * 60_000,
+        );
+        return {
+          data: {
+            claveIdempotencia: clave,
+            folio,
+            monto,
+            expiraEn: expira.toISOString(),
+          },
+        };
+      }
+      // Colisión de clave o de folio: si la clave ya existe, respuesta idempotente.
+      const otraVez: ReservaRecargaRow[] =
+        await this.transaccionesrecargaRepository.query(
+          `SELECT * FROM ReservasRecarga WHERE ClaveIdempotencia = ? LIMIT 1`,
+          [clave],
+        );
+      if (otraVez?.[0]) {
+        const prev = otraVez[0];
+        if (
+          prev.NumeroSerieMonedero !== dto.numeroSerieMonedero ||
+          Number(prev.Monto) !== monto
+        ) {
+          throw new ConflictException(
+            'La claveIdempotencia ya se usó para otra reserva.',
+          );
+        }
+        const creacion = new Date(prev.FechaCreacion);
+        const expira = new Date(
+          creacion.getTime() + this.minutosReservaStale() * 60_000,
+        );
+        return {
+          data: {
+            claveIdempotencia: clave,
+            folio: prev.Folio || '',
+            monto,
+            expiraEn: expira.toISOString(),
+          },
+        };
+      }
+      folio = this.generarFolioReserva();
+    }
+    throw new InternalServerErrorException(
+      'No se pudo generar la reserva de recarga.',
+    );
+  }
+
+  async cancelarReservaRecarga(
+    claveIdempotencia: string,
+    idUser: number,
+    cliente: number,
+  ): Promise<{ status: string; message: string }> {
+    const clave = decodeURIComponent(claveIdempotencia).trim();
+    const rows: ReservaRecargaRow[] =
+      await this.transaccionesrecargaRepository.query(
+        `SELECT * FROM ReservasRecarga WHERE ClaveIdempotencia = ? LIMIT 1`,
+        [clave],
+      );
+    const reserva = rows?.[0];
+    if (!reserva) {
+      throw new NotFoundException('Reserva no encontrada.');
+    }
+    if (reserva.Estado === 'COMPLETADA') {
+      throw new ConflictException(
+        'La reserva ya está completada y no se puede cancelar.',
+      );
+    }
+    if (reserva.Estado === 'CANCELADA') {
+      return { status: 'success', message: 'Reserva ya cancelada' };
+    }
+
+    const monedero = await this.monederosService.findOneMonederoBySerie(
+      reserva.NumeroSerieMonedero,
+    );
+    await this.assertMonederoEnTenant(Number(monedero.data.idCliente), cliente);
+
+    await this.transaccionesrecargaRepository.query(
+      `UPDATE ReservasRecarga SET Estado = 'CANCELADA'
+        WHERE ClaveIdempotencia = ?
+          AND Estado IN ('EN_PROCESO','PENDIENTE_CONCILIAR')`,
+      [clave],
+    );
+
+    await this.bitacoraLogger.logToBitacora(
+      'Transacciones',
+      `Reserva de recarga cancelada ${clave}`,
+      'UPDATE',
+      { claveIdempotencia: clave, folio: reserva.Folio },
+      idUser,
+      EnumModulos.TRANSACCIONES,
+      EstatusEnumBitcora.SUCCESS,
+    );
+
+    return { status: 'success', message: 'Reserva cancelada' };
+  }
+
   async createTransaccionRecarga(
     createTransaccioneRecargaDto: CreateTransaccioneRecargaDto,
     idUser: number,
     rol = 0,
     cliente = 0,
   ): Promise<ApiCrudResponse> {
+    if (
+      Number(createTransaccioneRecargaDto.idMetodoPago) ===
+      EnumMetodoPago.TARJETA_TERMINAL
+    ) {
+      return this.confirmarRecargaTerminal(
+        createTransaccioneRecargaDto,
+        idUser,
+        rol,
+        cliente,
+      );
+    }
+
     const clave =
       createTransaccioneRecargaDto.claveIdempotencia?.trim() || null;
     if (!clave) {
@@ -941,8 +1209,8 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
     const insert: { affectedRows?: number } =
       await this.transaccionesrecargaRepository.query(
         `INSERT IGNORE INTO ReservasRecarga
-           (ClaveIdempotencia, NumeroSerieMonedero, Monto, IdUsuario, Estado)
-         VALUES (?, ?, ?, ?, 'EN_PROCESO')`,
+           (ClaveIdempotencia, NumeroSerieMonedero, Monto, IdUsuario, Estado, Origen)
+         VALUES (?, ?, ?, ?, 'EN_PROCESO', 'ECOMMERCE')`,
         [
           clave,
           createTransaccioneRecargaDto.numeroSerieMonedero,
@@ -961,7 +1229,11 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const reserva: ReservaRecarga = { clave, estado: 'EN_PROCESO' };
+    const reserva: ReservaRecarga = {
+      clave,
+      estado: 'EN_PROCESO',
+      origen: 'ECOMMERCE',
+    };
     try {
       const result = await this.procesarRecarga(
         createTransaccioneRecargaDto,
@@ -994,6 +1266,112 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       }
       throw error;
     }
+  }
+
+  /**
+   * Paso 3 del cobro presencial: confirma abono con evidencia TPV.
+   * No llama a NetPay e-commerce.
+   */
+  private async confirmarRecargaTerminal(
+    dto: CreateTransaccioneRecargaDto,
+    idUser: number,
+    rol: number,
+    cliente: number,
+  ): Promise<ApiCrudResponse> {
+    const clave = dto.claveIdempotencia?.trim();
+    if (!clave) {
+      throw new BadRequestException(
+        'claveIdempotencia es obligatoria para recarga en terminal.',
+      );
+    }
+    if (!dto.pagoTerminal) {
+      throw new BadRequestException(
+        'pagoTerminal es obligatorio cuando idMetodoPago es 5.',
+      );
+    }
+    if (![1, 2, 3, 11].includes(Number(rol))) {
+      throw new ForbiddenException(
+        'Solo caja, administración o validador pueden confirmar recarga en terminal.',
+      );
+    }
+
+    const previa = await this.recargaPorClave(clave, dto);
+    if (previa) {
+      const monedero = await this.monederosService.findOneMonederoBySerie(
+        dto.numeroSerieMonedero,
+      );
+      return {
+        status: previa.status,
+        message: previa.message,
+        data: {
+          id: Number(previa.data?.id),
+          nombre: previa.data?.nombre || dto.numeroSerieMonedero,
+          saldo: Number(monedero.data.saldo),
+        },
+      };
+    }
+
+    const rows: ReservaRecargaRow[] =
+      await this.transaccionesrecargaRepository.query(
+        `SELECT * FROM ReservasRecarga WHERE ClaveIdempotencia = ? LIMIT 1`,
+        [clave],
+      );
+    const reservaRow = rows?.[0];
+    if (!reservaRow) {
+      throw new BadRequestException(
+        'No hay reserva EN_PROCESO para esa claveIdempotencia. Llama primero a /recarga/reserva.',
+      );
+    }
+    if (reservaRow.Estado === 'CANCELADA') {
+      throw new ConflictException('La reserva fue cancelada.');
+    }
+    if (reservaRow.Estado === 'COMPLETADA' && reservaRow.IdTransaccionRecarga) {
+      return this.recargaPorClave(clave, dto).then(
+        (r) =>
+          r ??
+          Promise.reject(
+            new ConflictException('La reserva ya está completada.'),
+          ),
+      );
+    }
+    if (reservaRow.Estado !== 'EN_PROCESO') {
+      throw new ConflictException(
+        `La reserva está en estado ${reservaRow.Estado} y no se puede confirmar.`,
+      );
+    }
+    if (reservaRow.NumeroSerieMonedero !== dto.numeroSerieMonedero) {
+      throw new ConflictException(
+        'El monedero no coincide con la reserva.',
+      );
+    }
+    if (Number(reservaRow.Monto) !== Number(dto.monto)) {
+      throw new ConflictException('El monto no coincide con la reserva.');
+    }
+    if (!reservaRow.Folio || reservaRow.Folio !== dto.pagoTerminal.folio) {
+      throw new BadRequestException(
+        'El folio de pagoTerminal no coincide con la reserva.',
+      );
+    }
+    if (Number(dto.pagoTerminal.montoCobrado) !== Number(dto.monto)) {
+      throw new BadRequestException(
+        'pagoTerminal.montoCobrado debe ser igual al monto de la recarga.',
+      );
+    }
+
+    const reserva: ReservaRecarga = {
+      clave,
+      estado: 'EN_PROCESO',
+      folio: reservaRow.Folio,
+      origen: 'TPV',
+    };
+
+    const result = await this.procesarRecarga(dto, idUser, rol, cliente, reserva);
+    await this.transaccionesrecargaRepository.query(
+      `UPDATE ReservasRecarga SET Estado = 'COMPLETADA', IdTransaccionRecarga = ?
+        WHERE ClaveIdempotencia = ? AND Estado = 'EN_PROCESO'`,
+      [Number(result.data?.id) || null, clave],
+    );
+    return result;
   }
 
   /**
@@ -1120,9 +1498,10 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        // 3) EN_PROCESO vencida sin token ni recarga: nada que confirmar ni
-        //    compensar en NetPay. Se marca PENDIENTE_CONCILIAR (revisión manual)
-        //    y deja de contarse como "en proceso".
+        // 3) EN_PROCESO vencida sin token ni recarga.
+        //    TPV: sin consulta NetPay por folio aún → PENDIENTE_CONCILIAR
+        //    (no CANCELADA automática: el cobro pudo haber quedado en la TPV).
+        //    E-commerce: igual, revisión manual.
         await this.transaccionesrecargaRepository.query(
           `UPDATE ReservasRecarga
               SET Estado = 'PENDIENTE_CONCILIAR'
@@ -1177,9 +1556,18 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         createTransaccioneRecargaDto.idMetodoPago === EnumMetodoPago.EFECTIVO ||
         createTransaccioneRecargaDto.idMetodoPago ===
           EnumMetodoPago.TRANSFERENCIA;
-      // Regla de negocio: la tarjeta solo la usa el pasajero desde su propia
-      // sesión; caja, administración y operadores recargan en efectivo.
-      if (!esEfectivoOTransferencia && Number(rol) !== 9) {
+      const esTarjetaTerminal =
+        createTransaccioneRecargaDto.idMetodoPago ===
+        EnumMetodoPago.TARJETA_TERMINAL;
+      // Tarjeta e-commerce (3/4): solo pasajero. Efectivo/transferencia y TPV (5):
+      // caja / admin / operador / cajero.
+      if (esTarjetaTerminal) {
+        if (![1, 2, 3, 11].includes(Number(rol))) {
+          throw new ForbiddenException(
+            'Solo caja, administración o validador pueden recargar en terminal.',
+          );
+        }
+      } else if (!esEfectivoOTransferencia && Number(rol) !== 9) {
         throw new ForbiddenException(
           'Las recargas con tarjeta solo las hace el pasajero desde su sesión.',
         );
@@ -1222,7 +1610,8 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         cliente,
       );
 
-      // ✅ Si el método de pago es Tarjeta (3 o 4), primero procesar el pago con Netpay
+      // Tarjeta e-commerce (3/4): el servidor cobra. Tarjeta TPV (5): ya cobró
+      // el Smart SDK; aquí solo se registra evidencia y se abona.
       let pagoNetpayResponse: any = null;
       if (
         createTransaccioneRecargaDto.idMetodoPago ===
@@ -1373,6 +1762,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           if (!incrementado) {
             throw new NotFoundException('El monedero no fue encontrado.');
           }
+          const pagoTpv = createTransaccioneRecargaDto.pagoTerminal;
           const newTransaccion = manager.create(TransaccionesRecarga, {
             monto: createTransaccioneRecargaDto.monto,
             latitudFinal: createTransaccioneRecargaDto.latitudInicial,
@@ -1407,6 +1797,24 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
                 EnumMetodoPago.TARJETA_DEBITO
                 ? createTransaccioneRecargaDto.referenceIdNetPay || null
                 : null,
+            orderIdNetPay: esTarjetaTerminal ? pagoTpv?.orderId || null : null,
+            transactionIdNetPay: esTarjetaTerminal
+              ? pagoTpv?.transactionId || null
+              : null,
+            authCodeNetPay: esTarjetaTerminal ? pagoTpv?.authCode || null : null,
+            rrnNetPay: esTarjetaTerminal ? pagoTpv?.rrn || null : null,
+            naturalezaTarjeta: esTarjetaTerminal
+              ? pagoTpv?.naturalezaTarjeta || null
+              : null,
+            bin: esTarjetaTerminal ? pagoTpv?.bin || null : null,
+            ultimos4: esTarjetaTerminal ? pagoTpv?.ultimos4 || null : null,
+            folioNetPay: esTarjetaTerminal ? pagoTpv?.folio || null : null,
+            marcaTarjeta: esTarjetaTerminal ? pagoTpv?.marca || null : null,
+            storeIdNetPay: esTarjetaTerminal ? pagoTpv?.storeId || null : null,
+            afiliacionNetPay: esTarjetaTerminal
+              ? pagoTpv?.afiliacion || null
+              : null,
+            terminalNetPay: esTarjetaTerminal ? pagoTpv?.terminal || null : null,
           });
           return manager.save(newTransaccion);
         });
@@ -1470,7 +1878,9 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
         EstatusEnumBitcora.SUCCESS,
       );
 
-      //API response
+      const monederoTras = await this.monederosService.findOneMonederoBySerie(
+        createTransaccioneRecargaDto.numeroSerieMonedero,
+      );
       const result: ApiCrudResponse = {
         status: 'success',
         message: 'Transaccion creado correctamente',
@@ -1479,6 +1889,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
           nombre:
             `${createTransaccioneRecargaDto.numeroSerieMonedero} ${montoFinal} ` ||
             '',
+          saldo: Number(monederoTras.data.saldo),
         },
       };
       return result;

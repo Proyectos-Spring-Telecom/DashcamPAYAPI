@@ -130,4 +130,6 @@ export enum EnumMetodoPago {
   TRANSFERENCIA = 2,
   TARJETA_CREDITO = 3,
   TARJETA_DEBITO = 4,
+  /** Cobro presencial en TPV NetPay (Smart SDK). El API no cobra e-commerce. */
+  TARJETA_TERMINAL = 5,
 }

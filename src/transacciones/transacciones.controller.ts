@@ -15,12 +15,14 @@ import { TenantResource } from 'src/common/tenant/tenant-resource.decorator';
 import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { CreateTransaccioneDebitoDto } from './dto/create-transaccione-debito.dto';
 import { CreateTransaccioneRecargaDto } from './dto/create-transaccione-recarga.dto';
+import { CreateReservaRecargaDto } from './dto/create-reserva-recarga.dto';
 import {
   ApiBearerAuth,
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBody,
+  ApiParam,
 } from '@nestjs/swagger';
 import { GetTransaccioneDto } from './dto/get-transacciones.dto';
 import { GetHistoricoRecargasDto } from './dto/get-historico-recargas.dto';
@@ -52,13 +54,55 @@ export class TransaccionesController {
     );
   }
 
+  @Post('recarga/reserva')
+  @Roles(1, 2, 3, 11)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @ApiOperation({
+    summary: 'Reserva una recarga antes del cobro presencial en TPV',
+    description:
+      'Valida monedero/tope/validador y crea ReservasRecarga EN_PROCESO con folio para SaleRequest. No cobra ni abona.',
+  })
+  @ApiResponse({ status: 200, description: 'Reserva creada o reutilizada' })
+  @ApiBody({ type: CreateReservaRecargaDto })
+  crearReservaRecarga(
+    @Body() dto: CreateReservaRecargaDto,
+    @Request() req,
+  ) {
+    return this.transaccionesService.crearReservaRecargaTerminal(
+      dto,
+      Number(req.user.userId),
+      Number(req.user.rol),
+      Number(req.user.cliente),
+    );
+  }
+
+  @Post('recarga/reserva/:claveIdempotencia/cancelar')
+  @Roles(1, 2, 3, 11)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @ApiOperation({
+    summary: 'Cancela una reserva de recarga TPV',
+    description:
+      'Usar si NetPay rechaza o el usuario cancela el cobro. Idempotente. 409 si ya COMPLETADA.',
+  })
+  @ApiParam({ name: 'claveIdempotencia' })
+  cancelarReservaRecarga(
+    @Param('claveIdempotencia') claveIdempotencia: string,
+    @Request() req,
+  ) {
+    return this.transaccionesService.cancelarReservaRecarga(
+      claveIdempotencia,
+      Number(req.user.userId),
+      Number(req.user.cliente),
+    );
+  }
+
   @Post('recarga')
   @Roles(1, 2, 3, 9, 11)
   @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
   @ApiOperation({
     summary: 'Crea una transacción de recarga',
     description:
-      'Crea una recarga de monedero. Si el método de pago es Tarjeta (3 o 4), primero procesa el pago con Netpay antes de hacer la recarga.',
+      'Efectivo/transferencia, tarjeta e-commerce (3/4, cobra NetPay) o tarjeta presencial TPV (5 + pagoTerminal, no cobra).',
   })
   @ApiResponse({ status: 201, description: 'Recarga creada exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos o pago rechazado' })
@@ -79,22 +123,35 @@ export class TransaccionesController {
           claveIdempotencia: 'a1b2c3d4-e5f6-47a8-9b0c-1d2e3f4a5b6c',
         },
       },
-      transferencia: {
-        summary: 'Recarga con Transferencia (idMetodoPago: 2)',
+      tarjetaTerminal: {
+        summary: 'Recarga con tarjeta presencial TPV (idMetodoPago: 5)',
         description:
-          'Recarga con transferencia bancaria, no requiere datos de Netpay',
+          'Tras SaleRequest aprobado. Requiere reserva previa y pagoTerminal. El API no cobra.',
         value: {
           idTipoTransaccion: 1,
-          monto: 200.0,
-          latitudInicial: 19.432608,
-          longitudInicial: -99.133209,
-          numeroSerieMonedero: 'MON-0001',
-          numeroSerieValidador: 'DISP-0001',
-          idMetodoPago: 2,
+          monto: 100.0,
+          latitudInicial: 18.953314,
+          longitudInicial: -99.235904,
+          numeroSerieMonedero: 'MON-670484-5477',
+          numeroSerieValidador: 'a22108bc025bea7f',
+          idMetodoPago: 5,
+          claveIdempotencia: '550e8400-e29b-41d4-a716-446655440000',
+          pagoTerminal: {
+            folio: 'R-000123456',
+            orderId: 'order-xyz',
+            transactionId: 'txn-xyz',
+            authCode: '123456',
+            rrn: 'rrn-1',
+            montoCobrado: '100.00',
+            naturalezaTarjeta: 'CREDITO',
+            marca: 'VISA',
+            bin: '411111',
+            ultimos4: '1234',
+          },
         },
       },
       tarjetaCredito: {
-        summary: 'Recarga con Tarjeta de Crédito (idMetodoPago: 3)',
+        summary: 'Recarga con Tarjeta de Crédito e-commerce (idMetodoPago: 3)',
         description:
           'Recarga con tarjeta de crédito. Primero procesa el pago en Netpay, luego hace la recarga.',
         value: {
@@ -110,35 +167,6 @@ export class TransaccionesController {
           sessionId: '1721779181755',
           deviceFingerPrint: '1721779181755',
           idDireccion: 1,
-          deviceInformation: {
-            deviceChannel: 'Browser',
-            httpBrowserColorDepth: '24',
-            httpBrowserJavaEnabled: 'FALSE',
-            httpBrowserJavaScriptEnabled: 'TRUE',
-            httpBrowserLanguage: 'es',
-            httpBrowserScreenHeight: '687',
-            httpBrowserScreenWidth: '1718',
-            httpBrowserTimeDifference: '360',
-          },
-        },
-      },
-      tarjetaDebito: {
-        summary: 'Recarga con Tarjeta de Débito (idMetodoPago: 4)',
-        description:
-          'Recarga con tarjeta de débito. Primero procesa el pago en Netpay, luego hace la recarga.',
-        value: {
-          idTipoTransaccion: 1,
-          monto: 300.5,
-          latitudInicial: 19.432608,
-          longitudInicial: -99.133209,
-          numeroSerieMonedero: 'MON-0001',
-          numeroSerieValidador: 'DISP-0001',
-          idMetodoPago: 4,
-          tokenCardNetPay: 'token_DxWw2P-7mFNUQKS2BjQoyyKuJ0eXm',
-          referenceIdNetPay: '1234567890123',
-          sessionId: '1721779181755',
-          deviceFingerPrint: '1721779181755',
-          idDireccion: 2,
           deviceInformation: {
             deviceChannel: 'Browser',
             httpBrowserColorDepth: '24',

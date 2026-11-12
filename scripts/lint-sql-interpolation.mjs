@@ -40,6 +40,7 @@ const ALLOW = new Set([
 
 const MIGRATION_ALLOW = new Set([
   'table',
+  'column',
   'check.table',
   'check.column',
   'check.name',
