@@ -87,8 +87,12 @@ export class HistoricoTransaccionesDebito {
   })
   fhRegistro: Date;
 
-  @Column('varchar', { name: 'NumeroSerieMonedero', length: 100 })
-  numeroSerieMonedero: string;
+  @Column('varchar', {
+    name: 'NumeroSerieMonedero',
+    length: 100,
+    nullable: true,
+  })
+  numeroSerieMonedero: string | null;
 
   @Column('varchar', { name: 'NumeroSerieValidador', length: 100 })
   numeroSerieValidador: string;

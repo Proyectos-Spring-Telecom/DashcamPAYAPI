@@ -22,6 +22,8 @@ import { SecurityFlags } from 'src/common/security-flags';
 import { assertDateWindow, assertIsoDate } from 'src/common/sql-date';
 import { CreateTransaccioneRecargaDto } from './dto/create-transaccione-recarga.dto';
 import { CreateReservaRecargaDto } from './dto/create-reserva-recarga.dto';
+import { CreateReservaDebitoTarjetaDto } from './dto/create-reserva-debito-tarjeta.dto';
+import { ConfirmarDebitoTarjetaDto } from './dto/confirmar-debito-tarjeta.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, IsNull } from 'typeorm';
 import { TransaccionesRecarga } from 'src/entities/TransaccionesRecarga';
@@ -107,6 +109,18 @@ interface ReservaRecargaRow {
   NumeroSerieValidador: string | null;
   Origen: string | null;
   IdTransaccionRecarga: number | null;
+  FechaCreacion: Date | string;
+}
+
+interface ReservaDebitoTarjetaRow {
+  ClaveIdempotencia: string;
+  IdViaje: number | string;
+  NumeroSerieValidador: string;
+  CantidadPasajes: number | string;
+  Monto: number | string;
+  Folio: string | null;
+  Estado: string;
+  IdTransaccionDebito: number | null;
   FechaCreacion: Date | string;
 }
 
@@ -215,9 +229,13 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
 
     for (const tx of vencidas) {
       try {
+        // Débitos TPV no tienen monedero; no aplican al barrido de ABIERTAS.
+        if (!tx.numeroSerieMonedero) {
+          continue;
+        }
         await this.dataSource.transaction(async (manager) => {
           const monedero = await manager.getRepository(Monederos).findOne({
-            where: { numeroSerie: tx.numeroSerieMonedero },
+            where: { numeroSerie: tx.numeroSerieMonedero as string },
           });
           const cobro = Number(tx.cobroMaximo ?? tx.monto ?? 0);
           let cargo = Math.min(
@@ -236,7 +254,7 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
             );
             if (!descontado) {
               const fresco = await manager.getRepository(Monederos).findOne({
-                where: { numeroSerie: tx.numeroSerieMonedero },
+                where: { numeroSerie: tx.numeroSerieMonedero as string },
               });
               cargo = Math.min(
                 Math.max(cobro, 0),
@@ -932,10 +950,93 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
   // ========================================
 
   /** Folio alfanumérico ≤ 20 para SaleRequest de NetPay TPV. */
-  private generarFolioReserva(): string {
+  private generarFolioReserva(prefijo: 'R' | 'P' = 'R'): string {
     const stamp = Date.now().toString(36).toUpperCase().slice(-8);
     const rnd = randomBytes(3).toString('hex').toUpperCase();
-    return `R${stamp}${rnd}`.slice(0, 20);
+    return `${prefijo}${stamp}${rnd}`.slice(0, 20);
+  }
+
+  /**
+   * Viaje del validador + tarifa activa. Para reserva exige viaje abierto;
+   * para confirmación permite viaje ya cerrado si la reserva era válida.
+   */
+  private async resolverViajeTarifaFija(params: {
+    idViaje: number;
+    numeroSerieValidador: string;
+    cliente: number;
+    exigirViajeAbierto: boolean;
+  }): Promise<{
+    idViaje: number;
+    idCliente: number;
+    tarifaBase: number;
+    tipoTarifa: number;
+  }> {
+    const rows: Array<{
+      idViaje: number;
+      idCliente: number;
+      tarifaBase: number | string;
+      tipoTarifa: number | string;
+      fin: Date | string | null;
+      estatusViaje: number;
+      estadoActual: number | null;
+      estatusTurno: number;
+    }> = await this.transaccionesdebitoRepository.query(
+      `
+      SELECT
+        vi.Id AS idViaje,
+        vi.IdCliente AS idCliente,
+        vi.Fin AS fin,
+        vi.Estatus AS estatusViaje,
+        vi.EstadoActual AS estadoActual,
+        t.Estatus AS estatusTurno,
+        ta.TarifaBase AS tarifaBase,
+        ta.TipoTarifa AS tipoTarifa
+      FROM Viajes vi
+      INNER JOIN Turnos t ON t.Id = vi.IdTurno
+      INNER JOIN Instalaciones i ON i.Id = t.IdInstalacion
+      INNER JOIN Validadores v ON v.Id = i.IdValidador
+      INNER JOIN Tarifas ta ON ta.IdVariante = vi.IdVariante AND ta.Estatus = 1
+      WHERE vi.Id = ?
+        AND v.NumeroSerie = ?
+      LIMIT 1
+      `,
+      [params.idViaje, params.numeroSerieValidador.trim()],
+    );
+    const row = rows?.[0];
+    if (!row) {
+      throw new BadRequestException(
+        'El viaje no pertenece a ese validador o no tiene tarifa activa.',
+      );
+    }
+    await this.assertMonederoEnTenant(Number(row.idCliente), params.cliente);
+    if (Number(row.estatusTurno) !== 1) {
+      throw new BadRequestException('El turno del validador no está activo.');
+    }
+    if (params.exigirViajeAbierto) {
+      if (
+        Number(row.estatusViaje) !== 1 ||
+        row.fin != null ||
+        (row.estadoActual != null && Number(row.estadoActual) !== 1)
+      ) {
+        throw new BadRequestException('El viaje no está activo.');
+      }
+    }
+    const tipoTarifa = Number(row.tipoTarifa);
+    if (tipoTarifa !== EnumTipoTarifa.FIJA) {
+      throw new BadRequestException(
+        'El cobro con tarjeta solo aplica a rutas de tarifa fija',
+      );
+    }
+    const tarifaBase = Number(Number(row.tarifaBase).toFixed(2));
+    if (!(tarifaBase > 0)) {
+      throw new BadRequestException('La tarifa base de la variante no es válida.');
+    }
+    return {
+      idViaje: Number(row.idViaje),
+      idCliente: Number(row.idCliente),
+      tarifaBase,
+      tipoTarifa,
+    };
   }
 
   private minutosReservaStale(): number {
@@ -1167,6 +1268,415 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
     );
 
     return { status: 'success', message: 'Reserva cancelada' };
+  }
+
+  // ========================================
+  // Cobro de pasaje con tarjeta presencial (TPV)
+  // ========================================
+
+  async crearReservaDebitoTarjeta(
+    dto: CreateReservaDebitoTarjetaDto,
+    idUser: number,
+    rol: number,
+    cliente: number,
+  ): Promise<{
+    data: {
+      claveIdempotencia: string;
+      folio: string;
+      monto: number;
+      expiraEn: string;
+    };
+  }> {
+    if (Number(dto.idMetodoPago) !== EnumMetodoPago.TARJETA_TERMINAL) {
+      throw new BadRequestException(
+        'La reserva de pasaje con tarjeta requiere idMetodoPago = 5.',
+      );
+    }
+    if (![1, 2, 3, 11].includes(Number(rol))) {
+      throw new ForbiddenException(
+        'Solo caja, administración o validador pueden cobrar pasaje con tarjeta.',
+      );
+    }
+
+    const clave = dto.claveIdempotencia.trim();
+    const cantidad = Math.floor(Number(dto.cantidadPasajes));
+    if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > 10) {
+      throw new BadRequestException(
+        'cantidadPasajes debe ser un entero entre 1 y 10.',
+      );
+    }
+
+    const existentes: ReservaDebitoTarjetaRow[] =
+      await this.transaccionesdebitoRepository.query(
+        `SELECT * FROM ReservasDebitoTarjeta WHERE ClaveIdempotencia = ? LIMIT 1`,
+        [clave],
+      );
+    if (existentes?.[0]) {
+      const prev = existentes[0];
+      if (prev.Estado === 'CANCELADA') {
+        throw new ConflictException(
+          'Esa claveIdempotencia ya fue cancelada. Usa una nueva.',
+        );
+      }
+      if (
+        Number(prev.IdViaje) !== Number(dto.idViaje) ||
+        Number(prev.CantidadPasajes) !== cantidad ||
+        prev.NumeroSerieValidador !== dto.numeroSerieValidador.trim()
+      ) {
+        throw new ConflictException(
+          'La claveIdempotencia ya se usó para otra reserva de pasaje.',
+        );
+      }
+      const creacion = new Date(prev.FechaCreacion);
+      const expira = new Date(
+        creacion.getTime() + this.minutosReservaStale() * 60_000,
+      );
+      return {
+        data: {
+          claveIdempotencia: clave,
+          folio: prev.Folio || '',
+          monto: Number(prev.Monto),
+          expiraEn: expira.toISOString(),
+        },
+      };
+    }
+
+    const viaje = await this.resolverViajeTarifaFija({
+      idViaje: Number(dto.idViaje),
+      numeroSerieValidador: dto.numeroSerieValidador,
+      cliente,
+      exigirViajeAbierto: true,
+    });
+    const monto = Number((viaje.tarifaBase * cantidad).toFixed(2));
+
+    let folio = this.generarFolioReserva('P');
+    for (let intento = 0; intento < 5; intento++) {
+      const insert: { affectedRows?: number } =
+        await this.transaccionesdebitoRepository.query(
+          `INSERT IGNORE INTO ReservasDebitoTarjeta
+             (ClaveIdempotencia, IdViaje, NumeroSerieValidador, CantidadPasajes,
+              Monto, IdUsuario, IdMetodoPago, Folio, Estado)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'EN_PROCESO')`,
+          [
+            clave,
+            viaje.idViaje,
+            dto.numeroSerieValidador.trim(),
+            cantidad,
+            monto,
+            idUser,
+            EnumMetodoPago.TARJETA_TERMINAL,
+            folio,
+          ],
+        );
+      if (Number(insert?.affectedRows ?? 0) === 1) {
+        const expira = new Date(
+          Date.now() + this.minutosReservaStale() * 60_000,
+        );
+        return {
+          data: {
+            claveIdempotencia: clave,
+            folio,
+            monto,
+            expiraEn: expira.toISOString(),
+          },
+        };
+      }
+      const otraVez: ReservaDebitoTarjetaRow[] =
+        await this.transaccionesdebitoRepository.query(
+          `SELECT * FROM ReservasDebitoTarjeta WHERE ClaveIdempotencia = ? LIMIT 1`,
+          [clave],
+        );
+      if (otraVez?.[0]) {
+        const prev = otraVez[0];
+        const creacion = new Date(prev.FechaCreacion);
+        const expira = new Date(
+          creacion.getTime() + this.minutosReservaStale() * 60_000,
+        );
+        return {
+          data: {
+            claveIdempotencia: clave,
+            folio: prev.Folio || '',
+            monto: Number(prev.Monto),
+            expiraEn: expira.toISOString(),
+          },
+        };
+      }
+      folio = this.generarFolioReserva('P');
+    }
+    throw new InternalServerErrorException(
+      'No se pudo generar la reserva de pasaje con tarjeta.',
+    );
+  }
+
+  async cancelarReservaDebitoTarjeta(
+    claveIdempotencia: string,
+    idUser: number,
+    cliente: number,
+  ): Promise<{ status: string; message: string }> {
+    const clave = decodeURIComponent(claveIdempotencia).trim();
+    const rows: ReservaDebitoTarjetaRow[] =
+      await this.transaccionesdebitoRepository.query(
+        `SELECT * FROM ReservasDebitoTarjeta WHERE ClaveIdempotencia = ? LIMIT 1`,
+        [clave],
+      );
+    const reserva = rows?.[0];
+    if (!reserva) {
+      throw new NotFoundException('Reserva no encontrada.');
+    }
+    if (reserva.Estado === 'COMPLETADA') {
+      throw new ConflictException(
+        'La reserva ya está completada y no se puede cancelar.',
+      );
+    }
+    if (reserva.Estado === 'CANCELADA') {
+      return { status: 'success', message: 'Reserva ya cancelada' };
+    }
+
+    await this.resolverViajeTarifaFija({
+      idViaje: Number(reserva.IdViaje),
+      numeroSerieValidador: reserva.NumeroSerieValidador,
+      cliente,
+      exigirViajeAbierto: false,
+    });
+
+    await this.transaccionesdebitoRepository.query(
+      `UPDATE ReservasDebitoTarjeta SET Estado = 'CANCELADA'
+        WHERE ClaveIdempotencia = ?
+          AND Estado IN ('EN_PROCESO','PENDIENTE_CONCILIAR')`,
+      [clave],
+    );
+
+    await this.bitacoraLogger.logToBitacora(
+      'Transacciones',
+      `Reserva de pasaje con tarjeta cancelada ${clave}`,
+      'UPDATE',
+      { claveIdempotencia: clave, folio: reserva.Folio },
+      idUser,
+      EnumModulos.TRANSACCIONES,
+      EstatusEnumBitcora.SUCCESS,
+    );
+
+    return { status: 'success', message: 'Reserva cancelada' };
+  }
+
+  async confirmarDebitoTarjeta(
+    dto: ConfirmarDebitoTarjetaDto,
+    idUser: number,
+    rol: number,
+    cliente: number,
+  ): Promise<ApiCrudResponse> {
+    if (Number(dto.idMetodoPago) !== EnumMetodoPago.TARJETA_TERMINAL) {
+      throw new BadRequestException(
+        'El cobro de pasaje con tarjeta requiere idMetodoPago = 5.',
+      );
+    }
+    if (![1, 2, 3, 11].includes(Number(rol))) {
+      throw new ForbiddenException(
+        'Solo caja, administración o validador pueden confirmar pasaje con tarjeta.',
+      );
+    }
+    if (!dto.pagoTerminal) {
+      throw new BadRequestException('pagoTerminal es obligatorio.');
+    }
+
+    const clave = dto.claveIdempotencia.trim();
+    const cantidad = Math.floor(Number(dto.cantidadPasajes));
+
+    const previa = await this.transaccionesdebitoRepository.findOne({
+      where: { claveIdempotencia: clave },
+      order: { id: 'ASC' },
+    });
+    if (previa) {
+      return {
+        status: 'success',
+        message: 'Pasaje cobrado con tarjeta',
+        data: {
+          id: Number(previa.id),
+          nombre: 'TARJETA',
+          monto: Number(previa.monto),
+          cantidadPasajes: Number(previa.cantidadPasajes ?? cantidad),
+        },
+      };
+    }
+
+    const rows: ReservaDebitoTarjetaRow[] =
+      await this.transaccionesdebitoRepository.query(
+        `SELECT * FROM ReservasDebitoTarjeta WHERE ClaveIdempotencia = ? LIMIT 1`,
+        [clave],
+      );
+    const reserva = rows?.[0];
+    if (!reserva) {
+      throw new BadRequestException(
+        'No hay reserva EN_PROCESO. Llama primero a /debito/tarjeta/reserva.',
+      );
+    }
+    if (reserva.Estado === 'CANCELADA') {
+      throw new ConflictException('La reserva fue cancelada.');
+    }
+    if (reserva.Estado === 'COMPLETADA' && reserva.IdTransaccionDebito) {
+      const ya = await this.transaccionesdebitoRepository.findOne({
+        where: { id: Number(reserva.IdTransaccionDebito) },
+      });
+      if (ya) {
+        return {
+          status: 'success',
+          message: 'Pasaje cobrado con tarjeta',
+          data: {
+            id: Number(ya.id),
+            nombre: 'TARJETA',
+            monto: Number(ya.monto),
+            cantidadPasajes: Number(ya.cantidadPasajes ?? cantidad),
+          },
+        };
+      }
+    }
+    if (reserva.Estado !== 'EN_PROCESO') {
+      throw new ConflictException(
+        `La reserva está en estado ${reserva.Estado} y no se puede confirmar.`,
+      );
+    }
+    if (Number(reserva.IdViaje) !== Number(dto.idViaje)) {
+      throw new ConflictException('El viaje no coincide con la reserva.');
+    }
+    if (Number(reserva.CantidadPasajes) !== cantidad) {
+      throw new ConflictException(
+        'cantidadPasajes no coincide con la reserva.',
+      );
+    }
+    if (reserva.NumeroSerieValidador !== dto.numeroSerieValidador.trim()) {
+      throw new ConflictException(
+        'El validador no coincide con la reserva.',
+      );
+    }
+    if (Number(reserva.Monto) !== Number(dto.monto)) {
+      throw new ConflictException('El monto no coincide con la reserva.');
+    }
+    if (!reserva.Folio || reserva.Folio !== dto.pagoTerminal.folio) {
+      throw new BadRequestException(
+        'El folio de pagoTerminal no coincide con la reserva.',
+      );
+    }
+    if (Number(dto.pagoTerminal.montoCobrado) !== Number(dto.monto)) {
+      throw new BadRequestException(
+        'pagoTerminal.montoCobrado debe ser igual al monto.',
+      );
+    }
+
+    // La reserva ya validó viaje/tarifa fija; se acepta aunque el viaje se haya cerrado.
+    await this.resolverViajeTarifaFija({
+      idViaje: Number(dto.idViaje),
+      numeroSerieValidador: dto.numeroSerieValidador,
+      cliente,
+      exigirViajeAbierto: false,
+    });
+
+    const pago = dto.pagoTerminal;
+    const ahora = nowDb();
+    const lat = dto.latitud != null ? Number(dto.latitud) : null;
+    const lon = dto.longitud != null ? Number(dto.longitud) : null;
+    const monto = Number(Number(dto.monto).toFixed(2));
+
+    const guardada = await this.dataSource.transaction(async (manager) => {
+      const debito = manager.create(TransaccionesDebito, {
+        idTipoTransaccion: EnumTipoTransaccion.DEBITO,
+        monto,
+        controlTransaccion: EnumControlTransacciones.PAGADO,
+        latitudInicial: lat,
+        longitudInicial: lon,
+        latitudFinal: lat,
+        longitudFinal: lon,
+        fechaHoraInicio: ahora,
+        fechaHoraFinal: ahora,
+        numeroSerieMonedero: null,
+        numeroSerieValidador: dto.numeroSerieValidador.trim(),
+        idViaje: Number(dto.idViaje),
+        esQR: 0,
+        esMultiple: cantidad > 1 ? 1 : 0,
+        cantidadPasajes: cantidad,
+        claveIdempotencia: clave,
+        idMetodoPago: EnumMetodoPago.TARJETA_TERMINAL,
+        orderIdNetPay: pago.orderId || null,
+        transactionIdNetPay: pago.transactionId || null,
+        authCodeNetPay: pago.authCode || null,
+        rrnNetPay: pago.rrn || null,
+        naturalezaTarjeta: pago.naturalezaTarjeta || null,
+        bin: pago.bin || null,
+        ultimos4: pago.ultimos4 || null,
+        folioNetPay: pago.folio || null,
+        marcaTarjeta: pago.marca || null,
+        storeIdNetPay: pago.storeId || null,
+        afiliacionNetPay: pago.afiliacion || null,
+        terminalNetPay: pago.terminal || null,
+      });
+      let saved: TransaccionesDebito;
+      try {
+        saved = await manager.save(debito);
+      } catch (error) {
+        if (error?.code === 'ER_DUP_ENTRY' || error?.errno === 1062) {
+          throw new IdempotenciaDuplicadaError(clave);
+        }
+        throw error;
+      }
+      await manager.getRepository(HistoricoTransaccionesDebito).save({
+        idTransaccionOrigen: Number(saved.id),
+        idTipoTransaccion: saved.idTipoTransaccion,
+        controlTransaccion: saved.controlTransaccion,
+        monto: saved.monto,
+        latitudInicial: saved.latitudInicial,
+        longitudInicial: saved.longitudInicial,
+        fechaHoraInicio: saved.fechaHoraInicio,
+        latitudFinal: saved.latitudFinal,
+        longitudFinal: saved.longitudFinal,
+        fechaHoraFinal: saved.fechaHoraFinal,
+        numeroSerieMonedero: saved.numeroSerieMonedero,
+        numeroSerieValidador: saved.numeroSerieValidador,
+        idViaje: saved.idViaje,
+        esQR: saved.esQR,
+        cobroMaximo: saved.cobroMaximo,
+      });
+      await manager.query(
+        `UPDATE ReservasDebitoTarjeta
+            SET Estado = 'COMPLETADA', IdTransaccionDebito = ?
+          WHERE ClaveIdempotencia = ? AND Estado = 'EN_PROCESO'`,
+        [Number(saved.id), clave],
+      );
+      return saved;
+    }).catch(async (error) => {
+      if (error instanceof IdempotenciaDuplicadaError) {
+        const dup = await this.transaccionesdebitoRepository.findOne({
+          where: { claveIdempotencia: clave },
+        });
+        if (dup) return dup;
+      }
+      throw error;
+    });
+
+    await this.bitacoraLogger.logToBitacora(
+      'Transacciones',
+      `Pasaje cobrado con tarjeta ID ${guardada.id}`,
+      'CREATE',
+      {
+        id: Number(guardada.id),
+        idViaje: Number(dto.idViaje),
+        monto,
+        cantidadPasajes: cantidad,
+        folio: pago.folio,
+      },
+      idUser,
+      EnumModulos.TRANSACCIONES,
+      EstatusEnumBitcora.SUCCESS,
+    );
+
+    return {
+      status: 'success',
+      message: 'Pasaje cobrado con tarjeta',
+      data: {
+        id: Number(guardada.id),
+        nombre: 'TARJETA',
+        monto,
+        cantidadPasajes: cantidad,
+      },
+    };
   }
 
   async createTransaccionRecarga(
@@ -1518,10 +2028,51 @@ export class TransaccionesService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    // Reservas de pasaje TPV vencidas sin débito registrado.
+    const reservasPasaje: Array<{ clave: string }> =
+      await this.transaccionesdebitoRepository.query(
+        `SELECT ClaveIdempotencia AS clave
+           FROM ReservasDebitoTarjeta
+          WHERE Estado = 'EN_PROCESO'
+            AND FechaCreacion < (NOW() - INTERVAL ? MINUTE)`,
+        [minutos],
+      );
+    for (const r of reservasPasaje) {
+      try {
+        const debitoRows: Array<{ id: number }> =
+          await this.transaccionesdebitoRepository.query(
+            `SELECT Id AS id FROM TransaccionesDebito
+              WHERE ClaveIdempotencia = ? ORDER BY Id ASC LIMIT 1`,
+            [r.clave],
+          );
+        if (debitoRows?.[0]?.id) {
+          await this.transaccionesdebitoRepository.query(
+            `UPDATE ReservasDebitoTarjeta
+                SET Estado = 'COMPLETADA', IdTransaccionDebito = ?
+              WHERE ClaveIdempotencia = ? AND Estado = 'EN_PROCESO'`,
+            [Number(debitoRows[0].id), r.clave],
+          );
+          resueltas++;
+        } else {
+          await this.transaccionesdebitoRepository.query(
+            `UPDATE ReservasDebitoTarjeta
+                SET Estado = 'PENDIENTE_CONCILIAR'
+              WHERE ClaveIdempotencia = ? AND Estado = 'EN_PROCESO'`,
+            [r.clave],
+          );
+        }
+      } catch (error) {
+        this.logger.error(
+          `[CONCILIACION] reserva pasaje ${r.clave}: ${(error as Error)?.message}`,
+        );
+      }
+    }
+
+    const revisadas = reservas.length + reservasPasaje.length;
     this.logger.log(
-      `[CONCILIACION] reservas revisadas=${reservas.length} resueltas=${resueltas}`,
+      `[CONCILIACION] reservas revisadas=${revisadas} resueltas=${resueltas}`,
     );
-    return { revisadas: reservas.length, resueltas };
+    return { revisadas, resueltas };
   }
 
   private async procesarRecarga(

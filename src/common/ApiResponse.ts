@@ -32,6 +32,8 @@ export interface ApiData {
   cantidadPasajes?: number;
   /** Saldo del monedero tras una recarga (p. ej. TPV). */
   saldo?: number;
+  /** Monto total (p. ej. pasaje cobrado con tarjeta). */
+  monto?: number;
 }
 
 export interface ApiEstatus {
