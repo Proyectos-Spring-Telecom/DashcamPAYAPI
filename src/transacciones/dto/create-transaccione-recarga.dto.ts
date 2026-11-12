@@ -9,9 +9,18 @@ import {
   Max,
   MaxLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { EnumTipoTransaccion, EnumMetodoPago } from 'src/common/estatus.enum';
+import { PagoTerminalDto } from './pago-terminal.dto';
+
+const esTarjetaEcommerce = (o: { idMetodoPago?: number }) =>
+  o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
+  o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO;
+
+const esTarjetaTerminal = (o: { idMetodoPago?: number }) =>
+  o.idMetodoPago === EnumMetodoPago.TARJETA_TERMINAL;
 
 // Helper function para transformar valores de FormData a números decimales
 const toNumberDecimal = ({ value }: { value: any }): number | undefined => {
@@ -99,13 +108,13 @@ export class CreateTransaccioneRecargaDto {
   @ApiProperty({
     example: 1,
     description:
-      'Método de pago: 1 (Efectivo), 2 (Transferencia), 3 (Tarjeta de crédito), 4 (Tarjeta de débito)',
+      'Método: 1 Efectivo, 2 Transferencia, 3/4 Tarjeta e-commerce, 5 Tarjeta presencial TPV',
     enum: EnumMetodoPago,
     required: true,
   })
   @IsEnum(EnumMetodoPago, {
     message:
-      'El método de pago debe ser: 1 (Efectivo), 2 (Transferencia), 3 (Tarjeta de crédito), 4 (Tarjeta de débito)',
+      'El método de pago debe ser: 1, 2, 3, 4 (e-commerce) o 5 (tarjeta presencial TPV)',
   })
   @IsNotEmpty({ message: 'El método de pago es obligatorio' })
   @Transform(toNumberDecimal)
@@ -114,13 +123,9 @@ export class CreateTransaccioneRecargaDto {
   @ApiPropertyOptional({
     example: 'token_vzhdS4W-6IAE6KlfGLUXmDH8VIDMFs',
     description:
-      'Token de la tarjeta de Netpay (obligatorio si método de pago es Tarjeta)',
+      'Token de la tarjeta de Netpay (obligatorio si método de pago es Tarjeta e-commerce)',
   })
-  @ValidateIf(
-    (o) =>
-      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
-      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
-  )
+  @ValidateIf(esTarjetaEcommerce)
   @IsString({ message: 'El tokenCardNetPay debe ser una cadena de texto' })
   @IsNotEmpty({
     message:
@@ -133,11 +138,7 @@ export class CreateTransaccioneRecargaDto {
     description:
       'Transaction Token ID de Netpay (se obtiene de la respuesta de Netpay, no se debe enviar en el request)',
   })
-  @ValidateIf(
-    (o) =>
-      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
-      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
-  )
+  @ValidateIf(esTarjetaEcommerce)
   @IsString({
     message: 'El transactionTokenIdNetPay debe ser una cadena de texto',
   })
@@ -147,13 +148,9 @@ export class CreateTransaccioneRecargaDto {
   @ApiPropertyOptional({
     example: '1222337263222',
     description:
-      'Reference ID de Netpay (obligatorio si método de pago es Tarjeta)',
+      'Reference ID de Netpay (obligatorio si método de pago es Tarjeta e-commerce)',
   })
-  @ValidateIf(
-    (o) =>
-      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
-      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
-  )
+  @ValidateIf(esTarjetaEcommerce)
   @IsString({ message: 'El referenceIdNetPay debe ser una cadena de texto' })
   @IsNotEmpty({
     message:
@@ -164,13 +161,9 @@ export class CreateTransaccioneRecargaDto {
   @ApiPropertyOptional({
     example: '1721779181755',
     description:
-      'Session ID para Netpay (obligatorio si método de pago es Tarjeta)',
+      'Session ID para Netpay (obligatorio si método de pago es Tarjeta e-commerce)',
   })
-  @ValidateIf(
-    (o) =>
-      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
-      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
-  )
+  @ValidateIf(esTarjetaEcommerce)
   @IsString({ message: 'El sessionId debe ser una cadena de texto' })
   @IsNotEmpty({
     message: 'El sessionId es obligatorio cuando el método de pago es Tarjeta',
@@ -180,13 +173,9 @@ export class CreateTransaccioneRecargaDto {
   @ApiPropertyOptional({
     example: '1721779181755',
     description:
-      'Device Fingerprint para Netpay (obligatorio si método de pago es Tarjeta)',
+      'Device Fingerprint para Netpay (obligatorio si método de pago es Tarjeta e-commerce)',
   })
-  @ValidateIf(
-    (o) =>
-      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
-      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
-  )
+  @ValidateIf(esTarjetaEcommerce)
   @IsString({ message: 'El deviceFingerPrint debe ser una cadena de texto' })
   @IsNotEmpty({
     message:
@@ -197,13 +186,9 @@ export class CreateTransaccioneRecargaDto {
   @ApiPropertyOptional({
     example: 1,
     description:
-      'ID de la dirección guardada en BD (obligatorio si método de pago es Tarjeta)',
+      'ID de la dirección guardada en BD (obligatorio si método de pago es Tarjeta e-commerce)',
   })
-  @ValidateIf(
-    (o) =>
-      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
-      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
-  )
+  @ValidateIf(esTarjetaEcommerce)
   @IsNumber()
   @IsNotEmpty({
     message:
@@ -224,13 +209,9 @@ export class CreateTransaccioneRecargaDto {
       httpBrowserTimeDifference: '360',
     },
     description:
-      'Información del dispositivo para Netpay (obligatorio si método de pago es Tarjeta)',
+      'Información del dispositivo para Netpay (e-commerce)',
   })
-  @ValidateIf(
-    (o) =>
-      o.idMetodoPago === EnumMetodoPago.TARJETA_CREDITO ||
-      o.idMetodoPago === EnumMetodoPago.TARJETA_DEBITO,
-  )
+  @ValidateIf(esTarjetaEcommerce)
   @IsOptional()
   deviceInformation?: {
     deviceChannel?: string;
@@ -246,10 +227,23 @@ export class CreateTransaccioneRecargaDto {
   @ApiPropertyOptional({
     example: 'a1b2c3d4-e5f6-47a8-9b0c-1d2e3f4a5b6c',
     description:
-      'Llave de idempotencia. Obligatoria si ENFORCE_IDEMPOTENCY_KEY=true.',
+      'Llave de idempotencia. Obligatoria si ENFORCE_IDEMPOTENCY_KEY=true o idMetodoPago=5.',
   })
   @IsString()
   @IsOptional()
   @MaxLength(64)
   claveIdempotencia?: string;
+
+  @ApiPropertyOptional({
+    type: PagoTerminalDto,
+    description:
+      'Evidencia del cobro presencial. Obligatorio si idMetodoPago = 5.',
+  })
+  @ValidateIf(esTarjetaTerminal)
+  @ValidateNested()
+  @Type(() => PagoTerminalDto)
+  @IsNotEmpty({
+    message: 'pagoTerminal es obligatorio cuando idMetodoPago es 5',
+  })
+  pagoTerminal?: PagoTerminalDto;
 }

@@ -102,4 +102,44 @@ export class TransaccionesRecarga {
     nullable: true,
   })
   claveIdempotencia: string | null;
+
+  @Column('varchar', { name: 'OrderIdNetPay', nullable: true, length: 100 })
+  orderIdNetPay: string | null;
+
+  @Column('varchar', {
+    name: 'TransactionIdNetPay',
+    nullable: true,
+    length: 100,
+  })
+  transactionIdNetPay: string | null;
+
+  @Column('varchar', { name: 'AuthCodeNetPay', nullable: true, length: 50 })
+  authCodeNetPay: string | null;
+
+  @Column('varchar', { name: 'RrnNetPay', nullable: true, length: 50 })
+  rrnNetPay: string | null;
+
+  @Column('varchar', { name: 'NaturalezaTarjeta', nullable: true, length: 20 })
+  naturalezaTarjeta: string | null;
+
+  @Column('varchar', { name: 'Bin', nullable: true, length: 8 })
+  bin: string | null;
+
+  @Column('varchar', { name: 'Ultimos4', nullable: true, length: 4 })
+  ultimos4: string | null;
+
+  @Column('varchar', { name: 'FolioNetPay', nullable: true, length: 20 })
+  folioNetPay: string | null;
+
+  @Column('varchar', { name: 'MarcaTarjeta', nullable: true, length: 50 })
+  marcaTarjeta: string | null;
+
+  @Column('varchar', { name: 'StoreIdNetPay', nullable: true, length: 50 })
+  storeIdNetPay: string | null;
+
+  @Column('varchar', { name: 'AfiliacionNetPay', nullable: true, length: 50 })
+  afiliacionNetPay: string | null;
+
+  @Column('varchar', { name: 'TerminalNetPay', nullable: true, length: 50 })
+  terminalNetPay: string | null;
 }

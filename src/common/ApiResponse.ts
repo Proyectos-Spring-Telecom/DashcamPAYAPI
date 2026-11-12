@@ -30,6 +30,8 @@ export interface ApiData {
   nombre: string;
   ids?: number[];
   cantidadPasajes?: number;
+  /** Saldo del monedero tras una recarga (p. ej. TPV). */
+  saldo?: number;
 }
 
 export interface ApiEstatus {
