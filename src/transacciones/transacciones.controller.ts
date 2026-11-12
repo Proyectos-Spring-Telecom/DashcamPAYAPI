@@ -16,6 +16,8 @@ import { ApiCrudResponse, ApiResponseCommon } from 'src/common/ApiResponse';
 import { CreateTransaccioneDebitoDto } from './dto/create-transaccione-debito.dto';
 import { CreateTransaccioneRecargaDto } from './dto/create-transaccione-recarga.dto';
 import { CreateReservaRecargaDto } from './dto/create-reserva-recarga.dto';
+import { CreateReservaDebitoTarjetaDto } from './dto/create-reserva-debito-tarjeta.dto';
+import { ConfirmarDebitoTarjetaDto } from './dto/confirmar-debito-tarjeta.dto';
 import {
   ApiBearerAuth,
   ApiTags,
@@ -51,6 +53,59 @@ export class TransaccionesController {
       createTransaccioneDebitoDto,
       idUser,
       req.user.cliente,
+    );
+  }
+
+  @Post('debito/tarjeta/reserva')
+  @Roles(1, 2, 3, 11)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @ApiOperation({
+    summary: 'Reserva cobro de pasaje con tarjeta TPV (solo tarifa fija)',
+  })
+  @ApiBody({ type: CreateReservaDebitoTarjetaDto })
+  crearReservaDebitoTarjeta(
+    @Body() dto: CreateReservaDebitoTarjetaDto,
+    @Request() req,
+  ) {
+    return this.transaccionesService.crearReservaDebitoTarjeta(
+      dto,
+      Number(req.user.userId),
+      Number(req.user.rol),
+      Number(req.user.cliente),
+    );
+  }
+
+  @Post('debito/tarjeta/reserva/:claveIdempotencia/cancelar')
+  @Roles(1, 2, 3, 11)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @ApiParam({ name: 'claveIdempotencia' })
+  cancelarReservaDebitoTarjeta(
+    @Param('claveIdempotencia') claveIdempotencia: string,
+    @Request() req,
+  ) {
+    return this.transaccionesService.cancelarReservaDebitoTarjeta(
+      claveIdempotencia,
+      Number(req.user.userId),
+      Number(req.user.cliente),
+    );
+  }
+
+  @Post('debito/tarjeta')
+  @Roles(1, 2, 3, 11)
+  @UseGuards(JwtAuthGuard, TenantOwnershipGuard)
+  @ApiOperation({
+    summary: 'Confirma pasaje cobrado en TPV (no cobra NetPay e-commerce)',
+  })
+  @ApiBody({ type: ConfirmarDebitoTarjetaDto })
+  confirmarDebitoTarjeta(
+    @Body() dto: ConfirmarDebitoTarjetaDto,
+    @Request() req,
+  ): Promise<ApiCrudResponse> {
+    return this.transaccionesService.confirmarDebitoTarjeta(
+      dto,
+      Number(req.user.userId),
+      Number(req.user.rol),
+      Number(req.user.cliente),
     );
   }
 
